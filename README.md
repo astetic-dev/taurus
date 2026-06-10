@@ -25,18 +25,12 @@ enterprise: they're hard to curate, easy to pollute, and brittle as the number o
 people and projects grows. Honestly, the wheel hasn't been invented yet — nobody
 has a clean, proven answer for how context should work at team scale.
 
-The Model Context Protocol (MCP) is a real step forward, but in practice it shines
-for single users who have already wired up their own servers and know their way
-around. For large teams the onboarding cost is steep: every new person has to learn
-which servers exist, what they expose, and how to phrase a request so the agent
-actually has what it needs.
+Taurus is built around the **[Interpreted Context Methodology (ICM)](https://github.com/RinDig/Interpreted-Context-Methdology)** — *"folder structure as agent architecture."* Instead of orchestration code or sprawling memory, context lives in the **folders** themselves: a `CLAUDE.md`, conventions, and reference material that load in layers the moment an agent starts there. Approaches built around one person's bespoke setup are expensive to onboard a whole team onto; a folder anyone can open is not.
 
-Taurus takes a deliberately pragmatic, intermediate approach: **let everyone start
-the agent in the process folder they actually need.** Each project folder carries
-its own context — its files, its `CLAUDE.md`, its conventions — so:
+Taurus' contribution is the **entry point**: let everyone start the agent in the process folder they actually need. From there ICM does the rest, so:
 
 - the **user** immediately knows *where they should be* for a given task, and
-- **Claude** starts with enough scoped context to carry out the request, with
+- **Claude** starts with exactly the scoped context that folder carries — giving
   repeatable results across people and runs.
 
 It isn't the final answer to context-at-scale, but it removes the biggest piece of
