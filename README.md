@@ -15,6 +15,34 @@ colour when an agent is done and waiting for you.
 
 > Windows-only for now (uses ConPTY + Windows Terminal-style embedding).
 
+## Why Taurus
+
+Giving Claude the *right* context at the *right* moment is still one of the hardest
+parts of working with coding agents day to day.
+
+Elaborate memory systems help a single power user, but they don't scale to an
+enterprise: they're hard to curate, easy to pollute, and brittle as the number of
+people and projects grows. Honestly, the wheel hasn't been invented yet — nobody
+has a clean, proven answer for how context should work at team scale.
+
+The Model Context Protocol (MCP) is a real step forward, but in practice it shines
+for single users who have already wired up their own servers and know their way
+around. For large teams the onboarding cost is steep: every new person has to learn
+which servers exist, what they expose, and how to phrase a request so the agent
+actually has what it needs.
+
+Taurus takes a deliberately pragmatic, intermediate approach: **let everyone start
+the agent in the process folder they actually need.** Each project folder carries
+its own context — its files, its `CLAUDE.md`, its conventions — so:
+
+- the **user** immediately knows *where they should be* for a given task, and
+- **Claude** starts with enough scoped context to carry out the request, with
+  repeatable results across people and runs.
+
+It isn't the final answer to context-at-scale, but it removes the biggest piece of
+day-to-day friction: people land in the right place, and the agent behaves
+consistently. That's what Taurus is for.
+
 ## Features
 
 - **Embedded terminals with tabs** — each agent runs inside the window (xterm.js +
