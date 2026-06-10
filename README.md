@@ -100,23 +100,9 @@ Edit them with the in-app **Projects** editor, or by hand. Format:
 ```
 
 - `command` (optional) — run a different program instead of `claude` for this
-  project (used by the demo to launch a mock Claude).
+  project.
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
-
-## Demo (clean, no real data)
-
-`demo/` contains a self-contained demo with a **fake Claude** (`mock-claude.mjs`)
-that shows a fresh welcome screen and replies with fictional data only — useful for
-screenshots/recordings without touching real projects or MCP.
-
-```powershell
-demo\demo-on.ps1     # activate demo projects (backs up your real config)
-# ... record / screenshot ...
-demo\demo-off.ps1    # restore your real projects
-```
-
-See `demo/STORYBOARD.md` for a suggested recording flow.
 
 ## How it works
 

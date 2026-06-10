@@ -17,6 +17,9 @@ projects.json
 projects.real.json
 /out
 
+# Local demo / recording helpers (not part of the published app)
+/demo/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
