@@ -1,11 +1,13 @@
 # Taurus — Agent Launcher
 
-![Taurus — Agent Launcher](media/screenshot.png)
+[![Taurus — Agent Launcher (click to watch the explainer)](media/screenshot.png)](https://youtu.be/ofswaJBX39k)
+
+<sub>▶ Click the image to watch the explainer on YouTube.</sub>
 
 A small Tauri desktop app that runs and manages multiple **Claude Code** agents as
 **terminal tabs in one window**.
 
-_Intro videos: [teaser](media/taurus-teaser.mp4) · [explainer](media/taurus-explainer.mp4)._ Each agent starts in the working folder you pick,
+_▶ Watch: [15-second teaser](https://youtu.be/7WDtN5giKSk) · [full explainer](https://youtu.be/ofswaJBX39k)._ Each agent starts in the working folder you pick,
 so you never have to wonder whether you're on a local (`C:`) or network (`X:`) path.
 
 Pick a project on the left, see the folder + a **LOCAL / NETWORK** badge, give the
