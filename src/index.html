@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="vendor/xterm.css" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Taurus — Agent Launcher</title>
+    <script src="vendor/xterm.js"></script>
+    <script src="vendor/addon-fit.js"></script>
+    <script src="vendor/addon-web-links.js"></script>
+    <script src="vendor/addon-search.js"></script>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <img class="brand-logo" src="taurus-logo.png" alt="Taurus" />
+          <div class="brand-title">Taurus</div>
+          <div class="brand-sub" data-i18n="brand_sub">Agent Launcher</div>
+        </div>
+
+        <div class="sidebar-label" data-i18n="projects">Projecten</div>
+        <div id="project-list" class="project-list"></div>
+
+        <div class="sidebar-footer">
+          <button id="edit-btn" class="foot-btn" data-i18n="foot_projects">✎ Projecten</button>
+          <button id="settings-btn" class="foot-btn" data-i18n="foot_settings">⚙ Instellingen</button>
+          <button id="reload-btn" class="foot-btn" data-i18n="foot_reload">⟳ Herlaad</button>
+        </div>
+      </aside>
+
+      <main class="panel">
+        <div id="tabbar" class="tabbar"></div>
+
+        <div class="stage">
+          <section id="launch-view" class="launch-view">
+            <div id="form-empty" class="empty-state">
+              <div class="empty-glyph">⌖</div>
+              <p data-i18n="empty_pick">Kies links een project om een agent te starten.</p>
+            </div>
+
+            <div id="launch-form" class="launch-form hidden">
+              <h2 id="form-title">—</h2>
+              <div class="field">
+                <label data-i18n="workdir">Werkmap</label>
+                <div class="path-row">
+                  <code id="path-value" class="path-value">—</code>
+                  <span id="loc-badge" class="loc-badge">—</span>
+                </div>
+                <div id="path-warn" class="path-warn hidden" data-i18n="path_warn">⚠ Map niet bereikbaar</div>
+              </div>
+              <div class="field">
+                <label for="title-input" data-i18n="session_title">Titel van de sessie</label>
+                <input id="title-input" type="text" data-i18n-ph="title_ph" placeholder="bijv. ZGV-SAML-debug" />
+                <div class="hint" data-i18n="title_hint">Wordt de naam in Claude én op het tabblad.</div>
+              </div>
+              <div class="field">
+                <label for="task-input"><span data-i18n="task">Taak</span> <span class="opt" data-i18n="optional">(optioneel)</span></label>
+                <textarea id="task-input" rows="3" data-i18n-ph="task_ph"
+                  placeholder="Laat leeg voor een lege sessie, of typ meteen een opdracht…"></textarea>
+              </div>
+              <div class="field">
+                <label for="mode-input" data-i18n="launch_mode">Modus</label>
+                <select id="mode-input">
+                  <option value="default" data-i18n="mode_default">Standaard</option>
+                  <option value="plan" data-i18n="mode_plan">Plan-modus</option>
+                  <option value="auto" data-i18n="mode_auto">Auto (accepteert acties)</option>
+                </select>
+              </div>
+              <button id="launch-btn" class="launch-btn" data-i18n="start_agent">▶ Start agent</button>
+              <div id="status-msg" class="status-msg"></div>
+            </div>
+          </section>
+
+          <div id="terminals" class="terminals"></div>
+
+          <div id="searchbar" class="searchbar hidden">
+            <input id="search-input" type="text" data-i18n-ph="search_ph" placeholder="Zoeken…" />
+            <button id="search-prev" title="Vorige (Shift+Enter)">▲</button>
+            <button id="search-next" title="Volgende (Enter)">▼</button>
+            <button id="search-close" title="Sluiten (Esc)">✕</button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ===== Instellingen-modal ===== -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-box">
+        <h2 data-i18n="settings">Instellingen</h2>
+
+        <div class="setting-group">
+          <h3 data-i18n="lang_label">Taal / Language</h3>
+          <label class="srow"><span data-i18n="lang_choose">Kies taal</span>
+            <select id="set-lang">
+              <option value="nl">Nederlands</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="setting-group">
+          <h3 data-i18n="grp_screen">Scherm</h3>
+          <label class="srow"><span data-i18n="set_font">Lettergrootte</span>
+            <input id="set-fontsize" type="number" min="8" max="28" />
+          </label>
+          <label class="srow"><span data-i18n="set_scroll">Scrollback (regels)</span>
+            <input id="set-scrollback" type="number" min="500" max="100000" step="500" />
+          </label>
+          <label class="srow check"><input id="set-cursorblink" type="checkbox" /> <span data-i18n="set_cursor">Cursor knippert</span></label>
+        </div>
+
+        <div class="setting-group">
+          <h3 data-i18n="grp_html">HTML-preview</h3>
+          <label class="srow check"><input type="radio" name="htmlview" id="set-html-split" value="split" /> <span data-i18n="html_split">Naast de terminal (split)</span></label>
+          <label class="srow check"><input type="radio" name="htmlview" id="set-html-full" value="full" /> <span data-i18n="html_full">Volledig (verberg terminal)</span></label>
+          <label class="srow check"><input id="set-fullpaths" type="checkbox" /> <span data-i18n="set_fullpaths">Vraag Claude volledige paden te tonen (klikbaar)</span></label>
+        </div>
+
+        <div class="setting-group">
+          <h3><span data-i18n="grp_comfort">Terminal-comfort</span> <span class="opt" data-i18n="comfort_hint">(per voorkeur aan/uit)</span></h3>
+          <label class="srow check"><input id="set-copyselect" type="checkbox" /> <span data-i18n="c_copy">Selectie kopieert automatisch</span></label>
+          <label class="srow check"><input id="set-pasteright" type="checkbox" /> <span data-i18n="c_paste">Rechtermuisklik plakt</span></label>
+          <label class="srow check"><input id="set-ctrlshift" type="checkbox" /> <span data-i18n="c_ctrl">Ctrl+Shift+C / Ctrl+Shift+V</span></label>
+          <label class="srow check"><input id="set-weblinks" type="checkbox" /> <span data-i18n="c_links">Klikbare links</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
+          <label class="srow check"><input id="set-search" type="checkbox" /> <span data-i18n="c_search">Zoeken in scrollback — Ctrl+Shift+F</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
+          <label class="srow check"><input id="set-tabshortcuts" type="checkbox" /> <span data-i18n="c_tabs">Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)</span></label>
+          <label class="srow check"><input id="set-tabstatus" type="checkbox" /> <span data-i18n="c_status">Live Claude-status op de tab (✶ Orbiting…)</span></label>
+        </div>
+
+        <div class="modal-actions">
+          <button id="settings-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+          <button id="settings-save" class="btn-primary" data-i18n="save">Opslaan</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Project-editor-modal ===== -->
+    <div id="editor-modal" class="modal hidden">
+      <div class="modal-box wide">
+        <h2 data-i18n="manage_projects">Projecten beheren</h2>
+        <div id="editor-rows" class="editor-rows"></div>
+        <button id="editor-add" class="btn-ghost add" data-i18n="add_project">＋ Project toevoegen</button>
+        <div class="modal-actions">
+          <button id="editor-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+          <button id="editor-save" class="btn-primary" data-i18n="save">Opslaan</button>
+        </div>
+        <div id="editor-status" class="status-msg"></div>
+      </div>
+    </div>
+  </body>
+</html>

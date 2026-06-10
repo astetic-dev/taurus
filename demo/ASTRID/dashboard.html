@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<title>ASTRID — Projectoverzicht (demo)</title>
+<style>
+  body { margin:0; font-family:"Segoe UI",system-ui,sans-serif; background:#faf7fe; color:#241a33; }
+  header { background:#7a2fd0; color:#fff; padding:20px 28px; }
+  header h1 { margin:0; font-size:22px; }
+  header p { margin:4px 0 0; opacity:.85; font-size:13px; }
+  .demo { display:inline-block; margin-top:10px; font-size:11px; background:#fff3; padding:3px 9px; border-radius:20px; }
+  .grid { padding:24px 28px; display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+  .card { background:#fff; border:1px solid #ece3f6; border-left:4px solid #d57aff; border-radius:10px; padding:16px; }
+  .card h3 { margin:0 0 6px; font-size:15px; }
+  .card .meta { font-size:12px; color:#7a6b8c; margin-bottom:10px; }
+  .status { font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; }
+  .s-doing { background:#e7eeff; color:#1144df; } .s-wait { background:#fff1da; color:#b9760a; } .s-done { background:#e3f7ec; color:#1f9d63; }
+  .bar { height:6px; background:#efeaf6; border-radius:6px; margin-top:12px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:#d57aff; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>ASTRID — Projectoverzicht</h1>
+    <p>Voorbeeld-kaarten · gegenereerd door een demo-agent</p>
+    <span class="demo">DEMO — fictieve data</span>
+  </header>
+  <div class="grid">
+    <div class="card"><h3>Voorbeeldproject Alfa</h3><div class="meta">Demo-klant · DEMO-101</div><span class="status s-doing">DOING</span><div class="bar"><i style="width:65%"></i></div></div>
+    <div class="card"><h3>Demo-migratie Beta</h3><div class="meta">Demo-klant · DEMO-102</div><span class="status s-wait">WACHT</span><div class="bar"><i style="width:30%"></i></div></div>
+    <div class="card"><h3>Voorbeeld-integratie Gamma</h3><div class="meta">Demo-klant · DEMO-103</div><span class="status s-done">KLAAR</span><div class="bar"><i style="width:100%"></i></div></div>
+    <div class="card"><h3>Test-uitrol Delta</h3><div class="meta">Demo-klant · DEMO-104</div><span class="status s-doing">DOING</span><div class="bar"><i style="width:45%"></i></div></div>
+  </div>
+</body>
+</html>

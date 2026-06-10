@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<title>Porter — Mail-triage (demo)</title>
+<style>
+  body { margin:0; font-family:"Segoe UI",system-ui,sans-serif; background:#f4f6fb; color:#1c2330; }
+  header { background:#1144df; color:#fff; padding:20px 28px; }
+  header h1 { margin:0; font-size:22px; }
+  header p { margin:4px 0 0; opacity:.85; font-size:13px; }
+  .wrap { padding:24px 28px; }
+  .stats { display:flex; gap:14px; margin-bottom:24px; flex-wrap:wrap; }
+  .stat { flex:1; min-width:120px; background:#fff; border:1px solid #e2e7f0; border-radius:10px; padding:16px; }
+  .stat .n { font-size:30px; font-weight:700; }
+  .stat .l { font-size:12px; color:#69748a; text-transform:uppercase; letter-spacing:.5px; }
+  .actie { color:#d62b3a; } .info { color:#1144df; } .laag { color:#69748a; } .done { color:#1f9d63; }
+  table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e2e7f0; border-radius:10px; overflow:hidden; }
+  th,td { text-align:left; padding:11px 14px; font-size:14px; border-bottom:1px solid #eef1f7; }
+  th { background:#fafbfe; color:#69748a; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  tr:last-child td { border-bottom:none; }
+  .tag { font-size:11px; padding:3px 8px; border-radius:20px; font-weight:600; }
+  .t-actie { background:#fde7e9; color:#d62b3a; } .t-info { background:#e7eeff; color:#1144df; } .t-laag { background:#eef1f7; color:#69748a; }
+  .demo { display:inline-block; margin-top:10px; font-size:11px; background:#fff3; padding:3px 9px; border-radius:20px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Porter — Mail-triage</h1>
+    <p>Voorbeeld-overzicht · gegenereerd door een demo-agent</p>
+    <span class="demo">DEMO — fictieve data</span>
+  </header>
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat"><div class="n actie">4</div><div class="l">Actie</div></div>
+      <div class="stat"><div class="n info">7</div><div class="l">Info</div></div>
+      <div class="stat"><div class="n laag">12</div><div class="l">Laag</div></div>
+      <div class="stat"><div class="n done">23</div><div class="l">Afgehandeld</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Van</th><th>Onderwerp</th><th>Categorie</th><th>Volgende stap</th></tr></thead>
+      <tbody>
+        <tr><td>jan@voorbeeld.nl</td><td>Vraag over voorbeeldfactuur</td><td><span class="tag t-actie">Actie</span></td><td>Reactie opstellen</td></tr>
+        <tr><td>info@demoklant.nl</td><td>Aankondiging onderhoud</td><td><span class="tag t-info">Info</span></td><td>Lezen, archiveren</td></tr>
+        <tr><td>nieuwsbrief@example.com</td><td>Maandupdate (voorbeeld)</td><td><span class="tag t-laag">Laag</span></td><td>Geen actie</td></tr>
+        <tr><td>support@demoklant.nl</td><td>Ticket DEMO-123 bijgewerkt</td><td><span class="tag t-actie">Actie</span></td><td>Opvolgen</td></tr>
+        <tr><td>team@voorbeeld.nl</td><td>Notulen demo-overleg</td><td><span class="tag t-info">Info</span></td><td>Doorlezen</td></tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
