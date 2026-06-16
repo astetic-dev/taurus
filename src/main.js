@@ -402,10 +402,24 @@ async function loadHtmlList(s) {
   sel.value = files[0].path;
   await renderPreview(s, files[0].path);
 }
+// Forwarded to the sandboxed preview: external-link clicks (and programmatic
+// postMessage from the page) are relayed to the parent, which opens them in the
+// default browser. Keeps the iframe sandbox tight (no allow-same-origin needed).
+const PREVIEW_BRIDGE = `<script>
+  document.addEventListener('click', function (ev) {
+    var a = ev.target && ev.target.closest && ev.target.closest('a[href]');
+    if (!a) return;
+    var href = a.href || a.getAttribute('href');
+    if (/^https?:\\/\\//i.test(href)) {
+      ev.preventDefault();
+      parent.postMessage({ type: 'taurus-open-external', url: href }, '*');
+    }
+  }, true);
+<\/script>`;
 async function renderPreview(s, path) {
   if (!path) return;
   const frame = s.el.querySelector(".preview-frame");
-  try { frame.srcdoc = await invoke("read_file", { path }); }
+  try { frame.srcdoc = PREVIEW_BRIDGE + await invoke("read_file", { path }); }
   catch (e) { frame.srcdoc = `<body style="font-family:sans-serif;color:#c66;padding:24px">${escapeHtml(String(e))}</body>`; }
 }
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
@@ -753,6 +767,17 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#search-close").addEventListener("click", closeSearch);
   els.searchInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doSearch(e.shiftKey ? -1 : 1); } });
   window.addEventListener("resize", resizeActive);
+
+  // Open external links forwarded from the sandboxed HTML preview (see renderPreview).
+  // The preview iframe has an opaque origin, so Tauri IPC is refused inside it; we open
+  // the link here in the parent window, which has a valid app origin and working IPC.
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (d && d.type === "taurus-open-external" && typeof d.url === "string"
+        && /^https?:\/\//i.test(d.url)) {
+      window.__TAURI__.opener.openUrl(d.url).catch(() => {});
+    }
+  });
 
   loadSettings();
   applyI18n();
