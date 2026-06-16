@@ -412,6 +412,9 @@ const PREVIEW_BRIDGE = `<script>
     var href = a.href || a.getAttribute('href');
     if (/^https?:\\/\\//i.test(href)) {
       ev.preventDefault();
+      // Be authoritative: stop the page's own click handlers (e.g. a dashboard
+      // openExternal() that would otherwise show a 'copy/paste' fallback).
+      ev.stopImmediatePropagation();
       parent.postMessage({ type: 'taurus-open-external', url: href }, '*');
     }
   }, true);
