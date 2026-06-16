@@ -106,6 +106,23 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).is_dir()
 }
 
+// Heeft de gekozen map een CLAUDE.md (hoofdletterongevoelig)? Een ad-hoc map
+// openen mag altijd, maar de UI geeft een hint als die ontbreekt -- "optimaal"
+// is een map met projectinstructies voor Claude.
+#[tauri::command]
+fn has_claude_md(path: String) -> bool {
+    let rd = match std::fs::read_dir(&path) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    for entry in rd.flatten() {
+        if entry.file_name().to_string_lossy().eq_ignore_ascii_case("claude.md") {
+            return true;
+        }
+    }
+    false
+}
+
 // ===== Persistente sessies =====
 // Een opgeslagen sessie: genoeg om bij de volgende start `claude --resume <uuid>`
 // te doen. De `id` is een vluchtige UI-handle; de `uuid` is het anker.
@@ -565,6 +582,7 @@ pub fn run() {
             save_projects,
             pick_folder,
             path_exists,
+            has_claude_md,
             save_sessions,
             get_sessions,
             session_state,

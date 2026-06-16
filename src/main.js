@@ -7,6 +7,8 @@ const I18N = {
     brand_sub: "Agent Launcher", projects: "Projecten",
     foot_projects: "✎ Projecten", foot_settings: "⚙ Instellingen", foot_reload: "⟳ Herlaad",
     empty_pick: "Kies links een project om een agent te starten.",
+    browse_folder: "📁 Blader naar een map…",
+    no_claude_md: "ℹ Geen CLAUDE.md in deze map — agent start zonder projectinstructies.",
     workdir: "Werkmap", session_title: "Titel van de sessie",
     title_hint: "Wordt de naam in Claude én op het tabblad.",
     task: "Taak", optional: "(optioneel)",
@@ -41,6 +43,8 @@ const I18N = {
     brand_sub: "Agent Launcher", projects: "Projects",
     foot_projects: "✎ Projects", foot_settings: "⚙ Settings", foot_reload: "⟳ Reload",
     empty_pick: "Pick a project on the left to start an agent.",
+    browse_folder: "📁 Browse for a folder…",
+    no_claude_md: "ℹ No CLAUDE.md in this folder — the agent starts without project instructions.",
     workdir: "Working folder", session_title: "Session title",
     title_hint: "Becomes the name in Claude and on the tab.",
     task: "Task", optional: "(optional)",
@@ -147,8 +151,23 @@ async function selectProject(p, card) {
   els.status.textContent = "";
   const ok = await invoke("path_exists", { path: p.path });
   els.warn.classList.toggle("hidden", ok);
+  let hasMd = false;
+  try { hasMd = await invoke("has_claude_md", { path: p.path }); } catch (_) {}
+  els.claudeWarn.classList.toggle("hidden", hasMd);
 }
 async function loadProjects() { projects = await invoke("get_projects"); renderProjects(); }
+
+// Open de OS-mapkiezer en start een ad-hoc launch in de gekozen map: vul het
+// startformulier voor die map (niet opgeslagen als project). Optimaal heeft de
+// map een CLAUDE.md; zo niet, dan toont selectProject een niet-blokkerende hint.
+async function browseFolder() {
+  let dir = null;
+  try { dir = await invoke("pick_folder"); } catch (_) { return; }
+  if (!dir) return; // geannuleerd
+  const name = dir.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || dir;
+  await selectProject({ id: "", label: name, path: dir, title: name, task: "", accent: "#7c9cff", mode: "default", command: "" }, null);
+  showView("new");
+}
 
 /* ============ tabbalk ============ */
 function renderTabs() {
@@ -728,6 +747,7 @@ window.addEventListener("DOMContentLoaded", () => {
     pathValue: document.querySelector("#path-value"),
     locBadge: document.querySelector("#loc-badge"),
     warn: document.querySelector("#path-warn"),
+    claudeWarn: document.querySelector("#claude-warn"),
     titleInput: document.querySelector("#title-input"),
     taskInput: document.querySelector("#task-input"),
     status: document.querySelector("#status-msg"),
@@ -757,6 +777,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
+  document.querySelector("#browse-btn").addEventListener("click", browseFolder);
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   document.querySelector("#edit-btn").addEventListener("click", openEditor);
