@@ -106,6 +106,12 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).is_dir()
 }
 
+// Versie van de app (uit Cargo.toml) -> discreet in de UI getoond.
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 // Heeft de gekozen map een CLAUDE.md (hoofdletterongevoelig)? Een ad-hoc map
 // openen mag altijd, maar de UI geeft een hint als die ontbreekt -- "optimaal"
 // is een map met projectinstructies voor Claude.
@@ -582,6 +588,7 @@ pub fn run() {
             save_projects,
             pick_folder,
             path_exists,
+            app_version,
             has_claude_md,
             save_sessions,
             get_sessions,

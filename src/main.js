@@ -803,6 +803,7 @@ window.addEventListener("DOMContentLoaded", () => {
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
     editorStatus: document.querySelector("#editor-status"),
+    appVersion: document.querySelector("#app-version"),
   });
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
@@ -837,4 +838,7 @@ window.addEventListener("DOMContentLoaded", () => {
   renderTabs();
   loadProjects();
   restoreSessions();
+
+  // Toon de app-versie discreet onderin de sidebar.
+  invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});
 });
