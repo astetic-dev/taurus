@@ -33,6 +33,8 @@ const I18N = {
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
+    grp_sessions: "Sessies", set_persist: "Sessies onthouden en bij opstarten hervatten",
+    restore_failed: "Hervatten mislukt voor:",
     err_need_project: "✗ Minstens één project met naam én pad nodig.",
   },
   en: {
@@ -65,6 +67,8 @@ const I18N = {
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
+    grp_sessions: "Sessions", set_persist: "Remember sessions and resume on startup",
+    restore_failed: "Could not resume:",
     err_need_project: "✗ Need at least one project with a name and a path.",
   },
 };
@@ -91,6 +95,7 @@ const DEFAULT_SETTINGS = {
   copyOnSelect: true, pasteOnRightClick: true, ctrlShiftCV: true,
   webLinks: true, search: true, tabShortcuts: true, tabStatus: true,
   fullPaths: true,
+  persistSessions: true,
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -187,17 +192,9 @@ function showView(target) {
 }
 
 /* ============ sessie starten ============ */
-async function startSession() {
-  if (!selected) return;
-  const title = els.titleInput.value.trim() || selected.label;
-  const task = els.taskInput.value;
-  const path = selected.path;
-  const accent = selected.accent || "#7c9cff";
-  const id = "s" + (++seq);
-  const uuid = crypto.randomUUID();
-  const mode = els.modeInput.value || "default";
-  const command = selected.command || "";
-
+// Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
+// backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
+function spawnTerminal({ id, uuid, path, title, accent, mode, command }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -271,15 +268,94 @@ async function startSession() {
       },
     });
   }
+  return session;
+}
 
+async function startSession() {
+  if (!selected) return;
+  const title = els.titleInput.value.trim() || selected.label;
+  const task = els.taskInput.value;
+  const path = selected.path;
+  const accent = selected.accent || "#7c9cff";
+  const id = "s" + (++seq);
+  const uuid = crypto.randomUUID();
+  const mode = els.modeInput.value || "default";
+  const command = selected.command || "";
+
+  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command });
   try {
-    await invoke("create_session", { id, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, cols: term.cols, rows: term.rows });
+    await invoke("create_session", { id, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, cols: session.term.cols, rows: session.term.rows });
     showView(id);
+    persistSessionsToDisk();
   } catch (e) {
-    sessions.delete(id); term.dispose(); el.remove();
+    sessions.delete(id); session.term.dispose(); session.el.remove();
     els.status.textContent = "✗ " + e; els.status.className = "status-msg err";
     renderTabs();
   }
+}
+
+/* ============ persistente sessies ============ */
+// Schrijf de huidige (herstartbare) sessies naar schijf. Command-override-sessies
+// (demo nep-Claude) hebben geen --resume-transcript en slaan we niet op.
+function persistSessionsToDisk() {
+  if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
+  const list = [...sessions.values()]
+    .filter((s) => !s.command)
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default" }));
+  invoke("save_sessions", { sessions: list }).catch(() => {});
+}
+
+// Bij opstarten: probeer elke opgeslagen sessie te hervatten met `--resume`, zonder
+// te vragen. Ontbreekt het transcript (Claude heeft het opgeruimd) of is het ouder
+// dan 1 dag -> overslaan, niet eens proberen. Een echte spawn-fout -> tab opruimen
+// en melden welke (projectnaam) sessie niet lukte.
+async function restoreSessions() {
+  if (!settings.persistSessions) return;
+  let saved = [];
+  try { saved = await invoke("get_sessions"); } catch (_) { return; }
+  if (!saved.length) return;
+
+  const ONE_DAY = 86400;
+  const failures = [];
+  for (const meta of saved) {
+    const uuid = meta.uuid;
+    if (!uuid) continue;
+    let st = { exists: false, ageSecs: 0 };
+    try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
+    if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
+
+    const id = "s" + (++seq);
+    const session = spawnTerminal({
+      id, uuid, path: meta.path,
+      title: meta.title || "agent", accent: meta.accent || "#7c9cff",
+      mode: meta.mode || "default", command: "",
+    });
+    session.el.classList.add("hidden");
+    session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
+    try {
+      await invoke("restart_session", {
+        id, path: meta.path, title: session.title, sessionId: uuid,
+        mode: session.mode, fullPaths: settings.fullPaths, command: "",
+        cols: session.term.cols, rows: session.term.rows,
+      });
+    } catch (_) {
+      sessions.delete(id); session.term.dispose(); session.el.remove();
+      failures.push(`${meta.title || meta.path} (${uuid.slice(0, 8)})`);
+    }
+  }
+  showView("new");            // herstelde tabs in de balk, maar blijf op het startscherm
+  persistSessionsToDisk();    // herschrijf zonder overgeslagen/verlopen sessies
+  if (failures.length) toast(`${t("restore_failed")} ${failures.join(", ")}`, "err");
+}
+
+let toastTimer = null;
+function toast(msg, kind) {
+  const el = els.toast;
+  if (!el) return;
+  el.textContent = msg;
+  el.className = "toast" + (kind ? " " + kind : "");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 9000);
 }
 
 async function closeSession(id) {
@@ -287,6 +363,7 @@ async function closeSession(id) {
   if (!s) return;
   await invoke("close_session", { id });
   s.term.dispose(); s.el.remove(); sessions.delete(id);
+  persistSessionsToDisk();
   if (current === id) showView([...sessions.keys()].pop() || "new"); else renderTabs();
 }
 
@@ -484,6 +561,7 @@ function openSettings() {
   els.setTabs.checked = settings.tabShortcuts;
   els.setTabStatus.checked = settings.tabStatus;
   els.setFullPaths.checked = settings.fullPaths;
+  els.setPersist.checked = settings.persistSessions;
   els.settingsModal.classList.remove("hidden");
 }
 function saveSettingsFromForm() {
@@ -501,7 +579,9 @@ function saveSettingsFromForm() {
   settings.tabShortcuts = els.setTabs.checked;
   settings.tabStatus = els.setTabStatus.checked;
   settings.fullPaths = els.setFullPaths.checked;
+  settings.persistSessions = els.setPersist.checked;
   saveSettings();
+  persistSessionsToDisk();
   for (const s of sessions.values()) {
     s.term.options.fontSize = settings.fontSize;
     s.term.options.cursorBlink = settings.cursorBlink;
@@ -584,6 +664,14 @@ function cycleTab(dir) {
 function selectNthTab(n) { const ids = tabIds(); if (n >= 1 && n <= ids.length) showView(ids[n - 1]); }
 
 document.addEventListener("keydown", (e) => {
+  // Blokkeer het herladen van de webview: F5 / Ctrl+F5 / Ctrl+R / Ctrl+Shift+R.
+  // Een reload wist de sessies-Map (alle tabs verdwijnen uit beeld) en laat de
+  // Claude-processen als onbereikbare zombies in de Rust-backend achter -- er is
+  // geen reattach. Daarom helemaal voorkomen i.p.v. proberen te herstellen.
+  if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"))) {
+    e.preventDefault();
+    return;
+  }
   if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   const ctrl = e.ctrlKey && !e.altKey;
@@ -643,6 +731,8 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabs: document.querySelector("#set-tabshortcuts"),
     setTabStatus: document.querySelector("#set-tabstatus"),
     setFullPaths: document.querySelector("#set-fullpaths"),
+    setPersist: document.querySelector("#set-persist"),
+    toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
@@ -668,4 +758,5 @@ window.addEventListener("DOMContentLoaded", () => {
   applyI18n();
   renderTabs();
   loadProjects();
+  restoreSessions();
 });

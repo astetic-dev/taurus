@@ -131,6 +131,11 @@
           <label class="srow check"><input id="set-tabstatus" type="checkbox" /> <span data-i18n="c_status">Live Claude-status op de tab (✶ Orbiting…)</span></label>
         </div>
 
+        <div class="setting-group">
+          <h3 data-i18n="grp_sessions">Sessies</h3>
+          <label class="srow check"><input id="set-persist" type="checkbox" /> <span data-i18n="set_persist">Sessies onthouden en bij opstarten hervatten</span></label>
+        </div>
+
         <div class="modal-actions">
           <button id="settings-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
           <button id="settings-save" class="btn-primary" data-i18n="save">Opslaan</button>
@@ -151,5 +156,7 @@
         <div id="editor-status" class="status-msg"></div>
       </div>
     </div>
+
+    <div id="toast" class="toast hidden"></div>
   </body>
 </html>

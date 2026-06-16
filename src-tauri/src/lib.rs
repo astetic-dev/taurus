@@ -106,6 +106,94 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).is_dir()
 }
 
+// ===== Persistente sessies =====
+// Een opgeslagen sessie: genoeg om bij de volgende start `claude --resume <uuid>`
+// te doen. De `id` is een vluchtige UI-handle; de `uuid` is het anker.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct PersistedSession {
+    id: String,
+    uuid: String,
+    path: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    accent: String,
+    #[serde(default)]
+    mode: String,
+}
+
+fn sessions_path() -> std::path::PathBuf {
+    config_dir().join("sessions.json")
+}
+
+#[tauri::command]
+fn save_sessions(sessions: Vec<PersistedSession>) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(config_dir());
+    let txt = serde_json::to_string_pretty(&sessions).map_err(|e| e.to_string())?;
+    std::fs::write(sessions_path(), txt).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_sessions() -> Vec<PersistedSession> {
+    if let Ok(txt) = std::fs::read_to_string(sessions_path()) {
+        if let Ok(list) = serde_json::from_str::<Vec<PersistedSession>>(&txt) {
+            return list;
+        }
+    }
+    Vec::new()
+}
+
+// Pad waar Claude Code het transcript van een sessie bewaart:
+// %USERPROFILE%\.claude\projects\<map-encoded>\<uuid>.jsonl
+// De map-encoding vervangt elk niet-alfanumeriek teken door '-'
+// (bv. C:\Users\AST -> C--Users-AST).
+fn claude_session_file(path: &str, uuid: &str) -> std::path::PathBuf {
+    let enc: String = path
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let home = std::env::var("USERPROFILE").unwrap_or_default();
+    std::path::PathBuf::from(home)
+        .join(".claude")
+        .join("projects")
+        .join(enc)
+        .join(format!("{}.jsonl", uuid))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionState {
+    exists: bool,
+    age_secs: u64,
+}
+
+// Bestaat het transcript nog, en hoe oud (seconden sinds laatste wijziging)?
+// Claude ruimt oude sessies zelf op; ontbreekt het bestand -> niet herstartbaar,
+// dan proberen we het bij het opstarten niet eens.
+#[tauri::command]
+fn session_state(path: String, uuid: String) -> SessionState {
+    let f = claude_session_file(&path, &uuid);
+    match std::fs::metadata(&f) {
+        Ok(meta) => {
+            let age = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(u64::MAX);
+            SessionState {
+                exists: true,
+                age_secs: age,
+            }
+        }
+        Err(_) => SessionState {
+            exists: false,
+            age_secs: 0,
+        },
+    }
+}
+
 // Zoek claude.exe via PATH, met fallback naar de kale naam.
 fn resolve_claude() -> String {
     if let Ok(paths) = std::env::var("PATH") {
@@ -418,17 +506,68 @@ fn open_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// Zet op Windows de WebView2 browser-accelerator-keys uit (F5, Ctrl+R,
+// Ctrl+Shift+R, Ctrl+Shift+I/devtools enz.). Die toetsen herladen of
+// onderbreken de webview en wissen daarmee alle agent-tabs uit beeld terwijl de
+// Claude-processen als zombies in de backend achterblijven. De JS-handler vangt
+// F5/Ctrl+R ook af; dit is de waterdichte laag eronder.
+#[cfg(target_os = "windows")]
+fn disable_accelerator_keys(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.with_webview(|webview| {
+            use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+            use windows::core::Interface;
+            unsafe {
+                if let Ok(core) = webview.controller().CoreWebView2() {
+                    if let Ok(settings) = core.Settings() {
+                        if let Ok(s3) = settings.cast::<ICoreWebView2Settings3>() {
+                            let _ = s3.SetAreBrowserAcceleratorKeysEnabled(false);
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// Stop alle nog draaiende claude-processen. Wordt aangeroepen als het venster
+// sluit (X-knop, Alt+F4), zodat er geen agents als zombie blijven draaien.
+fn kill_all_sessions(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let mut map = state.sessions.lock().unwrap();
+    for (_, s) in map.iter_mut() {
+        let _ = s.child.kill();
+    }
+    map.clear();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            #[cfg(target_os = "windows")]
+            disable_accelerator_keys(app.handle());
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                kill_all_sessions(window.app_handle());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_projects,
             save_projects,
             pick_folder,
             path_exists,
+            save_sessions,
+            get_sessions,
+            session_state,
             create_session,
             restart_session,
             write_session,

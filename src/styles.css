@@ -343,3 +343,14 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
   border-radius: 6px; padding: 0 10px; cursor: pointer; align-self: stretch; flex: none;
 }
 .e-del:hover { color: var(--red); border-color: var(--red); }
+
+/* ===== Toast (o.a. mislukte sessie-hervatting) ===== */
+.toast {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  max-width: 72%; background: var(--bg-card); color: var(--text);
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  padding: 10px 14px; border-radius: 8px; font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .45); z-index: 9999;
+}
+.toast.err { border-left-color: var(--red); }
+.toast.hidden { display: none; }
