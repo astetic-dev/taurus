@@ -248,6 +248,7 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
   text-align: left;
 }
 .foot-btn:hover { color: var(--text); border-color: var(--accent); }
+.app-version { margin-top: 8px; text-align: center; font-size: 10px; letter-spacing: .5px; color: var(--text-dim); opacity: .55; user-select: text; }
 
 /* ---- Tab-activiteit ---- */
 .tab.working .tab-dot { background: var(--green); }
