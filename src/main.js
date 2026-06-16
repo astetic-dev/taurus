@@ -265,22 +265,51 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command }) {
   el.querySelector(".preview-close").addEventListener("click", () => closePreview(session));
 
   // Maak .html-paden in de terminal klikbaar -> opent ze in de preview.
+  // Een lang absoluut pad wrapt vaak over meerdere terminalregels (smal
+  // split-paneel). Daarom reconstrueren we eerst de volledige LOGISCHE regel
+  // (eerste rij + alle isWrapped-vervolgrijen) en matchen we daarop; anders zou
+  // de bevraagde rij alleen een staartfragment zien -> verkeerd (relatief) pad.
   if (term.registerLinkProvider) {
     term.registerLinkProvider({
       provideLinks(y, cb) {
-        const ln = term.buffer.active.getLine(y - 1);
-        if (!ln) { cb(undefined); return; }
-        const text = ln.translateToString(true);
+        const buf = term.buffer.active;
+        const cols = term.cols;
+        const qi = y - 1; // 0-based index van de bevraagde rij
+        if (!buf.getLine(qi)) { cb(undefined); return; }
+        // Loop omhoog naar de eerste rij van de logische regel.
+        let first = qi;
+        while (first > 0) {
+          const ln = buf.getLine(first);
+          if (ln && ln.isWrapped) first--; else break;
+        }
+        // Verzamel de rijen van de logische regel; elke rij exact `cols` breed
+        // zodat tekenoffsets terug te rekenen zijn naar (x, y)-celposities.
+        const rows = [];
+        for (let r = first; ; r++) {
+          const ln = buf.getLine(r);
+          if (!ln) break;
+          rows.push(ln.translateToString(false).padEnd(cols, " ").slice(0, cols));
+          const next = buf.getLine(r + 1);
+          if (!next || !next.isWrapped) break;
+        }
+        const full = rows.join("");
+        const w0 = (qi - first) * cols; // offset-venster van de bevraagde rij
+        const w1 = w0 + cols;
+
         const re = /([A-Za-z]:\\[^\s"'<>|]+?\.html?|[\w.\-\\/]+\.html?)/gi;
         const links = [];
         let m;
-        while ((m = re.exec(text)) !== null) {
-          const x0 = m.index;
+        while ((m = re.exec(full)) !== null) {
+          const o0 = m.index;
+          const o1 = m.index + m[1].length;
+          const a = Math.max(o0, w0);
+          const b = Math.min(o1, w1);
+          if (a >= b) continue; // dit deel van de match valt niet op deze rij
           const txt = m[1];
           links.push({
-            range: { start: { x: x0 + 1, y }, end: { x: x0 + txt.length, y } },
+            range: { start: { x: (a - w0) + 1, y }, end: { x: (b - 1 - w0) + 1, y } },
             text: txt,
-            activate: () => openPreviewFile(session, txt),
+            activate: () => openPreviewFile(session, txt), // altijd het VOLLEDIGE pad
           });
         }
         cb(links.length ? links : undefined);
