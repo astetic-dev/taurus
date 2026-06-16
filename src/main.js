@@ -192,8 +192,19 @@ function renderTabs() {
   const plus = document.createElement("div");
   plus.className = "tab newtab" + (current === "new" ? " active" : "");
   plus.textContent = t("newtab");
-  plus.addEventListener("click", () => showView("new"));
+  plus.addEventListener("click", () => { resetLaunchForm(); showView("new"); });
   els.tabbar.appendChild(plus);
+}
+
+// Zet de launch-view terug naar de lege startstaat: geen geselecteerd project,
+// het ingevulde formulier verborgen en het lege scherm met de browse-knop zichtbaar.
+// Wordt alleen bij ＋ Nieuw / Ctrl+T aangeroepen -- selectProject/browseFolder die
+// het formulier juist tonen, blijven zo ongemoeid.
+function resetLaunchForm() {
+  selected = null;
+  document.querySelectorAll(".project-card").forEach((c) => c.classList.remove("selected"));
+  els.form.classList.add("hidden");
+  els.formEmpty.classList.remove("hidden");
 }
 
 function showView(target) {
@@ -757,7 +768,7 @@ document.addEventListener("keydown", (e) => {
   if (settings.search && ctrl && e.shiftKey && (e.key === "F" || e.key === "f")) { e.preventDefault(); openSearch(); return; }
   if (settings.tabShortcuts) {
     if (ctrl && e.key === "Tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
-    if (ctrl && (e.key === "t" || e.key === "T")) { e.preventDefault(); showView("new"); return; }
+    if (ctrl && (e.key === "t" || e.key === "T")) { e.preventDefault(); resetLaunchForm(); showView("new"); return; }
     if (ctrl && (e.key === "w" || e.key === "W")) { e.preventDefault(); if (current !== "new") closeSession(current); return; }
     if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); selectNthTab(parseInt(e.key)); return; }
   }
