@@ -478,7 +478,7 @@ async function renderPreview(s, path) {
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
 async function openPreviewFile(s, rawPath) {
   let p = String(rawPath).trim().replace(/[)\].,;:'"]+$/, "");
-  if (!/^([A-Za-z]:\\|\\\\)/.test(p)) {
+  if (!/^([A-Za-z]:[\\/]|\\\\)/.test(p)) {
     p = s.path.replace(/[\\/]+$/, "") + "\\" + p.replace(/^[.][\\/]/, "").replace(/\//g, "\\");
   }
   if (current !== s.id) showView(s.id);
