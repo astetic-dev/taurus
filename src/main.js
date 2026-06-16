@@ -307,7 +307,9 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command }) {
         const w0 = (qi - first) * cols; // offset-venster van de bevraagde rij
         const w1 = w0 + cols;
 
-        const re = /([A-Za-z]:\\[^\s"'<>|]+?\.html?|[\w.\-\\/]+\.html?)/gi;
+        // Drive-letter paths may use either separator (C:\dir\f.html or C:/dir/f.html);
+        // accept both so forward-slash absolute paths stay clickable too.
+        const re = /([A-Za-z]:[\\/][^\s"'<>|]+?\.html?|[\w.\-\\/]+\.html?)/gi;
         const links = [];
         let m;
         while ((m = re.exec(full)) !== null) {
@@ -487,7 +489,7 @@ async function renderPreview(s, path) {
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
 async function openPreviewFile(s, rawPath) {
   let p = String(rawPath).trim().replace(/[)\].,;:'"]+$/, "");
-  if (!/^([A-Za-z]:\\|\\\\)/.test(p)) {
+  if (!/^([A-Za-z]:[\\/]|\\\\)/.test(p)) {
     p = s.path.replace(/[\\/]+$/, "") + "\\" + p.replace(/^[.][\\/]/, "").replace(/\//g, "\\");
   }
   if (current !== s.id) showView(s.id);
