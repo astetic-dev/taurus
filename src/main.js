@@ -296,7 +296,9 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command }) {
         const w0 = (qi - first) * cols; // offset-venster van de bevraagde rij
         const w1 = w0 + cols;
 
-        const re = /([A-Za-z]:\\[^\s"'<>|]+?\.html?|[\w.\-\\/]+\.html?)/gi;
+        // Drive-letter paths may use either separator (C:\dir\f.html or C:/dir/f.html);
+        // accept both so forward-slash absolute paths stay clickable too.
+        const re = /([A-Za-z]:[\\/][^\s"'<>|]+?\.html?|[\w.\-\\/]+\.html?)/gi;
         const links = [];
         let m;
         while ((m = re.exec(full)) !== null) {
