@@ -17,6 +17,10 @@ projects.json
 projects.real.json
 /out
 
+# NEXUS white-label brand asset — supplied locally for `--features nexus` builds,
+# kept out of this public repo (corporate brand asset, see issue #21)
+src/nexus-logo.png
+
 # Local demo / recording helpers (not part of the published app)
 /demo/
 
