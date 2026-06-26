@@ -563,20 +563,31 @@ struct Branding {
 fn branding() -> Branding {
     #[cfg(feature = "nexus")]
     {
+        // Officiele NEXUS-huisstijl (bron: regels.md HUISSTIJL-VISUEEL ->
+        // bedrijfsbreed/huisstijl.md, Merkpaspoort AIED/4128793). Drie families:
+        //   Red:   Main #CC3333, Light #DD4A4A, Dark #AF2F2F  (primair accent)
+        //   White: Main #EDF2F4, Light #F7F7F7, Dark #CED5D8  (achtergrond/tekst)
+        //   Blue:  Main #24252F, Light #8D99AE               (donker accent/tekst)
+        // Regel: GEEN groen, geen Microsoft-blauw, geen cyaan. Statuskleuren die
+        // in Taurus groen/oranje zijn, mappen we zoals de NEXUS-dashboards doen:
+        // groen -> staalgrijs (Light-Blue), oranje -> Light-Red.
         return Branding {
             app_name: "NEXUS Agent Launcher".to_string(),
             brand_sub: "NEXUS Nederland".to_string(),
             window_title: "NEXUS Agent Launcher".to_string(),
             logo: Some("nexus-logo.png".to_string()),
             theme: HashMap::from([
-                ("--bg".to_string(), "#0e1726".to_string()),
-                ("--bg-panel".to_string(), "#142033".to_string()),
-                ("--bg-card".to_string(), "#1b2942".to_string()),
-                ("--bg-card-hover".to_string(), "#243352".to_string()),
-                ("--border".to_string(), "#2a3a55".to_string()),
-                ("--text".to_string(), "#eef1f6".to_string()),
-                ("--text-dim".to_string(), "#93a0b8".to_string()),
-                ("--accent".to_string(), "#3b82f6".to_string()),
+                ("--bg".to_string(), "#16171d".to_string()),
+                ("--bg-panel".to_string(), "#1d1e27".to_string()),
+                ("--bg-card".to_string(), "#24252f".to_string()),
+                ("--bg-card-hover".to_string(), "#2e2f3b".to_string()),
+                ("--border".to_string(), "#353746".to_string()),
+                ("--text".to_string(), "#edf2f4".to_string()),
+                ("--text-dim".to_string(), "#8d99ae".to_string()),
+                ("--accent".to_string(), "#cc3333".to_string()),
+                ("--green".to_string(), "#8d99ae".to_string()),
+                ("--orange".to_string(), "#dd4a4a".to_string()),
+                ("--red".to_string(), "#cc3333".to_string()),
             ]),
         };
     }
