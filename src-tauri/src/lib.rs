@@ -560,7 +560,9 @@ fn copy_to_clipboard(app: AppHandle, text: String) -> Result<(), String> {
 #[serde(rename_all = "camelCase")]
 struct Branding {
     app_name: String,
-    brand_sub: String,
+    // None = laat de ondertitel uit de UI/i18n staan (Taurus). Some("...") =
+    // overschrijf met deze tekst; Some("") = verberg de ondertitel helemaal.
+    brand_sub: Option<String>,
     window_title: String,
     logo: Option<String>,
     theme: HashMap<String, String>,
@@ -579,8 +581,11 @@ fn branding() -> Branding {
         // in Taurus groen/oranje zijn, mappen we zoals de NEXUS-dashboards doen:
         // groen -> staalgrijs (Light-Blue), oranje -> Light-Red.
         return Branding {
-            app_name: "NEXUS Agent Launcher".to_string(),
-            brand_sub: "NEXUS Nederland".to_string(),
+            // Logo toont al "NEXUS nederland"; titel hoeft dat niet te herhalen.
+            // De ondertitel is een tool-tagline (werktitel, niet de officiele
+            // NEXUS-payoff -- die staat niet in de lokale huisstijl-bronnen).
+            app_name: "Agent Launcher".to_string(),
+            brand_sub: Some("Start in de juiste context".to_string()),
             window_title: "NEXUS Agent Launcher".to_string(),
             logo: Some("nexus-logo.png".to_string()),
             theme: HashMap::from([
@@ -602,7 +607,7 @@ fn branding() -> Branding {
     {
         return Branding {
             app_name: "Taurus".to_string(),
-            brand_sub: String::new(),
+            brand_sub: None,
             window_title: String::new(), // leeg = laat de <title> uit index.html staan
             logo: Some("taurus-logo.png".to_string()),
             theme: HashMap::new(),

@@ -132,7 +132,7 @@ async function applyBranding() {
   const logoEl = document.querySelector(".brand-logo");
   if (b.appName && titleEl) titleEl.textContent = b.appName;
   if (b.windowTitle) document.title = b.windowTitle;
-  if (b.brandSub && subEl) { subEl.textContent = b.brandSub; subEl.removeAttribute("data-i18n"); }
+  if (subEl && b.brandSub != null) { subEl.removeAttribute("data-i18n"); subEl.textContent = b.brandSub; subEl.style.display = b.brandSub ? "" : "none"; }
   if (logoEl) {
     if (b.logo) { logoEl.src = b.logo; logoEl.alt = b.appName || logoEl.alt; logoEl.onerror = () => { logoEl.style.display = "none"; }; }
     else { logoEl.style.display = "none"; }
