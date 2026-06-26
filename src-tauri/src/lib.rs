@@ -35,14 +35,21 @@ fn default_projects() -> Vec<Project> {
     Vec::new()
 }
 
-// Per-gebruiker config: %APPDATA%\Taurus\projects.json (schrijfbaar, geen
-// hardcoded dev-pad, werkt na installatie).
+// Per-gebruiker config: %APPDATA%\<APP_DIR>\projects.json (schrijfbaar, geen
+// hardcoded dev-pad, werkt na installatie). White-label: de NEXUS-build gebruikt
+// een EIGEN map zodat hij naast Taurus draait zonder projects.json/sessions.json
+// te delen -- anders zou de NEXUS-instantie Taurus' sessies hervatten.
+#[cfg(feature = "nexus")]
+const APP_DIR: &str = "NEXUS Agent Launcher";
+#[cfg(not(feature = "nexus"))]
+const APP_DIR: &str = "Taurus";
+
 fn config_dir() -> std::path::PathBuf {
     let base = std::env::var("APPDATA")
         .ok()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    base.join("Taurus")
+    base.join(APP_DIR)
 }
 fn config_path() -> std::path::PathBuf {
     config_dir().join("projects.json")
