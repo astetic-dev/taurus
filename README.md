@@ -81,6 +81,29 @@ Output:
 - standalone: `src-tauri/target/release/taurus.exe`
 - installers: `src-tauri/target/release/bundle/` (NSIS `*-setup.exe`, MSI)
 
+## Build variants (white-label)
+
+Taurus is white-labelled from a **single codebase**: branding (app name, subtitle,
+logo, colour theme) is not hard-coded in the UI but returned by the Rust
+`branding` command, which the frontend applies on startup. The default build is
+plain Taurus; the **NEXUS Nederland** variant is gated behind the `nexus` Cargo
+feature, so the default build is byte-for-byte unchanged.
+
+```powershell
+# Default Taurus
+npm run tauri build
+
+# NEXUS Agent Launcher (branded): enable the feature + the config overlay
+npm run tauri build -- --features nexus --config src-tauri/tauri.nexus.conf.json
+```
+
+The overlay (`src-tauri/tauri.nexus.conf.json`) sets the product name, bundle
+identifier and window title; the `nexus` feature switches the runtime branding
+(name, subtitle, accent/background palette). Drop a `src/nexus-logo.png` to give
+the branded build its own logo (it falls back to hidden if the file is absent).
+To tweak the corporate theme, edit the `branding()` function in
+`src-tauri/src/lib.rs`.
+
 ## Configuration
 
 Projects live in `%APPDATA%\Taurus\projects.json` (per user, created on first run).

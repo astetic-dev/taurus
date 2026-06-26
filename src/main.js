@@ -118,6 +118,27 @@ function copyToClipboard(text) {
   if (!text) return;
   invoke("copy_to_clipboard", { text }).catch((e) => console.error("clipboard copy failed:", e));
 }
+
+// White-label: haal de merk-instellingen op uit de backend (standaard = Taurus,
+// met de Cargo-feature `nexus` = NEXUS Nederland) en pas ze toe. De standaard-
+// build levert exact de Taurus-waarden -> ongewijzigd uiterlijk. Draait ná
+// applyI18n(), zodat een merk-ondertitel een vertaling kan overschrijven.
+async function applyBranding() {
+  let b;
+  try { b = await invoke("branding"); } catch (_) { return; }
+  if (!b) return;
+  const titleEl = document.querySelector(".brand-title");
+  const subEl = document.querySelector(".brand-sub");
+  const logoEl = document.querySelector(".brand-logo");
+  if (b.appName && titleEl) titleEl.textContent = b.appName;
+  if (b.windowTitle) document.title = b.windowTitle;
+  if (b.brandSub && subEl) { subEl.textContent = b.brandSub; subEl.removeAttribute("data-i18n"); }
+  if (logoEl) {
+    if (b.logo) { logoEl.src = b.logo; logoEl.alt = b.appName || logoEl.alt; logoEl.onerror = () => { logoEl.style.display = "none"; }; }
+    else { logoEl.style.display = "none"; }
+  }
+  if (b.theme) { const root = document.documentElement; for (const k in b.theme) root.style.setProperty(k, b.theme[k]); }
+}
 function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
 function locText(p) {
@@ -857,6 +878,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   loadSettings();
   applyI18n();
+  applyBranding();
   renderTabs();
   loadProjects();
   restoreSessions();

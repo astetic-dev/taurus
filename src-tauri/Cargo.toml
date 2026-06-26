@@ -14,6 +14,12 @@ edition = "2021"
 name = "taurus_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# White-label: bouw de NEXUS-variant met `--features nexus`. Zonder feature is
+# dit de gewone Taurus-build, volledig ongewijzigd. De feature wisselt alleen wat
+# de `branding`-command teruggeeft (naam, ondertitel, logo, kleuren).
+nexus = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -542,6 +542,56 @@ fn copy_to_clipboard(app: AppHandle, text: String) -> Result<(), String> {
     app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
 
+// ===== White-label branding =====
+// Een NEXUS-build is dezelfde engine met andere branding. Alles wat per merk
+// verschilt (naam, ondertitel, logo, kleur-variabelen) komt hiervandaan; de
+// frontend past het toe bij het opstarten via invoke("branding"). De standaard-
+// build (geen feature) levert exact de Taurus-waarden, dus die blijft visueel
+// ongewijzigd. De NEXUS-variant bouw je met `cargo build --features nexus` (en
+// voor de installer met --config tauri.nexus.conf.json).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Branding {
+    app_name: String,
+    brand_sub: String,
+    window_title: String,
+    logo: Option<String>,
+    theme: HashMap<String, String>,
+}
+
+#[tauri::command]
+fn branding() -> Branding {
+    #[cfg(feature = "nexus")]
+    {
+        return Branding {
+            app_name: "NEXUS Agent Launcher".to_string(),
+            brand_sub: "NEXUS Nederland".to_string(),
+            window_title: "NEXUS Agent Launcher".to_string(),
+            logo: Some("nexus-logo.png".to_string()),
+            theme: HashMap::from([
+                ("--bg".to_string(), "#0e1726".to_string()),
+                ("--bg-panel".to_string(), "#142033".to_string()),
+                ("--bg-card".to_string(), "#1b2942".to_string()),
+                ("--bg-card-hover".to_string(), "#243352".to_string()),
+                ("--border".to_string(), "#2a3a55".to_string()),
+                ("--text".to_string(), "#eef1f6".to_string()),
+                ("--text-dim".to_string(), "#93a0b8".to_string()),
+                ("--accent".to_string(), "#3b82f6".to_string()),
+            ]),
+        };
+    }
+    #[cfg(not(feature = "nexus"))]
+    {
+        return Branding {
+            app_name: "Taurus".to_string(),
+            brand_sub: String::new(),
+            window_title: String::new(), // leeg = laat de <title> uit index.html staan
+            logo: Some("taurus-logo.png".to_string()),
+            theme: HashMap::new(),
+        };
+    }
+}
+
 // Zet op Windows de WebView2 browser-accelerator-keys uit (F5, Ctrl+R,
 // Ctrl+Shift+R, Ctrl+Shift+I/devtools enz.). Die toetsen herladen of
 // onderbreken de webview en wissen daarmee alle agent-tabs uit beeld terwijl de
@@ -615,7 +665,8 @@ pub fn run() {
             list_html,
             read_file,
             open_folder,
-            copy_to_clipboard
+            copy_to_clipboard,
+            branding
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
