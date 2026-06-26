@@ -529,6 +529,19 @@ fn open_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// Schrijf tekst naar het Windows-klembord via native code i.p.v. de WebView2
+// browser-API. Een WebView2/Edge-update kan navigator.clipboard.writeText IN de
+// webview blokkeren (kopieren-bij-selectie en Ctrl+Shift+C deden niets meer),
+// terwijl het OS-klembord en elke shell buiten Taurus prima blijven werken. Deze
+// native weg schrijft op dezelfde laag als die externe shells en omzeilt het
+// schrijf-beleid van de webview. Eigen command (geen ACL-permissie nodig), net
+// als pick_folder.
+#[tauri::command]
+fn copy_to_clipboard(app: AppHandle, text: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
 // Zet op Windows de WebView2 browser-accelerator-keys uit (F5, Ctrl+R,
 // Ctrl+Shift+R, Ctrl+Shift+I/devtools enz.). Die toetsen herladen of
 // onderbreken de webview en wissen daarmee alle agent-tabs uit beeld terwijl de
@@ -572,6 +585,7 @@ pub fn run() {
         .manage(AppState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             #[cfg(target_os = "windows")]
             disable_accelerator_keys(app.handle());
@@ -600,7 +614,8 @@ pub fn run() {
             close_session,
             list_html,
             read_file,
-            open_folder
+            open_folder,
+            copy_to_clipboard
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

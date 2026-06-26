@@ -109,6 +109,15 @@ function loadSettings() {
 function saveSettings() { localStorage.setItem("taurus.settings", JSON.stringify(settings)); }
 
 /* ============ helpers ============ */
+// Klembord-schrijven loopt via een native Rust-command, niet via de WebView2
+// browser-API navigator.clipboard.writeText. Een WebView2/Edge-update kan die
+// write in de webview blokkeren (kopieren-bij-selectie en Ctrl+Shift+C deden
+// niets meer), terwijl het OS-klembord prima werkt -- zie issue #17. De fout
+// niet langer stil wegslikken: loggen naar de console.
+function copyToClipboard(text) {
+  if (!text) return;
+  invoke("copy_to_clipboard", { text }).catch((e) => console.error("clipboard copy failed:", e));
+}
 function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
 function locText(p) {
@@ -263,7 +272,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command }) {
 
   term.onData((d) => invoke("write_session", { id, data: d }));
   term.onResize(({ cols, rows }) => invoke("resize_session", { id, cols, rows }));
-  term.onSelectionChange(() => { if (settings.copyOnSelect) { const sel = term.getSelection(); if (sel) navigator.clipboard.writeText(sel).catch(() => {}); } });
+  term.onSelectionChange(() => { if (settings.copyOnSelect) { const sel = term.getSelection(); if (sel) copyToClipboard(sel); } });
   termPane.addEventListener("contextmenu", async (e) => {
     if (!settings.pasteOnRightClick) return;
     e.preventDefault();
@@ -758,7 +767,7 @@ document.addEventListener("keydown", (e) => {
   if (ctrl && e.key === "0") { e.preventDefault(); settings.fontSize = DEFAULT_SETTINGS.fontSize; saveSettings(); applyFontToTerms(); return; }
   if (settings.ctrlShiftCV && ctrl && e.shiftKey && (e.key === "C" || e.key === "c")) {
     const s = sessions.get(current);
-    if (s) { const sel = s.term.getSelection(); if (sel) { navigator.clipboard.writeText(sel).catch(() => {}); e.preventDefault(); } }
+    if (s) { const sel = s.term.getSelection(); if (sel) { copyToClipboard(sel); e.preventDefault(); } }
     return;
   }
   if (settings.ctrlShiftCV && ctrl && e.shiftKey && (e.key === "V" || e.key === "v")) {
