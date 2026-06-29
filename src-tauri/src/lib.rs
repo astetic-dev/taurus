@@ -26,6 +26,12 @@ struct Project {
     mode: String,
     #[serde(default)]
     command: String,
+    // Welke agent-CLI start dit project: "" / "claude" (default) of "agy".
+    #[serde(default)]
+    agent: String,
+    // Model voor de agent (vrije tekst). Leeg = de eigen default van de agent.
+    #[serde(default)]
+    model: String,
 }
 
 // Lege defaults: een verse installatie start zonder projecten. De gebruiker
@@ -143,6 +149,10 @@ struct PersistedSession {
     accent: String,
     #[serde(default)]
     mode: String,
+    #[serde(default)]
+    agent: String,
+    #[serde(default)]
+    model: String,
 }
 
 fn sessions_path() -> std::path::PathBuf {
@@ -217,17 +227,27 @@ fn session_state(path: String, uuid: String) -> SessionState {
     }
 }
 
-// Zoek claude.exe via PATH, met fallback naar de kale naam.
-fn resolve_claude() -> String {
+// Welk uitvoerbaar bestand hoort bij deze agent? Leeg/"claude" -> claude.exe,
+// "agy" -> agy.exe (de Gemini-agent-CLI).
+fn agent_exe(agent: &str) -> &'static str {
+    match agent {
+        "agy" => "agy.exe",
+        _ => "claude.exe",
+    }
+}
+
+// Zoek het exe van de agent via PATH, met fallback naar de kale naam.
+fn resolve_program(agent: &str) -> String {
+    let exe = agent_exe(agent);
     if let Ok(paths) = std::env::var("PATH") {
         for p in std::env::split_paths(&paths) {
-            let cand = p.join("claude.exe");
+            let cand = p.join(exe);
             if cand.is_file() {
                 return cand.to_string_lossy().into_owned();
             }
         }
     }
-    "claude.exe".to_string()
+    exe.to_string()
 }
 
 // Een actieve terminal-sessie: de PTY-master (voor resize), de writer (stdin)
@@ -331,6 +351,94 @@ fn norm_title(title: &str) -> String {
 // paden toont -> die zijn dan klikbaar in de HTML-preview.
 const FULL_PATH_PROMPT: &str = "When you create, write, save, or reference any file, always print its full absolute Windows path (for example C:\\Users\\you\\dir\\file.html), not just the file name, so it can be opened directly.";
 
+// Start een verse sessie of hervat een bestaande? Bepaalt welke vlaggen per agent
+// gebruikt worden (claude --session-id vs --resume; agy verse start vs --continue).
+enum LaunchKind {
+    Create,
+    Resume,
+}
+
+// Bouw (programma, argumenten) voor de gekozen agent. De `command`-escape-hatch
+// wordt door de aanroeper afgehandeld; hier gaat het puur om claude/agy. De twee
+// CLIs verschillen sterk in vlaggen, dus we bouwen ze apart op i.p.v. Claude's
+// vlaggen voor beide aan te nemen.
+fn build_command(
+    agent: &str,
+    kind: LaunchKind,
+    session_id: &str,
+    title: &str,
+    task: &str,
+    mode: &str,
+    model: &str,
+    full_paths: bool,
+) -> (String, Vec<String>) {
+    let program = resolve_program(agent);
+    let mut a: Vec<String> = Vec::new();
+    match agent {
+        // agy (Gemini-agent): kent geen --session-id / -n / --permission-mode /
+        // --append-system-prompt. Modus: auto -> alle tools auto-goedkeuren;
+        // plan -> sandbox (beperkte terminalrechten). full_paths heeft geen
+        // equivalent en wordt overgeslagen.
+        "agy" => {
+            if let LaunchKind::Resume = kind {
+                a.push("--continue".into());
+            }
+            if !model.trim().is_empty() {
+                a.push("--model".into());
+                a.push(model.trim().into());
+            }
+            match mode {
+                "auto" => a.push("--dangerously-skip-permissions".into()),
+                "plan" => a.push("--sandbox".into()),
+                _ => {}
+            }
+            // Een taak start agy interactief met die prompt -- alleen bij een
+            // verse start; bij --continue zou een losse prompt het hervatten van
+            // het gesprek verstoren.
+            if let LaunchKind::Create = kind {
+                if !task.trim().is_empty() {
+                    a.push("--prompt-interactive".into());
+                    a.push(task.trim().into());
+                }
+            }
+        }
+        // claude (default): ongewijzigde vlaggen, plus --model wanneer gezet.
+        _ => {
+            match kind {
+                LaunchKind::Create => {
+                    a.push("--session-id".into());
+                    a.push(session_id.into());
+                }
+                LaunchKind::Resume => {
+                    a.push("--resume".into());
+                    a.push(session_id.into());
+                }
+            }
+            a.push("-n".into());
+            a.push(norm_title(title));
+            if !mode.is_empty() && mode != "default" {
+                a.push("--permission-mode".into());
+                a.push(mode.into());
+            }
+            if !model.trim().is_empty() {
+                a.push("--model".into());
+                a.push(model.trim().into());
+            }
+            if full_paths {
+                a.push("--append-system-prompt".into());
+                a.push(FULL_PATH_PROMPT.into());
+            }
+            // Taak alleen bij een verse start meesturen; --resume hervat het gesprek.
+            if let LaunchKind::Create = kind {
+                if !task.trim().is_empty() {
+                    a.push(task.trim().into());
+                }
+            }
+        }
+    }
+    (program, a)
+}
+
 // Start een nieuwe agent-sessie. session_id is een vooraf bepaalde UUID, zodat we
 // later kunnen herstarten met `claude --resume <uuid>`.
 #[tauri::command]
@@ -345,34 +453,28 @@ fn create_session(
     mode: String,
     full_paths: bool,
     command: String,
+    agent: String,
+    model: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
     let (program, args) = if !command.trim().is_empty() {
         // Commando-override (bijv. nep-Claude voor de demo): voer dit programma
-        // uit i.p.v. claude, zonder claude-vlaggen.
+        // uit i.p.v. de agent, zonder agent-vlaggen.
         let mut toks: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
         let prog = toks.remove(0);
         (prog, toks)
     } else {
-        let mut a = vec![
-            "--session-id".into(),
-            session_id,
-            "-n".into(),
-            norm_title(&title),
-        ];
-        if !mode.is_empty() && mode != "default" {
-            a.push("--permission-mode".into());
-            a.push(mode);
-        }
-        if full_paths {
-            a.push("--append-system-prompt".into());
-            a.push(FULL_PATH_PROMPT.into());
-        }
-        if !task.trim().is_empty() {
-            a.push(task.trim().into());
-        }
-        (resolve_claude(), a)
+        build_command(
+            &agent,
+            LaunchKind::Create,
+            &session_id,
+            &title,
+            &task,
+            &mode,
+            &model,
+            full_paths,
+        )
     };
     start_pty(&app, &state.sessions, id, program, &path, args, cols, rows)
 }
@@ -390,6 +492,8 @@ fn restart_session(
     mode: String,
     full_paths: bool,
     command: String,
+    agent: String,
+    model: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -403,21 +507,16 @@ fn restart_session(
         let prog = toks.remove(0);
         (prog, toks)
     } else {
-        let mut a = vec![
-            "--resume".into(),
-            session_id,
-            "-n".into(),
-            norm_title(&title),
-        ];
-        if !mode.is_empty() && mode != "default" {
-            a.push("--permission-mode".into());
-            a.push(mode);
-        }
-        if full_paths {
-            a.push("--append-system-prompt".into());
-            a.push(FULL_PATH_PROMPT.into());
-        }
-        (resolve_claude(), a)
+        build_command(
+            &agent,
+            LaunchKind::Resume,
+            &session_id,
+            &title,
+            "",
+            &mode,
+            &model,
+            full_paths,
+        )
     };
     start_pty(&app, &state.sessions, id, program, &path, args, cols, rows)
 }
