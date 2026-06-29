@@ -20,6 +20,7 @@ const I18N = {
     grp_html: "HTML-preview", html_split: "Naast de terminal (split)", html_full: "Volledig (verberg terminal)",
     set_fullpaths: "Vraag Claude volledige paden te tonen (klikbaar)",
     launch_mode: "Modus", mode_default: "Standaard", mode_plan: "Plan-modus", mode_auto: "Auto (accepteert acties)",
+    mode_sandbox: "Sandbox (beperkte rechten)",
     launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "agy (Gemini)",
     launch_model: "Model", model_ph: "standaard", model_hint: "Leeg = de standaard van de agent.",
     cap_agent: "Agent", cap_model: "Model (leeg = standaard)",
@@ -59,6 +60,7 @@ const I18N = {
     grp_html: "HTML preview", html_split: "Beside the terminal (split)", html_full: "Full (hide terminal)",
     set_fullpaths: "Ask Claude to print full paths (clickable)",
     launch_mode: "Mode", mode_default: "Default", mode_plan: "Plan mode", mode_auto: "Auto (accepts actions)",
+    mode_sandbox: "Sandbox (restricted)",
     launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "agy (Gemini)",
     launch_model: "Model", model_ph: "default", model_hint: "Empty = the agent's default.",
     cap_agent: "Agent", cap_model: "Model (empty = default)",
@@ -96,10 +98,20 @@ function applyI18n() {
 const AGENTS = ["claude", "agy"];
 // Suggesties voor het model-veld (datalist). Vrije tekst blijft toegestaan en
 // leeg = de eigen default van de agent; de lijst is slechts een hint, want
-// model-ID's verschuiven en het veld dwingt niets af.
+// model-ID's verschuiven en het veld dwingt niets af. agy selecteert op de
+// volledige label-string (incl. effort-suffix), dus die nemen we letterlijk over.
 const MODEL_SUGGESTIONS = {
   claude: ["sonnet", "opus", "haiku", "opusplan"],
-  agy: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+  agy: [
+    "Gemini 3.5 Flash (Medium)",
+    "Gemini 3.5 Flash (High)",
+    "Gemini 3.5 Flash (Low)",
+    "Gemini 3.1 Pro (Low)",
+    "Gemini 3.1 Pro (High)",
+    "Claude Sonnet 4.6 (Thinking)",
+    "Claude Opus 4.6 (Thinking)",
+    "GPT-OSS 120B (Medium)",
+  ],
 };
 function fillModelDatalist(dl, agent) {
   if (!dl) return;
@@ -109,6 +121,42 @@ function fillModelDatalist(dl, agent) {
     o.value = m;
     dl.appendChild(o);
   }
+}
+
+// Modus-opties verschillen per agent. claude: --permission-mode default/plan/auto.
+// agy: geen --permission-mode, wel --sandbox (beperkt) en
+// --dangerously-skip-permissions (auto). Waarden komen overeen met de mapping in
+// build_command() in de Rust-backend.
+const MODE_OPTIONS = {
+  claude: [
+    { value: "default", key: "mode_default" },
+    { value: "plan", key: "mode_plan" },
+    { value: "auto", key: "mode_auto" },
+  ],
+  agy: [
+    { value: "default", key: "mode_default" },
+    { value: "sandbox", key: "mode_sandbox" },
+    { value: "auto", key: "mode_auto" },
+  ],
+};
+function modesFor(agent) { return MODE_OPTIONS[agent] || MODE_OPTIONS.claude; }
+// Geldige modus voor deze agent? Anders terug naar "default" (bv. claude "plan"
+// bestaat niet voor agy).
+function clampMode(agent, mode) {
+  return modesFor(agent).some((o) => o.value === mode) ? mode : "default";
+}
+// (Her)vul een <select> met de modus-opties van de agent; bewaar de huidige keuze.
+function fillModeSelect(sel, agent, current) {
+  if (!sel) return;
+  const val = clampMode(agent, current);
+  sel.innerHTML = "";
+  for (const o of modesFor(agent)) {
+    const opt = document.createElement("option");
+    opt.value = o.value;
+    opt.textContent = t(o.key);
+    sel.appendChild(opt);
+  }
+  sel.value = val;
 }
 
 /* ============ state ============ */
@@ -183,10 +231,10 @@ async function selectProject(p, card) {
   els.locBadge.className = "loc-badge " + locClass(p.path);
   els.titleInput.value = p.title || p.label;
   els.taskInput.value = p.task || "";
-  els.modeInput.value = p.mode || "default";
   els.agentInput.value = AGENTS.includes(p.agent) ? p.agent : "claude";
   els.modelInput.value = p.model || "";
   fillModelDatalist(els.modelSuggestions, els.agentInput.value);
+  fillModeSelect(els.modeInput, els.agentInput.value, p.mode || "default");
   els.status.textContent = "";
   const ok = await invoke("path_exists", { path: p.path });
   els.warn.classList.toggle("hidden", ok);
@@ -712,7 +760,7 @@ function saveSettingsFromForm() {
   resizeActive();
   if (langChanged) {
     applyI18n(); renderProjects(); renderTabs();
-    if (selected) { els.locBadge.textContent = locText(selected.path); els.locBadge.className = "loc-badge " + locClass(selected.path); }
+    if (selected) { els.locBadge.textContent = locText(selected.path); els.locBadge.className = "loc-badge " + locClass(selected.path); fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value); }
   }
   els.settingsModal.classList.add("hidden");
 }
@@ -744,12 +792,6 @@ function renderEditor() {
           <input class="e-title" type="text" placeholder="${escapeHtml(t("ph_title"))}" value="${escapeHtml(r.title || "")}" /></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_task"))}</span>
           <input class="e-task" type="text" placeholder="${escapeHtml(t("ph_task"))}" value="${escapeHtml(r.task || "")}" /></div>
-        <div class="e-field"><span class="e-cap">${escapeHtml(t("launch_mode"))}</span>
-          <select class="e-mode">
-            <option value="default"${(r.mode || "default") === "default" ? " selected" : ""}>${escapeHtml(t("mode_default"))}</option>
-            <option value="plan"${r.mode === "plan" ? " selected" : ""}>${escapeHtml(t("mode_plan"))}</option>
-            <option value="auto"${r.mode === "auto" ? " selected" : ""}>${escapeHtml(t("mode_auto"))}</option>
-          </select></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_agent"))}</span>
           <select class="e-agent">
             <option value="claude"${(r.agent || "claude") === "claude" ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
@@ -758,6 +800,8 @@ function renderEditor() {
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_model"))}</span>
           <input class="e-model" type="text" list="dl-emodel-${i}" autocomplete="off" placeholder="${escapeHtml(t("model_ph"))}" value="${escapeHtml(r.model || "")}" />
           <datalist id="dl-emodel-${i}">${(MODEL_SUGGESTIONS[r.agent] || MODEL_SUGGESTIONS.claude).map((m) => `<option value="${escapeHtml(m)}"></option>`).join("")}</datalist></div>
+        <div class="e-field"><span class="e-cap">${escapeHtml(t("launch_mode"))}</span>
+          <select class="e-mode">${modesFor(r.agent).map((o) => `<option value="${o.value}"${clampMode(r.agent, r.mode || "default") === o.value ? " selected" : ""}>${escapeHtml(t(o.key))}</option>`).join("")}</select></div>
       </div>
       <button class="e-del">🗑</button>`;
     row.querySelector(".e-color").addEventListener("input", (e) => (editRows[i].accent = e.target.value));
@@ -767,8 +811,13 @@ function renderEditor() {
     row.querySelector(".e-task").addEventListener("input", (e) => (editRows[i].task = e.target.value));
     row.querySelector(".e-mode").addEventListener("change", (e) => (editRows[i].mode = e.target.value));
     row.querySelector(".e-model").addEventListener("input", (e) => (editRows[i].model = e.target.value));
-    // Agent wisselen herrendert de rij zodat de model-suggesties meeveranderen.
-    row.querySelector(".e-agent").addEventListener("change", (e) => { editRows[i].agent = e.target.value; renderEditor(); });
+    // Agent wisselen herrendert de rij zodat model-suggesties EN modus-opties
+    // meeveranderen; de modus wordt geclampt (claude "plan" bestaat niet voor agy).
+    row.querySelector(".e-agent").addEventListener("change", (e) => {
+      editRows[i].agent = e.target.value;
+      editRows[i].mode = clampMode(e.target.value, editRows[i].mode || "default");
+      renderEditor();
+    });
     row.querySelector(".e-browse").addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
     row.querySelector(".e-del").addEventListener("click", () => { editRows.splice(i, 1); renderEditor(); });
     els.editorRows.appendChild(row);
@@ -877,8 +926,11 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
-  // Andere agent gekozen op het startformulier -> model-suggesties meeveranderen.
-  els.agentInput.addEventListener("change", () => fillModelDatalist(els.modelSuggestions, els.agentInput.value));
+  // Andere agent op het startformulier -> model-suggesties EN modus-opties mee.
+  els.agentInput.addEventListener("change", () => {
+    fillModelDatalist(els.modelSuggestions, els.agentInput.value);
+    fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value);
+  });
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);

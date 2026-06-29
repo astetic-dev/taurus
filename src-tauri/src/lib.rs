@@ -375,10 +375,11 @@ fn build_command(
     let program = resolve_program(agent);
     let mut a: Vec<String> = Vec::new();
     match agent {
-        // agy (Gemini-agent): kent geen --session-id / -n / --permission-mode /
-        // --append-system-prompt. Modus: auto -> alle tools auto-goedkeuren;
-        // plan -> sandbox (beperkte terminalrechten). full_paths heeft geen
-        // equivalent en wordt overgeslagen.
+        // agy (Antigravity/Gemini-agent): kent geen --session-id / -n /
+        // --permission-mode / --append-system-prompt. Modus: auto -> alle tools
+        // auto-goedkeuren; sandbox -> beperkte terminalrechten. full_paths heeft
+        // geen equivalent en wordt overgeslagen. Het model is de volledige
+        // agy-label-string (bijv. "Gemini 3.5 Flash (Medium)").
         "agy" => {
             if let LaunchKind::Resume = kind {
                 a.push("--continue".into());
@@ -389,7 +390,8 @@ fn build_command(
             }
             match mode {
                 "auto" => a.push("--dangerously-skip-permissions".into()),
-                "plan" => a.push("--sandbox".into()),
+                // "plan" blijft als alias voor sandbox staan (oudere configs).
+                "sandbox" | "plan" => a.push("--sandbox".into()),
                 _ => {}
             }
             // Een taak start agy interactief met die prompt -- alleen bij een
