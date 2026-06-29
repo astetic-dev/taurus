@@ -21,7 +21,7 @@ const I18N = {
     set_fullpaths: "Vraag Claude volledige paden te tonen (klikbaar)",
     launch_mode: "Modus", mode_default: "Standaard", mode_plan: "Plan-modus", mode_auto: "Auto (accepteert acties)",
     mode_sandbox: "Sandbox (beperkte rechten)",
-    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "agy (Gemini)",
+    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
     launch_model: "Model", model_ph: "standaard", model_hint: "Leeg = de standaard van de agent.",
     cap_agent: "Agent", cap_model: "Model (leeg = standaard)",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
@@ -61,7 +61,7 @@ const I18N = {
     set_fullpaths: "Ask Claude to print full paths (clickable)",
     launch_mode: "Mode", mode_default: "Default", mode_plan: "Plan mode", mode_auto: "Auto (accepts actions)",
     mode_sandbox: "Sandbox (restricted)",
-    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "agy (Gemini)",
+    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
     launch_model: "Model", model_ph: "default", model_hint: "Empty = the agent's default.",
     cap_agent: "Agent", cap_model: "Model (empty = default)",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
@@ -828,10 +828,12 @@ function renderEditor() {
     row.querySelector(".e-mode").addEventListener("change", (e) => (editRows[i].mode = e.target.value));
     row.querySelector(".e-model").addEventListener("input", (e) => (editRows[i].model = e.target.value));
     // Agent wisselen herrendert de rij zodat model-suggesties EN modus-opties
-    // meeveranderen; de modus wordt geclampt (claude "plan" bestaat niet voor agy).
+    // meeveranderen; de modus wordt geclampt (claude "plan" bestaat niet voor
+    // agy) en het model gewist (een model van de vorige agent is niet geldig).
     row.querySelector(".e-agent").addEventListener("change", (e) => {
       editRows[i].agent = e.target.value;
       editRows[i].mode = clampMode(e.target.value, editRows[i].mode || "default");
+      editRows[i].model = "";
       renderEditor();
     });
     row.querySelector(".e-browse").addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
@@ -942,8 +944,11 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
-  // Andere agent op het startformulier -> model-suggesties EN modus-opties mee.
+  // Andere agent op het startformulier -> model-keuze EN modus-opties mee.
+  // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
+  // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
   els.agentInput.addEventListener("change", () => {
+    els.modelInput.value = "";
     fillModelDatalist(els.modelSuggestions, els.agentInput.value);
     fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value);
   });
