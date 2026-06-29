@@ -96,12 +96,22 @@ function applyI18n() {
 // Welke agent-CLIs Taurus kan starten. De losse gemini-CLI is end-of-life en
 // staat hier bewust niet bij; "agy" is de ondersteunde Gemini-agent.
 const AGENTS = ["claude", "agy"];
+// Claude Code's --model accepteert een alias of een exact model-ID, geen vrije
+// weergavenaam (anders dan agy). We tonen nette namen als suggestie en vertalen
+// die in resolveModelArg() naar het model-ID dat de CLI accepteert; een alias of
+// ID die je zelf typt gaat ongewijzigd door. De opgeslagen/getoonde waarde blijft
+// de nette naam.
+const CLAUDE_MODELS = {
+  "Claude Opus 4.8": "claude-opus-4-8",
+  "Claude Sonnet 4.6": "claude-sonnet-4-6",
+  "Claude Haiku 4.5": "claude-haiku-4-5",
+};
 // Suggesties voor het model-veld (datalist). Vrije tekst blijft toegestaan en
 // leeg = de eigen default van de agent; de lijst is slechts een hint, want
 // model-ID's verschuiven en het veld dwingt niets af. agy selecteert op de
 // volledige label-string (incl. effort-suffix), dus die nemen we letterlijk over.
 const MODEL_SUGGESTIONS = {
-  claude: ["sonnet", "opus", "haiku", "opusplan"],
+  claude: Object.keys(CLAUDE_MODELS),
   agy: [
     "Gemini 3.5 Flash (Medium)",
     "Gemini 3.5 Flash (High)",
@@ -113,6 +123,14 @@ const MODEL_SUGGESTIONS = {
     "GPT-OSS 120B (Medium)",
   ],
 };
+// Vertaal de gekozen/ingetypte modelnaam naar de --model-waarde voor de agent.
+// Voor claude: nette naam -> model-ID; alles anders (alias of ID) ongewijzigd.
+// Voor agy: ongewijzigd (agy verwacht juist de volledige label-string).
+function resolveModelArg(agent, model) {
+  const m = (model || "").trim();
+  if (agent === "claude" && CLAUDE_MODELS[m]) return CLAUDE_MODELS[m];
+  return m;
+}
 function fillModelDatalist(dl, agent) {
   if (!dl) return;
   dl.innerHTML = "";
@@ -434,7 +452,7 @@ async function startSession() {
 
   const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model });
   try {
-    await invoke("create_session", { id, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model, cols: session.term.cols, rows: session.term.rows });
+    await invoke("create_session", { id, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), cols: session.term.cols, rows: session.term.rows });
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -487,7 +505,7 @@ async function restoreSessions() {
       await invoke("restart_session", {
         id, path: meta.path, title: session.title, sessionId: uuid,
         mode: session.mode, fullPaths: settings.fullPaths, command: "",
-        agent: session.agent, model: session.model,
+        agent: session.agent, model: resolveModelArg(session.agent, session.model),
         cols: session.term.cols, rows: session.term.rows,
       });
     } catch (_) {
@@ -657,7 +675,7 @@ async function restartSession(id) {
   s.exited = false; s.working = false; s.awaiting = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
   if (current !== id) showView(id); else renderTabs();
   try {
-    await invoke("restart_session", { id, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: s.model || "", cols: s.term.cols, rows: s.term.rows });
+    await invoke("restart_session", { id, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
   } catch (e) { s.term.write(`\r\n\x1b[31m[${t("restart_failed")}: ${e}]\x1b[0m\r\n`); }
 }
 
