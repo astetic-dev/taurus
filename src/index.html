@@ -66,6 +66,19 @@
                   placeholder="Laat leeg voor een lege sessie, of typ meteen een opdracht…"></textarea>
               </div>
               <div class="field">
+                <label for="agent-input" data-i18n="launch_agent">Agent</label>
+                <select id="agent-input">
+                  <option value="claude" data-i18n="agent_claude">Claude Code</option>
+                  <option value="agy" data-i18n="agent_agy">Antigravity</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="model-input"><span data-i18n="launch_model">Model</span> <span class="opt" data-i18n="optional">(optioneel)</span></label>
+                <input id="model-input" type="text" list="model-suggestions" autocomplete="off" data-i18n-ph="model_ph" placeholder="standaard" />
+                <datalist id="model-suggestions"></datalist>
+                <div class="hint" data-i18n="model_hint">Leeg = de standaard van de agent.</div>
+              </div>
+              <div class="field">
                 <label for="mode-input" data-i18n="launch_mode">Modus</label>
                 <select id="mode-input">
                   <option value="default" data-i18n="mode_default">Standaard</option>

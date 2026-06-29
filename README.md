@@ -49,6 +49,9 @@ consistently. That's what Taurus is for.
 - **In-app project editor** — add/edit/remove launch buttons (name, folder with a
   browse dialog, colour, default title/task, mode).
 - **Per-project mode** — start in `default`, `plan` or `auto` (`--permission-mode`).
+- **Per-project agent + model** — launch `claude` (Claude Code) or `agy` (a
+  Gemini-backed agent CLI), optionally pinned to a model, set per project and
+  overridable per session.
 - **Inline HTML preview** — right-click a tab → *HTML preview*, or click an `.html`
   path in the terminal; it renders beside (or instead of) the terminal.
 - **Restart / resume** — right-click a tab to restart the session and resume the
@@ -96,13 +99,21 @@ Edit them with the in-app **Projects** editor, or by hand. Format:
     "task": "",
     "accent": "#7c9cff",
     "mode": "default",
+    "agent": "claude",
+    "model": "",
     "command": ""
   }
 ]
 ```
 
-- `command` (optional) — run a different program instead of `claude` for this
-  project.
+- `agent` (optional) — which agent CLI to launch: `claude` (default, Claude Code)
+  or `agy` (a Gemini-backed agent CLI). Selectable per project in the editor and
+  overridable per session on the launch form.
+- `model` (optional) — model the agent starts with (free text, e.g. `opus`,
+  `sonnet`, `gemini-2.5-pro`). Empty means the agent's own default. Passed as
+  `--model`.
+- `command` (optional) — run a different program instead of the agent for this
+  project (verbatim, no agent flags). Takes precedence over `agent`/`model`.
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
 
