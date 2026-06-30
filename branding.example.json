@@ -1,0 +1,12 @@
+{
+  "appName": "Acme Agent Launcher",
+  "subtitle": "Acme Corp",
+  "logo": "C:\\ProgramData\\Acme\\logo.png",
+  "windowTitle": "Acme Agent Launcher",
+  "skin": "default",
+  "theme": {
+    "--accent": "#3b82f6",
+    "--bg": "#0b1220",
+    "--bg-panel": "#11182a"
+  }
+}

@@ -643,6 +643,98 @@ fn copy_to_clipboard(app: AppHandle, text: String) -> Result<(), String> {
     app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
 
+// ===== White-label branding =====
+// Branding is een configuratie-item, geen code: een optioneel branding.json in
+// de per-gebruiker config-map (%APPDATA%\Taurus\, naast projects.json) bepaalt
+// app-naam, ondertitel, logo, venstertitel en CSS-variabele-overrides. Ontbreekt
+// het bestand, dan komen lege velden terug en blijft de UI gewoon Taurus. Zo kan
+// iedereen rebranden zonder de code te wijzigen, en blijft de default-build
+// identiek. Bedrijfsspecifieke branding hoort puur in dat lokale bestand thuis.
+#[derive(serde::Deserialize, Default)]
+struct BrandingConfig {
+    #[serde(default)]
+    app_name: String,
+    #[serde(default)]
+    subtitle: String,
+    #[serde(default)]
+    logo: String, // absoluut pad naar een afbeelding
+    #[serde(default)]
+    window_title: String,
+    #[serde(default)]
+    theme: HashMap<String, String>, // CSS-variabele -> waarde, bv. "--accent": "#3b82f6"
+    #[serde(default)]
+    skin: String, // optionele default-skin (bv. "winxp"); leeg = geen default
+}
+
+#[derive(serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct Branding {
+    app_name: String,
+    subtitle: String,
+    logo_data_uri: String, // "" als er geen logo is
+    window_title: String,
+    theme: HashMap<String, String>,
+    skin: String,
+}
+
+// Minimale standaard-base64 (geen extra dependency): het logo wordt als data-URI
+// teruggegeven zodat het binnen de WebView2-sandbox laadt (een file:-pad zou door
+// de CSP/asset-laag geweigerd worden).
+fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for c in data.chunks(3) {
+        let b0 = c[0];
+        let b1 = *c.get(1).unwrap_or(&0);
+        let b2 = *c.get(2).unwrap_or(&0);
+        out.push(T[(b0 >> 2) as usize] as char);
+        out.push(T[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        out.push(if c.len() > 1 { T[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char } else { '=' });
+        out.push(if c.len() > 2 { T[(b2 & 0x3f) as usize] as char } else { '=' });
+    }
+    out
+}
+
+fn logo_mime(path: &str) -> &'static str {
+    let p = path.to_lowercase();
+    if p.ends_with(".svg") {
+        "image/svg+xml"
+    } else if p.ends_with(".jpg") || p.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if p.ends_with(".gif") {
+        "image/gif"
+    } else if p.ends_with(".webp") {
+        "image/webp"
+    } else {
+        "image/png"
+    }
+}
+
+#[tauri::command]
+fn branding() -> Branding {
+    let path = config_dir().join("branding.json");
+    let cfg: BrandingConfig = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let logo_data_uri = if cfg.logo.trim().is_empty() {
+        String::new()
+    } else {
+        match std::fs::read(cfg.logo.trim()) {
+            Ok(bytes) => format!("data:{};base64,{}", logo_mime(&cfg.logo), b64(&bytes)),
+            Err(_) => String::new(),
+        }
+    };
+    Branding {
+        app_name: cfg.app_name,
+        subtitle: cfg.subtitle,
+        logo_data_uri,
+        window_title: cfg.window_title,
+        theme: cfg.theme,
+        skin: cfg.skin,
+    }
+}
+
 // Zet op Windows de WebView2 browser-accelerator-keys uit (F5, Ctrl+R,
 // Ctrl+Shift+R, Ctrl+Shift+I/devtools enz.). Die toetsen herladen of
 // onderbreken de webview en wissen daarmee alle agent-tabs uit beeld terwijl de
@@ -716,7 +808,8 @@ pub fn run() {
             list_html,
             read_file,
             open_folder,
-            copy_to_clipboard
+            copy_to_clipboard,
+            branding
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

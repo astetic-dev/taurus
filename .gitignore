@@ -17,6 +17,13 @@ projects.json
 projects.real.json
 /out
 
+# White-label branding is a local config item — keep brands out of the repo.
+# Real branding lives in %APPDATA%\Taurus\branding.json (+ a logo); these are
+# only here in case someone keeps a copy in the working tree for testing.
+branding.json
+src/*-logo.png
+!src/taurus-logo.png
+
 # Local demo / recording helpers (not part of the published app)
 /demo/
 

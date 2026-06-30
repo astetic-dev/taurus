@@ -10,6 +10,10 @@
   --green: #5ccf9e;
   --orange: #f0a85c;
   --red: #ff6b6b;
+  /* Terminal-kleuren (xterm). Skins overschrijven deze; spawnTerminal leest ze. */
+  --term-bg: #14161c;
+  --term-fg: #e6e8ee;
+  --term-sel: #33405c;
 }
 
 * { box-sizing: border-box; }

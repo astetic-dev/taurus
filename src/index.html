@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="vendor/xterm.css" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="skins.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Taurus — Agent Launcher</title>
     <script src="vendor/xterm.js"></script>
@@ -145,6 +146,25 @@
           <label class="srow check"><input id="set-search" type="checkbox" /> <span data-i18n="c_search">Zoeken in scrollback — Ctrl+Shift+F</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
           <label class="srow check"><input id="set-tabshortcuts" type="checkbox" /> <span data-i18n="c_tabs">Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)</span></label>
           <label class="srow check"><input id="set-tabstatus" type="checkbox" /> <span data-i18n="c_status">Live Claude-status op de tab (✶ Orbiting…)</span></label>
+        </div>
+
+        <div class="setting-group">
+          <h3 data-i18n="grp_theme">Thema</h3>
+          <label class="srow"><span data-i18n="set_skin">Skin</span>
+            <select id="set-skin">
+              <option value="default" data-i18n="skin_default">Standaard (donker)</option>
+              <option value="retro-mac" data-i18n="skin_retromac">Retro Mac</option>
+              <option value="aqua" data-i18n="skin_aqua">macOS Aqua</option>
+              <option value="retro-win" data-i18n="skin_retrowin">Retro Windows</option>
+              <option value="winxp" data-i18n="skin_winxp">Windows XP</option>
+              <option value="terminal" data-i18n="skin_terminal">Terminal (CRT)</option>
+              <option value="nord" data-i18n="skin_nord">Nord</option>
+              <option value="dracula" data-i18n="skin_dracula">Dracula</option>
+              <option value="solarized" data-i18n="skin_solarized">Solarized Light</option>
+              <option value="catppuccin" data-i18n="skin_catppuccin">Catppuccin</option>
+            </select>
+          </label>
+          <div class="hint" data-i18n="skin_hint">Of zet een vaste default in branding.json (zie README).</div>
         </div>
 
         <div class="setting-group">
