@@ -122,28 +122,43 @@ async function applyBranding() {
     if (img) img.src = b.logoDataUri;
   }
   if (b.theme && typeof b.theme === "object") {
-    // Thema-variabelen in een <style>:root{}-blok i.p.v. inline op <html>.
-    // Inline-stijl wint qua specificiteit van een skin-regel; via :root kan een
-    // gekozen skin (html[data-skin=…]) er juist netjes overheen winnen, terwijl
-    // de branding-default boven de basis-:root blijft (latere cascade).
+    // Het branding-thema wordt een eigen, selecteerbare skin "brand": de vars
+    // hangen onder html[data-skin="brand"] (niet :root), zodat het naast de
+    // ingebouwde skins staat en niemand het per ongeluk overschrijft. Het label
+    // in de Thema-lijst komt uit de lokale branding (ondertitel/naam) — er staat
+    // dus niets merkspecifieks in de publieke code.
     const decls = Object.entries(b.theme)
       .filter(([k, v]) => /^--[\w-]+$/.test(k) && typeof v === "string" && !/[<>{}]/.test(v))
       .map(([k, v]) => `${k}: ${v};`)
       .join(" ");
     if (decls) {
+      brandHasTheme = true;
       let st = document.getElementById("taurus-branding");
       if (!st) { st = document.createElement("style"); st.id = "taurus-branding"; document.head.appendChild(st); }
-      st.textContent = `:root { ${decls} }`;
+      st.textContent = `html[data-skin="brand"] { ${decls} }`;
+      addBrandSkinOption(b.subtitle || b.appName || "Custom");
     }
   }
   if (b.windowTitle) {
     document.title = b.windowTitle;
     try { window.__TAURI__.window.getCurrentWindow().setTitle(b.windowTitle); } catch (_) {}
   }
-  // Skin-default uit branding onthouden en de effectieve skin toepassen:
-  // expliciete keuze in Instellingen wint, anders de branding-default, anders default.
+  // Effectieve skin: expliciete keuze in Instellingen wint, anders de
+  // branding-default-skin, anders de "brand"-skin (als er een thema is), anders
+  // gewoon Taurus.
   brandingSkin = (b.skin || "").trim();
-  applySkin(settings.skin || brandingSkin || "default");
+  applySkin(settings.skin || brandingSkin || (brandHasTheme ? "brand" : "default"));
+}
+
+// Voeg de uit branding.json afgeleide "brand"-skin als keuze toe aan de
+// Thema-dropdown (één keer), met een lokaal label. Geen merknaam in de code.
+function addBrandSkinOption(label) {
+  const sel = document.getElementById("set-skin");
+  if (!sel || sel.querySelector('option[value="brand"]')) return;
+  const o = document.createElement("option");
+  o.value = "brand";
+  o.textContent = label;
+  sel.insertBefore(o, sel.options[1] || null);
 }
 
 /* ============ skins ============ */
@@ -151,6 +166,7 @@ async function applyBranding() {
 // "default" / leeg = geen attribuut (gewoon :root). Het terminal-thema leest de
 // --term-* variabelen zodat de skin ook in de xterm-terminal doorwerkt.
 let brandingSkin = "";
+let brandHasTheme = false;
 function termThemeFromCss(accent) {
   const cs = getComputedStyle(document.documentElement);
   const v = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
@@ -827,8 +843,9 @@ function openSettings() {
   els.setTabStatus.checked = settings.tabStatus;
   els.setFullPaths.checked = settings.fullPaths;
   els.setPersist.checked = settings.persistSessions;
-  // Toon de effectieve skin: expliciete keuze, anders de branding-default.
-  els.setSkin.value = settings.skin || brandingSkin || "default";
+  // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
+  // anders de "brand"-skin (als er een branding-thema is), anders default.
+  els.setSkin.value = settings.skin || brandingSkin || (brandHasTheme ? "brand" : "default");
   els.settingsModal.classList.remove("hidden");
 }
 function saveSettingsFromForm() {
