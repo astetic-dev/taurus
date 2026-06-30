@@ -662,6 +662,8 @@ struct BrandingConfig {
     window_title: String,
     #[serde(default)]
     theme: HashMap<String, String>, // CSS-variabele -> waarde, bv. "--accent": "#3b82f6"
+    #[serde(default)]
+    skin: String, // optionele default-skin (bv. "winxp"); leeg = geen default
 }
 
 #[derive(serde::Serialize, Default)]
@@ -672,6 +674,7 @@ struct Branding {
     logo_data_uri: String, // "" als er geen logo is
     window_title: String,
     theme: HashMap<String, String>,
+    skin: String,
 }
 
 // Minimale standaard-base64 (geen extra dependency): het logo wordt als data-URI
@@ -728,6 +731,7 @@ fn branding() -> Branding {
         logo_data_uri,
         window_title: cfg.window_title,
         theme: cfg.theme,
+        skin: cfg.skin,
     }
 }
 

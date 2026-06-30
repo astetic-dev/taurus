@@ -59,6 +59,9 @@ consistently. That's what Taurus is for.
 - **Open folder in Explorer**, **search** (Ctrl+Shift+F), **copy/paste**, font zoom
   (Ctrl+= / - / 0), tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W) — all toggleable.
 - **EN / NL** language switch.
+- **White-label & skins** — rebrand from a local `branding.json` (name, logo,
+  colours), and pick a visual skin (retro Mac/Windows, XP, Aqua, green-CRT
+  terminal) in Settings. See [Branding](#branding-white-label).
 
 ## Requirements
 
@@ -119,10 +122,11 @@ Edit them with the in-app **Projects** editor, or by hand. Format:
 
 ## Branding (white-label)
 
-You can rebrand the launcher — app name, subtitle, logo, colours, window title —
-**without forking or editing code**. Drop an optional `branding.json` in
-`%APPDATA%\Taurus\` (next to `projects.json`). Without the file the build is
-plain Taurus; remove it to get Taurus back. Every field is optional:
+You can rebrand the launcher — app name, subtitle, logo, colours, skin, window
+title — **without forking or editing code**. Copy
+[`branding.example.json`](branding.example.json) to `%APPDATA%\Taurus\branding.json`
+(next to `projects.json`) and edit it. Without the file the build is plain
+Taurus; remove it to get Taurus back. Every field is optional:
 
 ```json
 {
@@ -130,17 +134,38 @@ plain Taurus; remove it to get Taurus back. Every field is optional:
   "subtitle": "Acme Corp",
   "logo": "C:\\ProgramData\\Acme\\logo.png",
   "windowTitle": "Acme Agent Launcher",
+  "skin": "default",
   "theme": { "--accent": "#3b82f6", "--bg": "#0b1220", "--bg-panel": "#11182a" }
 }
 ```
 
 - `theme` overrides the CSS variables in `src/styles.css` `:root` — the themeable
   ones are `--bg`, `--bg-panel`, `--bg-card`, `--bg-card-hover`, `--border`,
-  `--text`, `--text-dim`, `--accent`.
+  `--text`, `--text-dim`, `--accent` (and `--term-bg` / `--term-fg` / `--term-sel`
+  for the terminal).
+- `skin` sets the **default theme** (see *Skins* below).
 - `logo` is an absolute path; it's read at startup and inlined as a data URI.
 - The in-app branding above is runtime/config-driven. To also change the
   **installer** product name / identifier (baked into the bundle), build with a
   Tauri config overlay: `npm run tauri build -- --config <overlay>.json`.
+
+### Skins
+
+Built-in visual themes that restyle the sidebar, top bar, buttons and terminal.
+Pick one live under **⚙ Settings → Theme**, or set a default via `"skin": "…"`
+in `branding.json` (an explicit Settings choice wins). Available skins:
+
+| value | look |
+|-------|------|
+| `default` | the standard dark theme |
+| `retro-mac` | classic Mac System 7 / Platinum (grey, beveled, pinstripe) |
+| `aqua` | early Mac OS X (pinstripes, glossy lozenge buttons) |
+| `retro-win` | Windows 95/98 (teal desktop, raised 3D grey controls) |
+| `winxp` | Windows XP Luna (blue bars, glossy buttons, green primary) |
+| `terminal` | green-on-black CRT (monochrome, scanlines) |
+
+Skins are pure CSS (`src/skins.css`, scoped by `html[data-skin="…"]`) — adding
+more is just another block.
 
 > Keep brand assets out of this repo: `branding.json` and `src/*-logo.png` are
 > git-ignored. A real brand lives only in the local config, never committed.

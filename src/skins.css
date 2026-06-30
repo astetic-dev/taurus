@@ -1,0 +1,329 @@
+/* ============================================================================
+   Taurus skins — selectable visual themes.
+
+   Each skin is scoped under html[data-skin="<name>"] and mostly works by
+   overriding the :root CSS variables from styles.css (so the whole UI recolours
+   at once), plus a handful of region rules for the era/OS feel. No images — all
+   bevels/gloss/pinstripes are pure CSS. "default" = no [data-skin] attribute.
+
+   Terminal colours ride along via --term-bg / --term-fg / --term-sel, which
+   spawnTerminal() reads (see main.js); switching re-themes open terminals.
+   ========================================================================== */
+
+/* ============ Retro Windows (95/98) ============ */
+html[data-skin="retro-win"] {
+  --bg: #008080;            /* desktop teal */
+  --bg-panel: #c0c0c0;      /* classic 3D grey */
+  --bg-card: #c0c0c0;
+  --bg-card-hover: #d4d0c8;
+  --border: #808080;
+  --text: #000000;
+  --text-dim: #404040;
+  --accent: #000080;        /* navy title bar */
+  --green: #008000;
+  --orange: #a06000;
+  --red: #aa0000;
+  --term-bg: #000000;
+  --term-fg: #c0c0c0;
+  --term-sel: #000080;
+}
+html[data-skin="retro-win"] body,
+html[data-skin="retro-win"] button,
+html[data-skin="retro-win"] input,
+html[data-skin="retro-win"] select,
+html[data-skin="retro-win"] textarea {
+  font-family: "MS Sans Serif", Tahoma, "Segoe UI", sans-serif;
+}
+/* Square everything; raised 3D chrome */
+html[data-skin="retro-win"] .project-card,
+html[data-skin="retro-win"] .modal-box,
+html[data-skin="retro-win"] .tab,
+html[data-skin="retro-win"] input,
+html[data-skin="retro-win"] select,
+html[data-skin="retro-win"] textarea,
+html[data-skin="retro-win"] .launch-btn,
+html[data-skin="retro-win"] .btn-primary,
+html[data-skin="retro-win"] .btn-ghost,
+html[data-skin="retro-win"] .foot-btn,
+html[data-skin="retro-win"] .browse-btn,
+html[data-skin="retro-win"] .reload-btn {
+  border-radius: 0 !important;
+}
+/* Raised button bevel (white top-left, dark bottom-right) */
+html[data-skin="retro-win"] .launch-btn,
+html[data-skin="retro-win"] .btn-primary,
+html[data-skin="retro-win"] .btn-ghost,
+html[data-skin="retro-win"] .foot-btn,
+html[data-skin="retro-win"] .browse-btn,
+html[data-skin="retro-win"] .reload-btn,
+html[data-skin="retro-win"] .preview-bar button,
+html[data-skin="retro-win"] .searchbar button {
+  background: #c0c0c0;
+  color: #000;
+  border: 1px solid #000;
+  box-shadow: inset 1px 1px #fff, inset -1px -1px #808080, inset 2px 2px #dfdfdf, inset -2px -2px #000;
+}
+html[data-skin="retro-win"] .launch-btn:active,
+html[data-skin="retro-win"] .btn-primary:active,
+html[data-skin="retro-win"] .btn-ghost:active,
+html[data-skin="retro-win"] .foot-btn:active,
+html[data-skin="retro-win"] .browse-btn:active {
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #000;
+}
+/* Sunken inputs */
+html[data-skin="retro-win"] input,
+html[data-skin="retro-win"] select,
+html[data-skin="retro-win"] textarea {
+  background: #fff;
+  border: 1px solid #000;
+  box-shadow: inset 1px 1px #808080, inset -1px -1px #fff;
+}
+/* Active tab = navy title bar */
+html[data-skin="retro-win"] .tab.active {
+  background: #000080;
+  color: #fff;
+}
+
+/* ============ Windows XP (Luna) ============ */
+html[data-skin="winxp"] {
+  --bg: #5a7edc;            /* Luna blue */
+  --bg-panel: #ece9d8;      /* classic XP face */
+  --bg-card: #ffffff;
+  --bg-card-hover: #e3efff;
+  --border: #7ba2e7;
+  --text: #000000;
+  --text-dim: #4a5a7a;
+  --accent: #2a60d8;        /* XP blue */
+  --green: #74b74a;         /* XP "start" green */
+  --orange: #e08b2e;
+  --red: #d24b3e;
+  --term-bg: #000000;
+  --term-fg: #c0c0c0;
+  --term-sel: #2a60d8;
+}
+html[data-skin="winxp"] body,
+html[data-skin="winxp"] button,
+html[data-skin="winxp"] input,
+html[data-skin="winxp"] select,
+html[data-skin="winxp"] textarea {
+  font-family: Tahoma, "Segoe UI", sans-serif;
+}
+/* Blue title-bar gradient on the tab bar + active tab */
+html[data-skin="winxp"] .tabbar { background: linear-gradient(#3d8bff, #0a52d6); border-bottom-color: #0a3aa0; }
+html[data-skin="winxp"] .tab.active { background: #ffffff; color: #000; }
+html[data-skin="winxp"] .tab { color: #eaf2ff; }
+/* Glossy rounded buttons */
+html[data-skin="winxp"] .btn-ghost,
+html[data-skin="winxp"] .foot-btn,
+html[data-skin="winxp"] .browse-btn,
+html[data-skin="winxp"] .reload-btn,
+html[data-skin="winxp"] .preview-bar button,
+html[data-skin="winxp"] .searchbar button {
+  background: linear-gradient(#ffffff, #d6e3f7);
+  color: #11305f;
+  border: 1px solid #5a82c8;
+  border-radius: 7px;
+}
+/* Primary = the green "Start" gel */
+html[data-skin="winxp"] .launch-btn,
+html[data-skin="winxp"] .btn-primary {
+  background: linear-gradient(#8ed06a, #4f9b34);
+  color: #fff;
+  border: 1px solid #3c7a28;
+  border-radius: 9px;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, .25);
+}
+
+/* ============ Retro Mac (System 7 / Platinum) ============ */
+html[data-skin="retro-mac"] {
+  --bg: #b8b8b8;            /* desktop grey */
+  --bg-panel: #dddddd;
+  --bg-card: #ffffff;
+  --bg-card-hover: #ededed;
+  --border: #000000;
+  --text: #000000;
+  --text-dim: #555555;
+  --accent: #333333;
+  --green: #2f8f5b;
+  --orange: #9a6a00;
+  --red: #b81f1f;
+  --term-bg: #ffffff;       /* classic Mac: black on white */
+  --term-fg: #000000;
+  --term-sel: #b0b0b0;
+}
+html[data-skin="retro-mac"] body,
+html[data-skin="retro-mac"] button,
+html[data-skin="retro-mac"] input,
+html[data-skin="retro-mac"] select,
+html[data-skin="retro-mac"] textarea {
+  font-family: Geneva, Charcoal, Verdana, "Segoe UI", sans-serif;
+}
+/* Crisp 1px black chrome */
+html[data-skin="retro-mac"] .project-card,
+html[data-skin="retro-mac"] .modal-box,
+html[data-skin="retro-mac"] input,
+html[data-skin="retro-mac"] select,
+html[data-skin="retro-mac"] textarea {
+  border: 1px solid #000 !important;
+  border-radius: 0 !important;
+}
+/* Pinstripe title bar */
+html[data-skin="retro-mac"] .tabbar,
+html[data-skin="retro-mac"] .tab.active {
+  background: repeating-linear-gradient(#ffffff, #ffffff 1px, #cfcfcf 1px, #cfcfcf 2px);
+  color: #000;
+}
+html[data-skin="retro-mac"] .tab { border: 1px solid #000; border-radius: 0; }
+/* Rounded-rect buttons; default (primary) gets the bold black ring */
+html[data-skin="retro-mac"] .btn-ghost,
+html[data-skin="retro-mac"] .foot-btn,
+html[data-skin="retro-mac"] .browse-btn,
+html[data-skin="retro-mac"] .reload-btn,
+html[data-skin="retro-mac"] .preview-bar button,
+html[data-skin="retro-mac"] .searchbar button {
+  background: #fff;
+  color: #000;
+  border: 1px solid #000;
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 #fff;
+}
+html[data-skin="retro-mac"] .launch-btn,
+html[data-skin="retro-mac"] .btn-primary {
+  background: #ececec;
+  color: #000;
+  border: 2px solid #000;
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px #000;
+}
+
+/* ============ Aqua (early Mac OS X) ============ */
+html[data-skin="aqua"] {
+  --bg: #d6dde5;
+  --bg-panel: #e8ecf0;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f0f4ff;
+  --border: #a9b4c2;
+  --text: #1a1a1a;
+  --text-dim: #5b6675;
+  --accent: #2a7fff;        /* Aqua blue */
+  --green: #3fae6b;
+  --orange: #e08b2e;
+  --red: #e0473a;
+  --term-bg: #000000;
+  --term-fg: #c7c7c7;
+  --term-sel: #2a7fff;
+}
+html[data-skin="aqua"] body,
+html[data-skin="aqua"] button,
+html[data-skin="aqua"] input,
+html[data-skin="aqua"] select,
+html[data-skin="aqua"] textarea {
+  font-family: "Lucida Grande", "Helvetica Neue", "Segoe UI", sans-serif;
+}
+/* Subtle pinstripe on the main surfaces */
+html[data-skin="aqua"] .sidebar,
+html[data-skin="aqua"] .tabbar {
+  background-image: repeating-linear-gradient(rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, .03) 2px 4px);
+}
+/* Glossy lozenge buttons */
+html[data-skin="aqua"] .btn-ghost,
+html[data-skin="aqua"] .foot-btn,
+html[data-skin="aqua"] .browse-btn,
+html[data-skin="aqua"] .reload-btn,
+html[data-skin="aqua"] .preview-bar button,
+html[data-skin="aqua"] .searchbar button {
+  background: linear-gradient(#ffffff, #dde6f2);
+  color: #1a2740;
+  border: 1px solid #9fb0c8;
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9);
+}
+html[data-skin="aqua"] .launch-btn,
+html[data-skin="aqua"] .btn-primary {
+  background: linear-gradient(#7fc0ff, #1f6fe0);
+  color: #fff;
+  border: 1px solid #1858b8;
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7);
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, .2);
+}
+html[data-skin="aqua"] .tab,
+html[data-skin="aqua"] .project-card,
+html[data-skin="aqua"] input,
+html[data-skin="aqua"] select,
+html[data-skin="aqua"] textarea {
+  border-radius: 8px;
+}
+
+/* ============ Terminal (green CRT) ============ */
+html[data-skin="terminal"] {
+  --bg: #000000;
+  --bg-panel: #001100;
+  --bg-card: #001a00;
+  --bg-card-hover: #002600;
+  --border: #00aa00;
+  --text: #33ff33;
+  --text-dim: #1faa1f;
+  --accent: #33ff33;
+  --green: #33ff33;
+  --orange: #ffcc00;
+  --red: #ff5555;
+  --term-bg: #000000;
+  --term-fg: #33ff33;
+  --term-sel: #004400;
+}
+html[data-skin="terminal"] body,
+html[data-skin="terminal"] button,
+html[data-skin="terminal"] input,
+html[data-skin="terminal"] select,
+html[data-skin="terminal"] textarea {
+  font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+}
+/* Phosphor glow + square chrome */
+html[data-skin="terminal"] .brand-title,
+html[data-skin="terminal"] .tab-title,
+html[data-skin="terminal"] .pc-label,
+html[data-skin="terminal"] .launch-btn,
+html[data-skin="terminal"] .btn-primary {
+  text-shadow: 0 0 3px currentColor;
+}
+html[data-skin="terminal"] .project-card,
+html[data-skin="terminal"] .modal-box,
+html[data-skin="terminal"] .tab,
+html[data-skin="terminal"] input,
+html[data-skin="terminal"] select,
+html[data-skin="terminal"] textarea,
+html[data-skin="terminal"] .launch-btn,
+html[data-skin="terminal"] .btn-primary,
+html[data-skin="terminal"] .btn-ghost,
+html[data-skin="terminal"] .foot-btn,
+html[data-skin="terminal"] .browse-btn,
+html[data-skin="terminal"] .reload-btn {
+  border-radius: 0 !important;
+}
+html[data-skin="terminal"] .launch-btn,
+html[data-skin="terminal"] .btn-primary,
+html[data-skin="terminal"] .btn-ghost,
+html[data-skin="terminal"] .foot-btn,
+html[data-skin="terminal"] .browse-btn,
+html[data-skin="terminal"] .reload-btn {
+  background: #001a00;
+  color: #33ff33;
+  border: 1px solid #00aa00;
+}
+html[data-skin="terminal"] .launch-btn:hover,
+html[data-skin="terminal"] .btn-primary:hover,
+html[data-skin="terminal"] .foot-btn:hover,
+html[data-skin="terminal"] .browse-btn:hover {
+  background: #002600;
+  box-shadow: 0 0 6px rgba(51, 255, 51, .5);
+}
+/* Scanline overlay (non-interactive) */
+html[data-skin="terminal"] .app::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(rgba(0, 0, 0, 0) 0 2px, rgba(0, 255, 0, .045) 2px 3px);
+}

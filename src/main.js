@@ -40,6 +40,9 @@ const I18N = {
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
     grp_sessions: "Sessies", set_persist: "Sessies onthouden en bij opstarten hervatten",
+    grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
+    skin_default: "Standaard (donker)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
+    skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     restore_failed: "Hervatten mislukt voor:",
     err_need_project: "✗ Minstens één project met naam én pad nodig.",
   },
@@ -80,6 +83,9 @@ const I18N = {
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
     grp_sessions: "Sessions", set_persist: "Remember sessions and resume on startup",
+    grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
+    skin_default: "Default (dark)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
+    skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     restore_failed: "Could not resume:",
     err_need_project: "✗ Need at least one project with a name and a path.",
   },
@@ -121,6 +127,35 @@ async function applyBranding() {
   if (b.windowTitle) {
     document.title = b.windowTitle;
     try { window.__TAURI__.window.getCurrentWindow().setTitle(b.windowTitle); } catch (_) {}
+  }
+  // Skin-default uit branding onthouden en de effectieve skin toepassen:
+  // expliciete keuze in Instellingen wint, anders de branding-default, anders default.
+  brandingSkin = (b.skin || "").trim();
+  applySkin(settings.skin || brandingSkin || "default");
+}
+
+/* ============ skins ============ */
+// De gekozen skin hangt als data-skin op <html>; skins.css doet de rest.
+// "default" / leeg = geen attribuut (gewoon :root). Het terminal-thema leest de
+// --term-* variabelen zodat de skin ook in de xterm-terminal doorwerkt.
+let brandingSkin = "";
+function termThemeFromCss(accent) {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
+  return {
+    background: v("--term-bg", "#14161c"),
+    foreground: v("--term-fg", "#e6e8ee"),
+    cursor: accent || "#7c9cff",
+    selectionBackground: v("--term-sel", "#33405c"),
+  };
+}
+function applySkin(name) {
+  const skin = name && name !== "default" ? name : "";
+  if (skin) document.documentElement.setAttribute("data-skin", skin);
+  else document.documentElement.removeAttribute("data-skin");
+  // Open terminals her-thematiseren (cursor blijft de project-accent).
+  for (const s of sessions.values()) {
+    try { s.term.options.theme = termThemeFromCss(s.accent); } catch (_) {}
   }
 }
 
@@ -223,6 +258,7 @@ const DEFAULT_SETTINGS = {
   webLinks: true, search: true, tabShortcuts: true, tabStatus: true,
   fullPaths: true,
   persistSessions: true,
+  skin: "", // "" = volg branding-default / anders "default"
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -379,7 +415,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   const term = new window.Terminal({
     fontFamily: '"Cascadia Code", Consolas, "Courier New", monospace',
     fontSize: settings.fontSize, cursorBlink: settings.cursorBlink, scrollback: settings.scrollback,
-    theme: { background: "#14161c", foreground: "#e6e8ee", cursor: accent, selectionBackground: "#33405c" },
+    theme: termThemeFromCss(accent),
   });
   const fit = new window.FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -779,6 +815,8 @@ function openSettings() {
   els.setTabStatus.checked = settings.tabStatus;
   els.setFullPaths.checked = settings.fullPaths;
   els.setPersist.checked = settings.persistSessions;
+  // Toon de effectieve skin: expliciete keuze, anders de branding-default.
+  els.setSkin.value = settings.skin || brandingSkin || "default";
   els.settingsModal.classList.remove("hidden");
 }
 function saveSettingsFromForm() {
@@ -797,6 +835,8 @@ function saveSettingsFromForm() {
   settings.tabStatus = els.setTabStatus.checked;
   settings.fullPaths = els.setFullPaths.checked;
   settings.persistSessions = els.setPersist.checked;
+  settings.skin = els.setSkin.value;
+  applySkin(settings.skin);
   saveSettings();
   persistSessionsToDisk();
   for (const s of sessions.values()) {
@@ -964,6 +1004,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabStatus: document.querySelector("#set-tabstatus"),
     setFullPaths: document.querySelector("#set-fullpaths"),
     setPersist: document.querySelector("#set-persist"),
+    setSkin: document.querySelector("#set-skin"),
     toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
     agentInput: document.querySelector("#agent-input"),
@@ -1012,6 +1053,9 @@ window.addEventListener("DOMContentLoaded", () => {
 
   loadSettings();
   applyI18n();
+  // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
+  // daarna eventueel de branding-default in als er geen keuze is gemaakt.
+  if (settings.skin) applySkin(settings.skin);
   applyBranding();
   renderTabs();
   loadProjects();
