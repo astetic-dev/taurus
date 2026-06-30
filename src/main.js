@@ -45,6 +45,7 @@ const I18N = {
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
     restore_failed: "Hervatten mislukt voor:",
+    copy_failed: "✗ Kopiëren naar klembord mislukt:",
     err_need_project: "✗ Minstens één project met naam én pad nodig.",
   },
   en: {
@@ -89,6 +90,7 @@ const I18N = {
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
     restore_failed: "Could not resume:",
+    copy_failed: "✗ Copy to clipboard failed:",
     err_need_project: "✗ Need at least one project with a name and a path.",
   },
 };
@@ -351,9 +353,21 @@ function saveSettings() { localStorage.setItem("taurus.settings", JSON.stringify
 // write in de webview blokkeren (kopieren-bij-selectie en Ctrl+Shift+C deden
 // niets meer), terwijl het OS-klembord prima werkt -- zie issue #17. De fout
 // niet langer stil wegslikken: loggen naar de console.
+// Diagnoselog naar %APPDATA%\Taurus\clipboard.log (alleen metadata, geen inhoud).
+// Helpt intermitterende kopieer/plak-problemen debuggen zonder devtools.
+function dbg(line) {
+  try { invoke("debug_log", { line: `[${new Date().toISOString()}] ${line}` }); } catch (_) {}
+}
 function copyToClipboard(text) {
-  if (!text) return;
-  invoke("copy_to_clipboard", { text }).catch((e) => console.error("clipboard copy failed:", e));
+  if (!text) { dbg("copy skipped (empty selection)"); return; }
+  dbg(`copy attempt len=${text.length}`);
+  invoke("copy_to_clipboard", { text })
+    .then(() => dbg(`copy ok len=${text.length}`))
+    .catch((e) => {
+      dbg(`copy FAIL: ${e}`);
+      console.error("clipboard copy failed:", e);
+      toast(t("copy_failed") + " " + e, "err");
+    });
 }
 function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
@@ -506,17 +520,37 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
     exited: false, working: false, awaiting: false, status: null, lastSpin: 0, buf: "",
-    decoder: new TextDecoder("utf-8"), previewMode: null,
+    decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
   };
   sessions.set(id, session);
 
   term.onData((d) => invoke("write_session", { id, data: d }));
   term.onResize(({ cols, rows }) => invoke("resize_session", { id, cols, rows }));
-  term.onSelectionChange(() => { if (settings.copyOnSelect) { const sel = term.getSelection(); if (sel) copyToClipboard(sel); } });
+  // Kopieren bij selectie: terwijl Claude streamt of een prompt hertekent wist
+  // xterm de selectie, vaak voordat we 'm kunnen lezen. Daarom leggen we de
+  // laatste niet-lege selectie vast tijdens het slepen en kopieren we pas bij
+  // muisknop-loslaten -- dat overleeft de herteken-wis.
+  term.onSelectionChange(() => { const sel = term.getSelection(); if (sel) session.lastSel = sel; });
+  termPane.addEventListener("mousedown", (e) => { if (e.button === 0) session.lastSel = ""; });
+  termPane.addEventListener("mouseup", (e) => {
+    if (e.button !== 0 || !settings.copyOnSelect) return;
+    const sel = term.getSelection() || session.lastSel;
+    if (sel) copyToClipboard(sel);
+  });
+  // Rechtermuis-plak met debounce: een enkele rechtsklik mag niet twee keer
+  // plakken (dubbele event/echo). Negeer een tweede plak binnen 250 ms.
+  let lastPasteAt = 0;
   termPane.addEventListener("contextmenu", async (e) => {
     if (!settings.pasteOnRightClick) return;
     e.preventDefault();
-    try { const txt = await navigator.clipboard.readText(); if (txt) invoke("write_session", { id, data: txt }); } catch (_) {}
+    const now = Date.now();
+    if (now - lastPasteAt < 250) { dbg("paste IGNORED (debounce)"); return; }
+    lastPasteAt = now;
+    dbg("paste rightclick");
+    try {
+      const txt = await navigator.clipboard.readText();
+      if (txt) { invoke("write_session", { id, data: txt }); dbg(`paste wrote len=${txt.length}`); }
+    } catch (err) { dbg(`paste FAIL: ${err}`); }
   });
 
   el.querySelector(".preview-file").addEventListener("change", (e) => renderPreview(session, e.target.value));
@@ -1030,13 +1064,15 @@ document.addEventListener("keydown", (e) => {
   if (ctrl && e.key === "0") { e.preventDefault(); settings.fontSize = DEFAULT_SETTINGS.fontSize; saveSettings(); applyFontToTerms(); return; }
   if (settings.ctrlShiftCV && ctrl && e.shiftKey && (e.key === "C" || e.key === "c")) {
     const s = sessions.get(current);
-    if (s) { const sel = s.term.getSelection(); if (sel) { copyToClipboard(sel); e.preventDefault(); } }
+    // Val terug op de vastgelegde selectie als getSelection() leeg is (een
+    // herteken kan 'm net gewist hebben).
+    if (s) { const sel = s.term.getSelection() || s.lastSel; if (sel) { copyToClipboard(sel); e.preventDefault(); } }
     return;
   }
   if (settings.ctrlShiftCV && ctrl && e.shiftKey && (e.key === "V" || e.key === "v")) {
     e.preventDefault();
     const s = sessions.get(current);
-    if (s) navigator.clipboard.readText().then((txt) => txt && invoke("write_session", { id: s.id, data: txt })).catch(() => {});
+    if (s) navigator.clipboard.readText().then((txt) => { if (txt) { invoke("write_session", { id: s.id, data: txt }); dbg(`paste kbd len=${txt.length}`); } }).catch((err) => dbg(`paste kbd FAIL: ${err}`));
     return;
   }
   if (settings.search && ctrl && e.shiftKey && (e.key === "F" || e.key === "f")) { e.preventDefault(); openSearch(); return; }
