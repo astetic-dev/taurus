@@ -28,6 +28,7 @@ const I18N = {
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
     c_tabs: "Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude-status op de tab (✶ Orbiting…)",
+    c_mouse: "Agent mag de muis gebruiken (anders selecteert/scrolt de muis lokaal)",
     cancel: "Annuleer", save: "Opslaan",
     manage_projects: "Projecten beheren", add_project: "＋ Project toevoegen",
     cap_button: "▸ Knop in het linkermenu", cap_workdir: "Werkmap (lokaal C: of netwerk X:)",
@@ -73,6 +74,7 @@ const I18N = {
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
     c_tabs: "Tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude status on the tab (✶ Orbiting…)",
+    c_mouse: "Let the agent use the mouse (otherwise the mouse selects/scrolls locally)",
     cancel: "Cancel", save: "Save",
     manage_projects: "Manage projects", add_project: "＋ Add project",
     cap_button: "▸ Button in the left menu", cap_workdir: "Working folder (local C: or network X:)",
@@ -338,6 +340,7 @@ const DEFAULT_SETTINGS = {
   webLinks: true, search: true, tabShortcuts: true, tabStatus: true,
   fullPaths: true,
   persistSessions: true,
+  agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
 };
 let settings = { ...DEFAULT_SETTINGS };
@@ -517,6 +520,22 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   term.open(termPane);
   fit.fit();
 
+  // Muis-overname (mouse-tracking) van de agent onderscheppen. Een TUI zoals
+  // Claude Code zet via DECSET (ESC[?1000h..1006h) de muis-rapportage aan, zodat
+  // de muis naar de agent gaat i.p.v. naar lokale tekstselectie -- dan moet je
+  // Shift+slepen om te selecteren, en wordt een rechtsklik ook naar de agent
+  // gestuurd. Standaard (agentMouse uit) negeren we die sequenties via de
+  // parser-hook: gewoon slepen selecteert, het wiel scrollt de scrollback, en
+  // rechtsklik plakt enkel. Andere DECSET-modi (bracketed paste 2004, alt-screen
+  // 1049, cursor 25, ...) laten we ongemoeid. Aanzetten geeft de agent de muis terug.
+  const MOUSE_MODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
+  const firstParam = (params) => { const p = params && params.length ? params[0] : 0; return Array.isArray(p) ? (p[0] || 0) : (p || 0); };
+  const mouseGuard = (params) => (!settings.agentMouse && MOUSE_MODES.has(firstParam(params)));
+  if (term.parser && term.parser.registerCsiHandler) {
+    term.parser.registerCsiHandler({ prefix: "?", final: "h" }, mouseGuard); // DECSET (aan)
+    term.parser.registerCsiHandler({ prefix: "?", final: "l" }, mouseGuard); // DECRST (uit)
+  }
+
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
     exited: false, working: false, awaiting: false, status: null, lastSpin: 0, buf: "",
@@ -534,7 +553,6 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   let selTimer = null;
   term.onSelectionChange(() => {
     const sel = term.getSelection();
-    dbg(`selchange len=${sel ? sel.length : 0}`);
     if (sel) session.lastSel = sel;
     if (!settings.copyOnSelect) return;
     if (selTimer) clearTimeout(selTimer);
@@ -543,14 +561,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
       if (s) copyToClipboard(s);
     }, 120);
   });
-  // Diagnose: vuurt onze muis-listener wel, en staat de app in mouse-tracking
-  // mode (dan grijpt de TUI de muis en ontstaat er geen xterm-selectie)?
-  termPane.addEventListener("mousedown", (e) => {
-    if (e.button === 0) session.lastSel = "";
-    let mm = "?"; try { mm = (term.modes && term.modes.mouseTrackingMode) || "none"; } catch (_) {}
-    dbg(`mousedown btn=${e.button} copyOnSelect=${settings.copyOnSelect} mouseMode=${mm}`);
-  });
-  termPane.addEventListener("mouseup", (e) => { dbg(`mouseup btn=${e.button} getSel=${term.getSelection().length}`); });
+  termPane.addEventListener("mousedown", (e) => { if (e.button === 0) session.lastSel = ""; });
   // Voorkom dat de RECHTERknop als muis-event naar de TUI gaat (mouseMode=any):
   // anders plakt Claude Code op die rechtsklik OOK zelf het klembord -> de tekst
   // verschijnt dubbel. We laten de linkerknop ongemoeid (klikken en
@@ -942,6 +953,7 @@ function openSettings() {
   els.htmlFull.checked = settings.htmlView === "full";
   els.setCopy.checked = settings.copyOnSelect;
   els.setPaste.checked = settings.pasteOnRightClick;
+  els.setAgentMouse.checked = settings.agentMouse;
   els.setCtrl.checked = settings.ctrlShiftCV;
   els.setLinks.checked = settings.webLinks;
   els.setSearch.checked = settings.search;
@@ -963,6 +975,7 @@ function saveSettingsFromForm() {
   settings.htmlView = els.htmlFull.checked ? "full" : "split";
   settings.copyOnSelect = els.setCopy.checked;
   settings.pasteOnRightClick = els.setPaste.checked;
+  settings.agentMouse = els.setAgentMouse.checked;
   settings.ctrlShiftCV = els.setCtrl.checked;
   settings.webLinks = els.setLinks.checked;
   settings.search = els.setSearch.checked;
@@ -1134,6 +1147,7 @@ window.addEventListener("DOMContentLoaded", () => {
     htmlFull: document.querySelector("#set-html-full"),
     setCopy: document.querySelector("#set-copyselect"),
     setPaste: document.querySelector("#set-pasteright"),
+    setAgentMouse: document.querySelector("#set-agentmouse"),
     setCtrl: document.querySelector("#set-ctrlshift"),
     setLinks: document.querySelector("#set-weblinks"),
     setSearch: document.querySelector("#set-search"),
