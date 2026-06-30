@@ -144,6 +144,11 @@ Taurus; remove it to get Taurus back. Every field is optional:
   `--text`, `--text-dim`, `--accent` (and `--term-bg` / `--term-fg` / `--term-sel`
   for the terminal).
 - `skin` sets the **default theme** (see *Skins* below).
+- `font` sets the UI font family (e.g. `"'IBM Plex Mono', monospace"`). IBM Plex
+  Mono ships bundled (offline); any installed/CSS font name also works.
+- `garble` (`true`/`false`) toggles the hover **letter-scramble** effect on the
+  sidebar buttons, project cards and tab titles. It's on by default for a branded
+  theme; set `false` to disable.
 - `logo` is an absolute path; it's read at startup and inlined as a data URI.
 - The in-app branding above is runtime/config-driven. To also change the
   **installer** product name / identifier (baked into the bundle), build with a
