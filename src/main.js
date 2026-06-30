@@ -551,6 +551,14 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     dbg(`mousedown btn=${e.button} copyOnSelect=${settings.copyOnSelect} mouseMode=${mm}`);
   });
   termPane.addEventListener("mouseup", (e) => { dbg(`mouseup btn=${e.button} getSel=${term.getSelection().length}`); });
+  // Voorkom dat de RECHTERknop als muis-event naar de TUI gaat (mouseMode=any):
+  // anders plakt Claude Code op die rechtsklik OOK zelf het klembord -> de tekst
+  // verschijnt dubbel. We laten de linkerknop ongemoeid (klikken en
+  // Shift-selecteren in de TUI blijven werken). De capture-fase op het paneel
+  // draait voor xterm's eigen muis-handlers, zodat xterm de knop niet doorstuurt.
+  const swallowRightBtn = (e) => { if (settings.pasteOnRightClick && e.button === 2) e.stopPropagation(); };
+  termPane.addEventListener("mousedown", swallowRightBtn, true);
+  termPane.addEventListener("mouseup", swallowRightBtn, true);
   // Rechtermuis-plak met debounce: een enkele rechtsklik mag niet twee keer
   // plakken (dubbele event/echo). Negeer een tweede plak binnen 250 ms.
   let lastPasteAt = 0;
