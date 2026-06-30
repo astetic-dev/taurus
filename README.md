@@ -117,6 +117,34 @@ Edit them with the in-app **Projects** editor, or by hand. Format:
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
 
+## Branding (white-label)
+
+You can rebrand the launcher — app name, subtitle, logo, colours, window title —
+**without forking or editing code**. Drop an optional `branding.json` in
+`%APPDATA%\Taurus\` (next to `projects.json`). Without the file the build is
+plain Taurus; remove it to get Taurus back. Every field is optional:
+
+```json
+{
+  "appName": "Acme Agent Launcher",
+  "subtitle": "Acme Corp",
+  "logo": "C:\\ProgramData\\Acme\\logo.png",
+  "windowTitle": "Acme Agent Launcher",
+  "theme": { "--accent": "#3b82f6", "--bg": "#0b1220", "--bg-panel": "#11182a" }
+}
+```
+
+- `theme` overrides the CSS variables in `src/styles.css` `:root` — the themeable
+  ones are `--bg`, `--bg-panel`, `--bg-card`, `--bg-card-hover`, `--border`,
+  `--text`, `--text-dim`, `--accent`.
+- `logo` is an absolute path; it's read at startup and inlined as a data URI.
+- The in-app branding above is runtime/config-driven. To also change the
+  **installer** product name / identifier (baked into the bundle), build with a
+  Tauri config overlay: `npm run tauri build -- --config <overlay>.json`.
+
+> Keep brand assets out of this repo: `branding.json` and `src/*-logo.png` are
+> git-ignored. A real brand lives only in the local config, never committed.
+
 ## How it works
 
 - Frontend: `src/` — vanilla HTML/CSS/JS (xterm.js vendored in `src/vendor/`).

@@ -92,6 +92,38 @@ function applyI18n() {
   document.documentElement.lang = settings.lang || "nl";
 }
 
+/* ============ white-label branding ============ */
+// Optionele branding uit %APPDATA%\Taurus\branding.json (via de Rust-command).
+// Lege velden = geen override, dus zonder bestand blijft alles gewoon Taurus.
+// Draait NA applyI18n zodat een ingestelde ondertitel niet overschreven wordt.
+async function applyBranding() {
+  let b;
+  try { b = await invoke("branding"); } catch (_) { return; }
+  if (!b) return;
+  if (b.appName) {
+    const el = document.querySelector(".brand-title");
+    if (el) el.textContent = b.appName;
+  }
+  if (b.subtitle) {
+    const el = document.querySelector(".brand-sub");
+    // data-i18n weghalen zodat een taalwissel de ondertitel niet terugzet.
+    if (el) { el.textContent = b.subtitle; el.removeAttribute("data-i18n"); }
+  }
+  if (b.logoDataUri) {
+    const img = document.querySelector(".brand-logo");
+    if (img) img.src = b.logoDataUri;
+  }
+  if (b.theme && typeof b.theme === "object") {
+    for (const [k, v] of Object.entries(b.theme)) {
+      if (/^--[\w-]+$/.test(k) && typeof v === "string") document.documentElement.style.setProperty(k, v);
+    }
+  }
+  if (b.windowTitle) {
+    document.title = b.windowTitle;
+    try { window.__TAURI__.window.getCurrentWindow().setTitle(b.windowTitle); } catch (_) {}
+  }
+}
+
 /* ============ agents + modellen ============ */
 // Welke agent-CLIs Taurus kan starten. De losse gemini-CLI is end-of-life en
 // staat hier bewust niet bij; "agy" is de ondersteunde Gemini-agent.
@@ -980,6 +1012,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   loadSettings();
   applyI18n();
+  applyBranding();
   renderTabs();
   loadProjects();
   restoreSessions();
