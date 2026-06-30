@@ -526,17 +526,31 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
   term.onData((d) => invoke("write_session", { id, data: d }));
   term.onResize(({ cols, rows }) => invoke("resize_session", { id, cols, rows }));
-  // Kopieren bij selectie: terwijl Claude streamt of een prompt hertekent wist
-  // xterm de selectie, vaak voordat we 'm kunnen lezen. Daarom leggen we de
-  // laatste niet-lege selectie vast tijdens het slepen en kopieren we pas bij
-  // muisknop-loslaten -- dat overleeft de herteken-wis.
-  term.onSelectionChange(() => { const sel = term.getSelection(); if (sel) session.lastSel = sel; });
-  termPane.addEventListener("mousedown", (e) => { if (e.button === 0) session.lastSel = ""; });
-  termPane.addEventListener("mouseup", (e) => {
-    if (e.button !== 0 || !settings.copyOnSelect) return;
-    const sel = term.getSelection() || session.lastSel;
-    if (sel) copyToClipboard(sel);
+  // Kopieren bij selectie via xterm's onSelectionChange (vuurt betrouwbaar; een
+  // DOM mouseup op het paneel komt niet door xterm's eigen muis-afhandeling).
+  // We leggen de laatste niet-lege selectie vast en kopieren met een korte
+  // debounce -- niet bij elke tussenstap (spam/contentie), en als een herteken
+  // (streaming/prompt) de selectie net wist, kopieren we de vastgelegde tekst.
+  let selTimer = null;
+  term.onSelectionChange(() => {
+    const sel = term.getSelection();
+    dbg(`selchange len=${sel ? sel.length : 0}`);
+    if (sel) session.lastSel = sel;
+    if (!settings.copyOnSelect) return;
+    if (selTimer) clearTimeout(selTimer);
+    selTimer = setTimeout(() => {
+      const s = term.getSelection() || session.lastSel;
+      if (s) copyToClipboard(s);
+    }, 120);
   });
+  // Diagnose: vuurt onze muis-listener wel, en staat de app in mouse-tracking
+  // mode (dan grijpt de TUI de muis en ontstaat er geen xterm-selectie)?
+  termPane.addEventListener("mousedown", (e) => {
+    if (e.button === 0) session.lastSel = "";
+    let mm = "?"; try { mm = (term.modes && term.modes.mouseTrackingMode) || "none"; } catch (_) {}
+    dbg(`mousedown btn=${e.button} copyOnSelect=${settings.copyOnSelect} mouseMode=${mm}`);
+  });
+  termPane.addEventListener("mouseup", (e) => { dbg(`mouseup btn=${e.button} getSel=${term.getSelection().length}`); });
   // Rechtermuis-plak met debounce: een enkele rechtsklik mag niet twee keer
   // plakken (dubbele event/echo). Negeer een tweede plak binnen 250 ms.
   let lastPasteAt = 0;
