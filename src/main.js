@@ -120,8 +120,18 @@ async function applyBranding() {
     if (img) img.src = b.logoDataUri;
   }
   if (b.theme && typeof b.theme === "object") {
-    for (const [k, v] of Object.entries(b.theme)) {
-      if (/^--[\w-]+$/.test(k) && typeof v === "string") document.documentElement.style.setProperty(k, v);
+    // Thema-variabelen in een <style>:root{}-blok i.p.v. inline op <html>.
+    // Inline-stijl wint qua specificiteit van een skin-regel; via :root kan een
+    // gekozen skin (html[data-skin=…]) er juist netjes overheen winnen, terwijl
+    // de branding-default boven de basis-:root blijft (latere cascade).
+    const decls = Object.entries(b.theme)
+      .filter(([k, v]) => /^--[\w-]+$/.test(k) && typeof v === "string" && !/[<>{}]/.test(v))
+      .map(([k, v]) => `${k}: ${v};`)
+      .join(" ");
+    if (decls) {
+      let st = document.getElementById("taurus-branding");
+      if (!st) { st = document.createElement("style"); st.id = "taurus-branding"; document.head.appendChild(st); }
+      st.textContent = `:root { ${decls} }`;
     }
   }
   if (b.windowTitle) {
