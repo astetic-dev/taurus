@@ -3927,7 +3927,7 @@ dependencies = [
 
 [[package]]
 name = "taurus"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "portable-pty",
  "serde",
