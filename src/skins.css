@@ -15,6 +15,22 @@
    data-URI SVGs.
    ========================================================================== */
 
+/* ============ Brand skin (from branding.json) ============ */
+/* Het merk-logo is meestal een woordmerk: toon het zo groot mogelijk, van rand
+   tot rand met een kleine marge, gestapeld boven naam/ondertitel. */
+html[data-skin="brand"] .brand {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px 2px 14px;
+}
+html[data-skin="brand"] .brand-logo {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 6px;
+  filter: none;
+}
+
 /* ============ Retro Windows (95/98) ============ */
 html[data-skin="retro-win"] {
   --bg: #008080;            /* desktop teal */

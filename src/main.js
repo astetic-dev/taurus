@@ -119,7 +119,9 @@ async function applyBranding() {
   }
   if (b.logoDataUri) {
     const img = document.querySelector(".brand-logo");
-    if (img) img.src = b.logoDataUri;
+    // Geen drop-shadow op een eigen logo (dat oogt rommelig op een lichte/eigen
+    // achtergrond); de meeste merklogo's hebben hun eigen vorm/marge al.
+    if (img) { img.src = b.logoDataUri; img.style.filter = "none"; }
   }
   if (b.theme && typeof b.theme === "object") {
     // Het branding-thema wordt een eigen, selecteerbare skin "brand": de vars
@@ -129,13 +131,16 @@ async function applyBranding() {
     // dus niets merkspecifieks in de publieke code.
     const decls = Object.entries(b.theme)
       .filter(([k, v]) => /^--[\w-]+$/.test(k) && typeof v === "string" && !/[<>{}]/.test(v))
-      .map(([k, v]) => `${k}: ${v};`)
-      .join(" ");
-    if (decls) {
+      .map(([k, v]) => `${k}: ${v};`);
+    // Optioneel UI-lettertype hoort bij de merk-skin (overschrijft --ui-font).
+    if (typeof b.font === "string" && b.font.trim() && !/[<>{};]/.test(b.font)) {
+      decls.push(`--ui-font: ${b.font.trim()};`);
+    }
+    if (decls.length) {
       brandHasTheme = true;
       let st = document.getElementById("taurus-branding");
       if (!st) { st = document.createElement("style"); st.id = "taurus-branding"; document.head.appendChild(st); }
-      st.textContent = `html[data-skin="brand"] { ${decls} }`;
+      st.textContent = `html[data-skin="brand"] { ${decls.join(" ")} }`;
       addBrandSkinOption(b.subtitle || b.appName || "Custom");
     }
   }
@@ -143,6 +148,8 @@ async function applyBranding() {
     document.title = b.windowTitle;
     try { window.__TAURI__.window.getCurrentWindow().setTitle(b.windowTitle); } catch (_) {}
   }
+  // Branding mag het garble-effect uitzetten (garble:false).
+  if (b.garble === false) brandGarble = false;
   // Effectieve skin: expliciete keuze in Instellingen wint, anders de
   // branding-default-skin, anders de "brand"-skin (als er een thema is), anders
   // gewoon Taurus.
@@ -181,10 +188,53 @@ function applySkin(name) {
   const skin = name && name !== "default" ? name : "";
   if (skin) document.documentElement.setAttribute("data-skin", skin);
   else document.documentElement.removeAttribute("data-skin");
+  // Garble-effect: standaard alleen aan voor merk-skins; branding kan het
+  // uitzetten (garble:false). GARBLE_SKINS is bewust een set zodat het later
+  // triviaal naar andere skins uit te breiden is.
+  garbleEnabled = GARBLE_SKINS.has(skin) && brandGarble !== false;
   // Open terminals her-thematiseren (cursor blijft de project-accent).
   for (const s of sessions.values()) {
     try { s.term.options.theme = termThemeFromCss(s.accent); } catch (_) {}
   }
+}
+
+/* ============ garble (letter-scramble op hover) ============ */
+// Editorial micro-interactie: bij hover scrambelt het label kort met willekeurige
+// tekens en lost dan op naar de echte tekst. Generiek, maar gated per skin.
+const GARBLE_SKINS = new Set(["brand"]);
+const GARBLE_SELECTOR = ".foot-btn, .project-card .pc-label, .tab-title";
+const GARBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#%&@*<>/\\";
+let garbleEnabled = false;
+let brandGarble = null; // null = default; false = branding zette het uit
+const garbling = new WeakSet();
+function scramble(el) {
+  if (garbling.has(el)) return;
+  const original = el.textContent;
+  if (!original || !original.trim()) return;
+  garbling.add(el);
+  const len = original.length;
+  let frame = 0;
+  const id = setInterval(() => {
+    // Tabs/kaarten worden vaak opnieuw gerenderd: als het element verdwijnt,
+    // stop netjes (we schrijven anders naar een losgekoppelde node).
+    if (!el.isConnected) { clearInterval(id); garbling.delete(el); return; }
+    const revealed = Math.max(0, frame - 5); // eerst even volledig scrambelen
+    let out = "";
+    for (let i = 0; i < len; i++) {
+      const ch = original[i];
+      out += (i < revealed || ch === " ") ? ch : GARBLE_CHARS[(Math.random() * GARBLE_CHARS.length) | 0];
+    }
+    el.textContent = out;
+    frame++;
+    if (revealed >= len) { clearInterval(id); el.textContent = original; garbling.delete(el); }
+  }, 28);
+}
+function wireGarble() {
+  document.addEventListener("mouseover", (e) => {
+    if (!garbleEnabled || !e.target || !e.target.closest) return;
+    const el = e.target.closest(GARBLE_SELECTOR);
+    if (el) scramble(el);
+  });
 }
 
 /* ============ agents + modellen ============ */
@@ -1082,6 +1132,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   loadSettings();
   applyI18n();
+  wireGarble();
   // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);

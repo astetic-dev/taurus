@@ -144,6 +144,11 @@ Taurus; remove it to get Taurus back. Every field is optional:
   `--text`, `--text-dim`, `--accent` (and `--term-bg` / `--term-fg` / `--term-sel`
   for the terminal).
 - `skin` sets the **default theme** (see *Skins* below).
+- `font` sets the UI font family (e.g. `"'IBM Plex Mono', monospace"`). IBM Plex
+  Mono ships bundled (offline); any installed/CSS font name also works.
+- `garble` (`true`/`false`) toggles the hover **letter-scramble** effect on the
+  sidebar buttons, project cards and tab titles. It's on by default for a branded
+  theme; set `false` to disable.
 - `logo` is an absolute path; it's read at startup and inlined as a data URI.
 - The in-app branding above is runtime/config-driven. To also change the
   **installer** product name / identifier (baked into the bundle), build with a
@@ -175,6 +180,24 @@ modern skins are palette-only.
 
 > Keep brand assets out of this repo: `branding.json` and `src/*-logo.png` are
 > git-ignored. A real brand lives only in the local config, never committed.
+
+### Portable / pre-branded distribution
+
+`branding.json` is read from `%APPDATA%\Taurus\` **or**, as a fallback, from the
+folder next to `taurus.exe`. A relative `logo` path resolves against the folder
+the `branding.json` was found in. So a self-contained, pre-branded build is just
+a folder you can zip and hand out:
+
+```
+MyBrand Agent Launcher/
+  taurus.exe          (rename freely, e.g. "MyBrand Agent Launcher.exe")
+  branding.json       ("logo": "logo.png", relative)
+  logo.png
+```
+
+Unzip and run — no setup. A `branding.json` in `%APPDATA%\Taurus\` takes
+precedence over the one next to the exe. To also rebrand the installer's product
+name, build with a Tauri config overlay (`--config`).
 
 ## How it works
 
