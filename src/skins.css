@@ -8,6 +8,11 @@
 
    Terminal colours ride along via --term-bg / --term-fg / --term-sel, which
    spawnTerminal() reads (see main.js); switching re-themes open terminals.
+
+   Retro-Windows detailing (bevels, title-bar gradient, scrollbars, controls)
+   follows the recipes from 98.css (MIT, https://jdan.github.io/98.css/),
+   adapted onto Taurus' own selectors. No external assets — controls use inline
+   data-URI SVGs.
    ========================================================================== */
 
 /* ============ Retro Windows (95/98) ============ */
@@ -34,7 +39,7 @@ html[data-skin="retro-win"] select,
 html[data-skin="retro-win"] textarea {
   font-family: "MS Sans Serif", Tahoma, "Segoe UI", sans-serif;
 }
-/* Square everything; raised 3D chrome */
+/* Square chrome */
 html[data-skin="retro-win"] .project-card,
 html[data-skin="retro-win"] .modal-box,
 html[data-skin="retro-win"] .tab,
@@ -49,7 +54,7 @@ html[data-skin="retro-win"] .browse-btn,
 html[data-skin="retro-win"] .reload-btn {
   border-radius: 0 !important;
 }
-/* Raised button bevel (white top-left, dark bottom-right) */
+/* Raised 3D bevel — exact Win98 recipe (98.css), no extra border */
 html[data-skin="retro-win"] .launch-btn,
 html[data-skin="retro-win"] .btn-primary,
 html[data-skin="retro-win"] .btn-ghost,
@@ -61,8 +66,8 @@ html[data-skin="retro-win"] .searchbar button,
 html[data-skin="retro-win"] .project-card {
   background: #c0c0c0;
   color: #000;
-  border: 1px solid #000;
-  box-shadow: inset 1px 1px #fff, inset -1px -1px #808080, inset 2px 2px #dfdfdf, inset -2px -2px #000;
+  border: none;
+  box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf;
 }
 html[data-skin="retro-win"] .launch-btn:active,
 html[data-skin="retro-win"] .btn-primary:active,
@@ -71,22 +76,85 @@ html[data-skin="retro-win"] .foot-btn:active,
 html[data-skin="retro-win"] .browse-btn:active,
 html[data-skin="retro-win"] .project-card:active,
 html[data-skin="retro-win"] .project-card.selected {
-  box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #000;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #0a0a0a, inset -2px -2px #dfdfdf, inset 2px 2px #808080;
 }
-/* houd de project-tekst leesbaar op het grijze 3D-vlak */
 html[data-skin="retro-win"] .project-card .pc-label { color: #000; }
-/* Sunken inputs */
-html[data-skin="retro-win"] input,
+/* Dotted focus rectangle (Win98) */
+html[data-skin="retro-win"] .launch-btn:focus,
+html[data-skin="retro-win"] .btn-primary:focus,
+html[data-skin="retro-win"] .btn-ghost:focus,
+html[data-skin="retro-win"] .foot-btn:focus,
+html[data-skin="retro-win"] .browse-btn:focus {
+  outline: 1px dotted #000;
+  outline-offset: -4px;
+}
+/* Sunken text fields (not checkbox/radio) */
+html[data-skin="retro-win"] input:not([type="checkbox"]):not([type="radio"]),
 html[data-skin="retro-win"] select,
 html[data-skin="retro-win"] textarea {
   background: #fff;
-  border: 1px solid #000;
-  box-shadow: inset 1px 1px #808080, inset -1px -1px #fff;
+  color: #000;
+  border: none;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #0a0a0a;
 }
-/* Active tab = navy title bar */
+/* Win98 checkboxes & radios (inline SVG check/dot — no external assets) */
+html[data-skin="retro-win"] input[type="checkbox"],
+html[data-skin="retro-win"] input[type="radio"] {
+  appearance: none; -webkit-appearance: none;
+  width: 13px; height: 13px; margin: 0 6px 0 0; padding: 0; flex: none;
+  background: #fff; border: none;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #0a0a0a;
+  background-repeat: no-repeat; background-position: center;
+}
+html[data-skin="retro-win"] input[type="radio"] { border-radius: 50%; }
+html[data-skin="retro-win"] input[type="checkbox"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='13'%20height='13'%3E%3Cpath%20d='M2%206%20L5%209%20L11%203'%20stroke='black'%20stroke-width='2'%20fill='none'/%3E%3C/svg%3E");
+}
+html[data-skin="retro-win"] input[type="radio"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='13'%20height='13'%3E%3Ccircle%20cx='6.5'%20cy='6.5'%20r='2.5'%20fill='black'/%3E%3C/svg%3E");
+}
+/* Tabs: inactive raised silver, active = title-bar gradient */
+html[data-skin="retro-win"] .tab {
+  background: #c0c0c0; color: #000; border: none;
+  box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf;
+}
 html[data-skin="retro-win"] .tab.active {
-  background: #000080;
-  color: #fff;
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #fff; font-weight: 700; border: none; box-shadow: none;
+}
+/* Window/dialog as a raised Win98 frame */
+html[data-skin="retro-win"] .modal-box {
+  background: #c0c0c0; border: none;
+  box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf;
+}
+/* Win98 scrollbars (DOM areas: project list, modals, preview) */
+html[data-skin="retro-win"] ::-webkit-scrollbar { width: 16px; height: 16px; }
+html[data-skin="retro-win"] ::-webkit-scrollbar-track {
+  background: #c0c0c0;
+  background-image: repeating-conic-gradient(#c0c0c0 0% 25%, #d8d8d8 0% 50%);
+  background-size: 2px 2px;
+}
+html[data-skin="retro-win"] ::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf;
+}
+html[data-skin="retro-win"] ::-webkit-scrollbar-button {
+  display: block; height: 16px; width: 16px;
+  background: #c0c0c0;
+  box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf;
+  background-repeat: no-repeat; background-position: center;
+}
+html[data-skin="retro-win"] ::-webkit-scrollbar-button:vertical:start {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%3E%3Cpath%20d='M8%205%20L12%2010%20L4%2010%20Z'%20fill='black'/%3E%3C/svg%3E");
+}
+html[data-skin="retro-win"] ::-webkit-scrollbar-button:vertical:end {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%3E%3Cpath%20d='M8%2011%20L4%206%20L12%206%20Z'%20fill='black'/%3E%3C/svg%3E");
+}
+html[data-skin="retro-win"] ::-webkit-scrollbar-button:horizontal:start {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%3E%3Cpath%20d='M5%208%20L10%204%20L10%2012%20Z'%20fill='black'/%3E%3C/svg%3E");
+}
+html[data-skin="retro-win"] ::-webkit-scrollbar-button:horizontal:end {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%3E%3Cpath%20d='M11%208%20L6%204%20L6%2012%20Z'%20fill='black'/%3E%3C/svg%3E");
 }
 
 /* ============ Windows XP (Luna) ============ */
