@@ -119,7 +119,9 @@ async function applyBranding() {
   }
   if (b.logoDataUri) {
     const img = document.querySelector(".brand-logo");
-    if (img) img.src = b.logoDataUri;
+    // Geen drop-shadow op een eigen logo (dat oogt rommelig op een lichte/eigen
+    // achtergrond); de meeste merklogo's hebben hun eigen vorm/marge al.
+    if (img) { img.src = b.logoDataUri; img.style.filter = "none"; }
   }
   if (b.theme && typeof b.theme === "object") {
     // Het branding-thema wordt een eigen, selecteerbare skin "brand": de vars
