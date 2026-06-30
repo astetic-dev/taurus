@@ -640,7 +640,36 @@ fn open_folder(path: String) -> Result<(), String> {
 #[tauri::command]
 fn copy_to_clipboard(app: AppHandle, text: String) -> Result<(), String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
-    app.clipboard().write_text(text).map_err(|e| e.to_string())
+    // Het Windows-klembord kan kortstondig vergrendeld zijn door een ander
+    // proces (clipboard-manager, RDP, Office); OpenClipboard faalt dan. Een
+    // paar korte herpogingen vangt die contentie op i.p.v. stil opgeven.
+    let mut last = String::new();
+    for attempt in 0..4 {
+        match app.clipboard().write_text(text.clone()) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = e.to_string();
+                if attempt < 3 {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+// Lichtgewicht diagnoselog voor klembord-events. Schrijft alleen METADATA
+// (event, lengte, ok/fout) naar %APPDATA%\Taurus\clipboard.log -- nooit de
+// inhoud van het klembord (privacy). Gebruikt om intermitterende kopieer/plak-
+// problemen te debuggen zonder devtools.
+#[tauri::command]
+fn debug_log(line: String) {
+    use std::io::Write;
+    let p = config_dir().join("clipboard.log");
+    let _ = std::fs::create_dir_all(config_dir());
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let _ = writeln!(f, "{}", line);
+    }
 }
 
 // ===== White-label branding =====
@@ -842,7 +871,8 @@ pub fn run() {
             read_file,
             open_folder,
             copy_to_clipboard,
-            branding
+            branding,
+            debug_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

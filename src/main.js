@@ -28,6 +28,7 @@ const I18N = {
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
     c_tabs: "Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude-status op de tab (✶ Orbiting…)",
+    c_mouse: "Agent mag de muis gebruiken (anders selecteert/scrolt de muis lokaal)",
     cancel: "Annuleer", save: "Opslaan",
     manage_projects: "Projecten beheren", add_project: "＋ Project toevoegen",
     cap_button: "▸ Knop in het linkermenu", cap_workdir: "Werkmap (lokaal C: of netwerk X:)",
@@ -45,6 +46,7 @@ const I18N = {
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
     restore_failed: "Hervatten mislukt voor:",
+    copy_failed: "✗ Kopiëren naar klembord mislukt:",
     err_need_project: "✗ Minstens één project met naam én pad nodig.",
   },
   en: {
@@ -72,6 +74,7 @@ const I18N = {
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
     c_tabs: "Tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude status on the tab (✶ Orbiting…)",
+    c_mouse: "Let the agent use the mouse (otherwise the mouse selects/scrolls locally)",
     cancel: "Cancel", save: "Save",
     manage_projects: "Manage projects", add_project: "＋ Add project",
     cap_button: "▸ Button in the left menu", cap_workdir: "Working folder (local C: or network X:)",
@@ -89,6 +92,7 @@ const I18N = {
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
     restore_failed: "Could not resume:",
+    copy_failed: "✗ Copy to clipboard failed:",
     err_need_project: "✗ Need at least one project with a name and a path.",
   },
 };
@@ -336,6 +340,7 @@ const DEFAULT_SETTINGS = {
   webLinks: true, search: true, tabShortcuts: true, tabStatus: true,
   fullPaths: true,
   persistSessions: true,
+  agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
 };
 let settings = { ...DEFAULT_SETTINGS };
@@ -351,9 +356,21 @@ function saveSettings() { localStorage.setItem("taurus.settings", JSON.stringify
 // write in de webview blokkeren (kopieren-bij-selectie en Ctrl+Shift+C deden
 // niets meer), terwijl het OS-klembord prima werkt -- zie issue #17. De fout
 // niet langer stil wegslikken: loggen naar de console.
+// Diagnoselog naar %APPDATA%\Taurus\clipboard.log (alleen metadata, geen inhoud).
+// Helpt intermitterende kopieer/plak-problemen debuggen zonder devtools.
+function dbg(line) {
+  try { invoke("debug_log", { line: `[${new Date().toISOString()}] ${line}` }); } catch (_) {}
+}
 function copyToClipboard(text) {
-  if (!text) return;
-  invoke("copy_to_clipboard", { text }).catch((e) => console.error("clipboard copy failed:", e));
+  if (!text) { dbg("copy skipped (empty selection)"); return; }
+  dbg(`copy attempt len=${text.length}`);
+  invoke("copy_to_clipboard", { text })
+    .then(() => dbg(`copy ok len=${text.length}`))
+    .catch((e) => {
+      dbg(`copy FAIL: ${e}`);
+      console.error("clipboard copy failed:", e);
+      toast(t("copy_failed") + " " + e, "err");
+    });
 }
 function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
@@ -503,20 +520,70 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   term.open(termPane);
   fit.fit();
 
+  // Muis-overname (mouse-tracking) van de agent onderscheppen. Een TUI zoals
+  // Claude Code zet via DECSET (ESC[?1000h..1006h) de muis-rapportage aan, zodat
+  // de muis naar de agent gaat i.p.v. naar lokale tekstselectie -- dan moet je
+  // Shift+slepen om te selecteren, en wordt een rechtsklik ook naar de agent
+  // gestuurd. Standaard (agentMouse uit) negeren we die sequenties via de
+  // parser-hook: gewoon slepen selecteert, het wiel scrollt de scrollback, en
+  // rechtsklik plakt enkel. Andere DECSET-modi (bracketed paste 2004, alt-screen
+  // 1049, cursor 25, ...) laten we ongemoeid. Aanzetten geeft de agent de muis terug.
+  const MOUSE_MODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
+  const firstParam = (params) => { const p = params && params.length ? params[0] : 0; return Array.isArray(p) ? (p[0] || 0) : (p || 0); };
+  const mouseGuard = (params) => (!settings.agentMouse && MOUSE_MODES.has(firstParam(params)));
+  if (term.parser && term.parser.registerCsiHandler) {
+    term.parser.registerCsiHandler({ prefix: "?", final: "h" }, mouseGuard); // DECSET (aan)
+    term.parser.registerCsiHandler({ prefix: "?", final: "l" }, mouseGuard); // DECRST (uit)
+  }
+
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
     exited: false, working: false, awaiting: false, status: null, lastSpin: 0, buf: "",
-    decoder: new TextDecoder("utf-8"), previewMode: null,
+    decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
   };
   sessions.set(id, session);
 
   term.onData((d) => invoke("write_session", { id, data: d }));
   term.onResize(({ cols, rows }) => invoke("resize_session", { id, cols, rows }));
-  term.onSelectionChange(() => { if (settings.copyOnSelect) { const sel = term.getSelection(); if (sel) copyToClipboard(sel); } });
+  // Kopieren bij selectie via xterm's onSelectionChange (vuurt betrouwbaar; een
+  // DOM mouseup op het paneel komt niet door xterm's eigen muis-afhandeling).
+  // We leggen de laatste niet-lege selectie vast en kopieren met een korte
+  // debounce -- niet bij elke tussenstap (spam/contentie), en als een herteken
+  // (streaming/prompt) de selectie net wist, kopieren we de vastgelegde tekst.
+  let selTimer = null;
+  term.onSelectionChange(() => {
+    const sel = term.getSelection();
+    if (sel) session.lastSel = sel;
+    if (!settings.copyOnSelect) return;
+    if (selTimer) clearTimeout(selTimer);
+    selTimer = setTimeout(() => {
+      const s = term.getSelection() || session.lastSel;
+      if (s) copyToClipboard(s);
+    }, 120);
+  });
+  termPane.addEventListener("mousedown", (e) => { if (e.button === 0) session.lastSel = ""; });
+  // Voorkom dat de RECHTERknop als muis-event naar de TUI gaat (mouseMode=any):
+  // anders plakt Claude Code op die rechtsklik OOK zelf het klembord -> de tekst
+  // verschijnt dubbel. We laten de linkerknop ongemoeid (klikken en
+  // Shift-selecteren in de TUI blijven werken). De capture-fase op het paneel
+  // draait voor xterm's eigen muis-handlers, zodat xterm de knop niet doorstuurt.
+  const swallowRightBtn = (e) => { if (settings.pasteOnRightClick && e.button === 2) e.stopPropagation(); };
+  termPane.addEventListener("mousedown", swallowRightBtn, true);
+  termPane.addEventListener("mouseup", swallowRightBtn, true);
+  // Rechtermuis-plak met debounce: een enkele rechtsklik mag niet twee keer
+  // plakken (dubbele event/echo). Negeer een tweede plak binnen 250 ms.
+  let lastPasteAt = 0;
   termPane.addEventListener("contextmenu", async (e) => {
     if (!settings.pasteOnRightClick) return;
     e.preventDefault();
-    try { const txt = await navigator.clipboard.readText(); if (txt) invoke("write_session", { id, data: txt }); } catch (_) {}
+    const now = Date.now();
+    if (now - lastPasteAt < 250) { dbg("paste IGNORED (debounce)"); return; }
+    lastPasteAt = now;
+    dbg("paste rightclick");
+    try {
+      const txt = await navigator.clipboard.readText();
+      if (txt) { invoke("write_session", { id, data: txt }); dbg(`paste wrote len=${txt.length}`); }
+    } catch (err) { dbg(`paste FAIL: ${err}`); }
   });
 
   el.querySelector(".preview-file").addEventListener("change", (e) => renderPreview(session, e.target.value));
@@ -886,6 +953,7 @@ function openSettings() {
   els.htmlFull.checked = settings.htmlView === "full";
   els.setCopy.checked = settings.copyOnSelect;
   els.setPaste.checked = settings.pasteOnRightClick;
+  els.setAgentMouse.checked = settings.agentMouse;
   els.setCtrl.checked = settings.ctrlShiftCV;
   els.setLinks.checked = settings.webLinks;
   els.setSearch.checked = settings.search;
@@ -907,6 +975,7 @@ function saveSettingsFromForm() {
   settings.htmlView = els.htmlFull.checked ? "full" : "split";
   settings.copyOnSelect = els.setCopy.checked;
   settings.pasteOnRightClick = els.setPaste.checked;
+  settings.agentMouse = els.setAgentMouse.checked;
   settings.ctrlShiftCV = els.setCtrl.checked;
   settings.webLinks = els.setLinks.checked;
   settings.search = els.setSearch.checked;
@@ -1030,13 +1099,15 @@ document.addEventListener("keydown", (e) => {
   if (ctrl && e.key === "0") { e.preventDefault(); settings.fontSize = DEFAULT_SETTINGS.fontSize; saveSettings(); applyFontToTerms(); return; }
   if (settings.ctrlShiftCV && ctrl && e.shiftKey && (e.key === "C" || e.key === "c")) {
     const s = sessions.get(current);
-    if (s) { const sel = s.term.getSelection(); if (sel) { copyToClipboard(sel); e.preventDefault(); } }
+    // Val terug op de vastgelegde selectie als getSelection() leeg is (een
+    // herteken kan 'm net gewist hebben).
+    if (s) { const sel = s.term.getSelection() || s.lastSel; if (sel) { copyToClipboard(sel); e.preventDefault(); } }
     return;
   }
   if (settings.ctrlShiftCV && ctrl && e.shiftKey && (e.key === "V" || e.key === "v")) {
     e.preventDefault();
     const s = sessions.get(current);
-    if (s) navigator.clipboard.readText().then((txt) => txt && invoke("write_session", { id: s.id, data: txt })).catch(() => {});
+    if (s) navigator.clipboard.readText().then((txt) => { if (txt) { invoke("write_session", { id: s.id, data: txt }); dbg(`paste kbd len=${txt.length}`); } }).catch((err) => dbg(`paste kbd FAIL: ${err}`));
     return;
   }
   if (settings.search && ctrl && e.shiftKey && (e.key === "F" || e.key === "f")) { e.preventDefault(); openSearch(); return; }
@@ -1076,6 +1147,7 @@ window.addEventListener("DOMContentLoaded", () => {
     htmlFull: document.querySelector("#set-html-full"),
     setCopy: document.querySelector("#set-copyselect"),
     setPaste: document.querySelector("#set-pasteright"),
+    setAgentMouse: document.querySelector("#set-agentmouse"),
     setCtrl: document.querySelector("#set-ctrlshift"),
     setLinks: document.querySelector("#set-weblinks"),
     setSearch: document.querySelector("#set-search"),
