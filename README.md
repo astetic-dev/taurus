@@ -181,6 +181,24 @@ modern skins are palette-only.
 > Keep brand assets out of this repo: `branding.json` and `src/*-logo.png` are
 > git-ignored. A real brand lives only in the local config, never committed.
 
+### Portable / pre-branded distribution
+
+`branding.json` is read from `%APPDATA%\Taurus\` **or**, as a fallback, from the
+folder next to `taurus.exe`. A relative `logo` path resolves against the folder
+the `branding.json` was found in. So a self-contained, pre-branded build is just
+a folder you can zip and hand out:
+
+```
+MyBrand Agent Launcher/
+  taurus.exe          (rename freely, e.g. "MyBrand Agent Launcher.exe")
+  branding.json       ("logo": "logo.png", relative)
+  logo.png
+```
+
+Unzip and run — no setup. A `branding.json` in `%APPDATA%\Taurus\` takes
+precedence over the one next to the exe. To also rebrand the installer's product
+name, build with a Tauri config overlay (`--config`).
+
 ## How it works
 
 - Frontend: `src/` — vanilla HTML/CSS/JS (xterm.js vendored in `src/vendor/`).

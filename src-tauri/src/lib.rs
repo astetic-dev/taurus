@@ -716,19 +716,44 @@ fn logo_mime(path: &str) -> &'static str {
     }
 }
 
+// Vind branding.json: eerst de per-gebruiker config-map (%APPDATA%\Taurus\),
+// anders naast de exe -- zo werkt een portable, voorgebrande map zonder setup.
+// Geeft ook de map terug waarin het bestand stond, zodat een relatief logo-pad
+// daartegen opgelost kan worden (portable: "logo": "logo.png" naast de exe).
+fn load_branding() -> (BrandingConfig, std::path::PathBuf) {
+    let mut candidates: Vec<std::path::PathBuf> = vec![config_dir().join("branding.json")];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("branding.json"));
+        }
+    }
+    for p in candidates {
+        if let Ok(txt) = std::fs::read_to_string(&p) {
+            if let Ok(cfg) = serde_json::from_str::<BrandingConfig>(&txt) {
+                let base = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+                return (cfg, base);
+            }
+        }
+    }
+    (BrandingConfig::default(), std::path::PathBuf::new())
+}
+
 #[tauri::command]
 fn branding() -> Branding {
-    let path = config_dir().join("branding.json");
-    let cfg: BrandingConfig = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default();
-    let logo_data_uri = if cfg.logo.trim().is_empty() {
-        String::new()
-    } else {
-        match std::fs::read(cfg.logo.trim()) {
-            Ok(bytes) => format!("data:{};base64,{}", logo_mime(&cfg.logo), b64(&bytes)),
-            Err(_) => String::new(),
+    let (cfg, base_dir) = load_branding();
+    let logo_data_uri = {
+        let raw = cfg.logo.trim();
+        if raw.is_empty() {
+            String::new()
+        } else {
+            // Absoluut pad blijft zoals het is; een relatief pad lost op t.o.v.
+            // de map waarin branding.json gevonden is (portable distributie).
+            let p = std::path::Path::new(raw);
+            let full = if p.is_absolute() { p.to_path_buf() } else { base_dir.join(raw) };
+            match std::fs::read(&full) {
+                Ok(bytes) => format!("data:{};base64,{}", logo_mime(raw), b64(&bytes)),
+                Err(_) => String::new(),
+            }
         }
     };
     Branding {
