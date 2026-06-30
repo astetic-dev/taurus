@@ -181,30 +181,62 @@ html[data-skin="winxp"] select,
 html[data-skin="winxp"] textarea {
   font-family: Tahoma, "Segoe UI", sans-serif;
 }
-/* Blue title-bar gradient on the tab bar + active tab */
-html[data-skin="winxp"] .tabbar { background: linear-gradient(#3d8bff, #0a52d6); border-bottom-color: #0a3aa0; }
-html[data-skin="winxp"] .tab.active { background: #ffffff; color: #000; }
-html[data-skin="winxp"] .tab { color: #eaf2ff; }
-/* Glossy rounded buttons */
+/* Luna tabs: vivid blue "active window" title bar, greyed inactive */
+html[data-skin="winxp"] .tabbar { background: #ece9d8; border-bottom: 1px solid #aebfdf; }
+html[data-skin="winxp"] .tab {
+  color: #dfe7f5; border: none;
+  background: linear-gradient(180deg, #7a9bd6, #5f82c4);
+}
+html[data-skin="winxp"] .tab.active {
+  color: #fff; font-weight: 700;
+  background: linear-gradient(180deg, #3d95ff 0%, #1a6ce8 45%, #0a52d6 100%);
+  border-radius: 6px 6px 0 0;
+}
+/* Glossy rounded XP buttons with a top highlight + orange focus glow */
 html[data-skin="winxp"] .btn-ghost,
 html[data-skin="winxp"] .foot-btn,
 html[data-skin="winxp"] .browse-btn,
 html[data-skin="winxp"] .reload-btn,
 html[data-skin="winxp"] .preview-bar button,
 html[data-skin="winxp"] .searchbar button {
-  background: linear-gradient(#ffffff, #d6e3f7);
+  background: linear-gradient(180deg, #fdfdfd 0%, #f0f3f9 45%, #cfd9ee 100%);
   color: #11305f;
-  border: 1px solid #5a82c8;
-  border-radius: 7px;
+  border: 1px solid #003c74;
+  border-radius: 4px;
+  box-shadow: inset 0 1px 0 #fff;
+}
+html[data-skin="winxp"] .btn-ghost:hover,
+html[data-skin="winxp"] .foot-btn:hover,
+html[data-skin="winxp"] .browse-btn:hover,
+html[data-skin="winxp"] .reload-btn:hover {
+  border-color: #e98a00;
+  box-shadow: inset 0 1px 0 #fff, 0 0 4px rgba(233, 138, 0, .6);
 }
 /* Primary = the green "Start" gel */
 html[data-skin="winxp"] .launch-btn,
 html[data-skin="winxp"] .btn-primary {
-  background: linear-gradient(#8ed06a, #4f9b34);
+  background: linear-gradient(180deg, #9ed97a 0%, #6fb74a 45%, #4f9b34 100%);
   color: #fff;
   border: 1px solid #3c7a28;
-  border-radius: 9px;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5);
   text-shadow: 0 -1px 0 rgba(0, 0, 0, .25);
+}
+html[data-skin="winxp"] input,
+html[data-skin="winxp"] select,
+html[data-skin="winxp"] textarea,
+html[data-skin="winxp"] .project-card,
+html[data-skin="winxp"] .modal-box { border-radius: 4px; }
+/* XP scrollbars (light 3D blue-grey) */
+html[data-skin="winxp"] ::-webkit-scrollbar { width: 16px; height: 16px; }
+html[data-skin="winxp"] ::-webkit-scrollbar-track { background: #d6dff0; }
+html[data-skin="winxp"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #eaf0fb, #aebfdf);
+  border: 1px solid #5a82c8; border-radius: 3px;
+}
+html[data-skin="winxp"] ::-webkit-scrollbar-button {
+  background: linear-gradient(180deg, #fdfdfd, #cfd9ee);
+  border: 1px solid #5a82c8; height: 16px; width: 16px;
 }
 
 /* ============ Retro Mac (System 7 / Platinum) ============ */
@@ -231,23 +263,24 @@ html[data-skin="retro-mac"] select,
 html[data-skin="retro-mac"] textarea {
   font-family: Geneva, Charcoal, Verdana, "Segoe UI", sans-serif;
 }
-/* Crisp 1px black chrome */
+/* Crisp 1px black chrome (System 7) */
 html[data-skin="retro-mac"] .project-card,
 html[data-skin="retro-mac"] .modal-box,
-html[data-skin="retro-mac"] input,
+html[data-skin="retro-mac"] input:not([type="checkbox"]):not([type="radio"]),
 html[data-skin="retro-mac"] select,
 html[data-skin="retro-mac"] textarea {
   border: 1px solid #000 !important;
   border-radius: 0 !important;
+  background: #fff;
 }
-/* Pinstripe title bar */
-html[data-skin="retro-mac"] .tabbar,
-html[data-skin="retro-mac"] .tab.active {
+/* Pinstripe title bar; active tab solid white, inactive grey */
+html[data-skin="retro-mac"] .tabbar {
   background: repeating-linear-gradient(#ffffff, #ffffff 1px, #cfcfcf 1px, #cfcfcf 2px);
-  color: #000;
+  border-bottom: 1px solid #000;
 }
-html[data-skin="retro-mac"] .tab { border: 1px solid #000; border-radius: 0; }
-/* Rounded-rect buttons; default (primary) gets the bold black ring */
+html[data-skin="retro-mac"] .tab { border: 1px solid #000; border-radius: 0; background: #ccc; color: #000; }
+html[data-skin="retro-mac"] .tab.active { background: #fff; color: #000; font-weight: 700; }
+/* Classic Mac buttons: hard 1px drop shadow; default = bold double ring */
 html[data-skin="retro-mac"] .btn-ghost,
 html[data-skin="retro-mac"] .foot-btn,
 html[data-skin="retro-mac"] .browse-btn,
@@ -258,16 +291,42 @@ html[data-skin="retro-mac"] .searchbar button {
   color: #000;
   border: 1px solid #000;
   border-radius: 8px;
-  box-shadow: inset 0 1px 0 #fff;
+  box-shadow: 1px 1px 0 #000;
+}
+html[data-skin="retro-mac"] .btn-ghost:active,
+html[data-skin="retro-mac"] .foot-btn:active,
+html[data-skin="retro-mac"] .browse-btn:active,
+html[data-skin="retro-mac"] .reload-btn:active {
+  background: #000; color: #fff; box-shadow: none;
 }
 html[data-skin="retro-mac"] .launch-btn,
 html[data-skin="retro-mac"] .btn-primary {
-  background: #ececec;
+  background: #fff;
   color: #000;
   border: 2px solid #000;
   border-radius: 12px;
-  box-shadow: 0 0 0 1px #000;
+  box-shadow: 0 0 0 2px #000, 1px 1px 0 2px #000;
 }
+/* Classic Mac checkboxes (X) & radios (dot) */
+html[data-skin="retro-mac"] input[type="checkbox"],
+html[data-skin="retro-mac"] input[type="radio"] {
+  appearance: none; -webkit-appearance: none;
+  width: 13px; height: 13px; margin: 0 6px 0 0; flex: none;
+  background: #fff; border: 1px solid #000;
+  background-repeat: no-repeat; background-position: center;
+}
+html[data-skin="retro-mac"] input[type="radio"] { border-radius: 50%; }
+html[data-skin="retro-mac"] input[type="checkbox"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='13'%20height='13'%3E%3Cpath%20d='M3%203%20L10%2010%20M10%203%20L3%2010'%20stroke='black'%20stroke-width='1.5'/%3E%3C/svg%3E");
+}
+html[data-skin="retro-mac"] input[type="radio"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='13'%20height='13'%3E%3Ccircle%20cx='6.5'%20cy='6.5'%20r='3'%20fill='black'/%3E%3C/svg%3E");
+}
+/* Black-and-white scrollbars */
+html[data-skin="retro-mac"] ::-webkit-scrollbar { width: 15px; height: 15px; }
+html[data-skin="retro-mac"] ::-webkit-scrollbar-track { background: #fff; border-left: 1px solid #000; }
+html[data-skin="retro-mac"] ::-webkit-scrollbar-thumb { background: #cccccc; border: 1px solid #000; }
+html[data-skin="retro-mac"] ::-webkit-scrollbar-button { background: #fff; border: 1px solid #000; height: 15px; width: 15px; }
 
 /* ============ Aqua (early Mac OS X) ============ */
 html[data-skin="aqua"] {
@@ -313,12 +372,13 @@ html[data-skin="aqua"] .searchbar button {
 }
 html[data-skin="aqua"] .launch-btn,
 html[data-skin="aqua"] .btn-primary {
-  background: linear-gradient(#7fc0ff, #1f6fe0);
+  /* gel: bright top highlight over a blue body */
+  background: linear-gradient(180deg, #d6ecff 0%, #6db4ff 48%, #1f6fe0 50%, #2f7df0 100%);
   color: #fff;
   border: 1px solid #1858b8;
   border-radius: 16px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7);
-  text-shadow: 0 -1px 0 rgba(0, 0, 0, .2);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .9), 0 1px 2px rgba(0, 0, 0, .2);
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, .25);
 }
 html[data-skin="aqua"] .tab,
 html[data-skin="aqua"] .project-card,
@@ -326,6 +386,16 @@ html[data-skin="aqua"] input,
 html[data-skin="aqua"] select,
 html[data-skin="aqua"] textarea {
   border-radius: 8px;
+}
+/* brushed-metal tabs; active is brighter */
+html[data-skin="aqua"] .tab {
+  background: linear-gradient(180deg, #f6f8fb, #d4dde8);
+  color: #3b4655; border: 1px solid #b6c1d0; border-bottom: none;
+  border-radius: 8px 8px 0 0;
+}
+html[data-skin="aqua"] .tab.active {
+  background: linear-gradient(180deg, #ffffff, #e3ecf7);
+  color: #11305f; font-weight: 600;
 }
 
 /* ============ Terminal (green CRT) ============ */
@@ -399,4 +469,82 @@ html[data-skin="terminal"] .app::after {
   pointer-events: none;
   z-index: 9999;
   background: repeating-linear-gradient(rgba(0, 0, 0, 0) 0 2px, rgba(0, 255, 0, .045) 2px 3px);
+}
+
+/* ============================================================================
+   Modern themes — clean palettes only (no retro chrome), just CSS-variable
+   overrides. The base UI is already a modern dark layout, so swapping the
+   palette gives a polished, contemporary look.
+   ========================================================================== */
+
+/* ---- Nord (arctic, dark) ---- */
+html[data-skin="nord"] {
+  --bg: #2e3440;
+  --bg-panel: #3b4252;
+  --bg-card: #434c5e;
+  --bg-card-hover: #4c566a;
+  --border: #4c566a;
+  --text: #eceff4;
+  --text-dim: #aab3c5;
+  --accent: #88c0d0;
+  --green: #a3be8c;
+  --orange: #d08770;
+  --red: #bf616a;
+  --term-bg: #2e3440;
+  --term-fg: #d8dee9;
+  --term-sel: #434c5e;
+}
+
+/* ---- Dracula (dark, vibrant) ---- */
+html[data-skin="dracula"] {
+  --bg: #282a36;
+  --bg-panel: #21222c;
+  --bg-card: #343746;
+  --bg-card-hover: #44475a;
+  --border: #44475a;
+  --text: #f8f8f2;
+  --text-dim: #a6accd;
+  --accent: #bd93f9;
+  --green: #50fa7b;
+  --orange: #ffb86c;
+  --red: #ff5555;
+  --term-bg: #282a36;
+  --term-fg: #f8f8f2;
+  --term-sel: #44475a;
+}
+
+/* ---- Solarized Light (warm, light) ---- */
+html[data-skin="solarized"] {
+  --bg: #fdf6e3;
+  --bg-panel: #eee8d5;
+  --bg-card: #fdf6e3;
+  --bg-card-hover: #eee8d5;
+  --border: #93a1a1;
+  --text: #586e75;
+  --text-dim: #93a1a1;
+  --accent: #268bd2;
+  --green: #859900;
+  --orange: #cb4b16;
+  --red: #dc322f;
+  --term-bg: #fdf6e3;
+  --term-fg: #657b83;
+  --term-sel: #eee8d5;
+}
+
+/* ---- Catppuccin Mocha (soft pastel, dark) ---- */
+html[data-skin="catppuccin"] {
+  --bg: #1e1e2e;
+  --bg-panel: #181825;
+  --bg-card: #313244;
+  --bg-card-hover: #45475a;
+  --border: #45475a;
+  --text: #cdd6f4;
+  --text-dim: #a6adc8;
+  --accent: #cba6f7;
+  --green: #a6e3a1;
+  --orange: #fab387;
+  --red: #f38ba8;
+  --term-bg: #1e1e2e;
+  --term-fg: #cdd6f4;
+  --term-sel: #313244;
 }

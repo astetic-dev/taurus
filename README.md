@@ -163,9 +163,15 @@ in `branding.json` (an explicit Settings choice wins). Available skins:
 | `retro-win` | Windows 95/98 (teal desktop, raised 3D grey controls) |
 | `winxp` | Windows XP Luna (blue bars, glossy buttons, green primary) |
 | `terminal` | green-on-black CRT (monochrome, scanlines) |
+| `nord` | modern — Nord arctic blue-grey (dark) |
+| `dracula` | modern — Dracula (dark, vibrant) |
+| `solarized` | modern — Solarized Light (warm, light) |
+| `catppuccin` | modern — Catppuccin Mocha (soft pastel, dark) |
 
 Skins are pure CSS (`src/skins.css`, scoped by `html[data-skin="…"]`) — adding
-more is just another block.
+more is just another block. The retro skins adapt techniques from the MIT
+projects [98.css](https://jdan.github.io/98.css/) / XP.css / system.css; the
+modern skins are palette-only.
 
 > Keep brand assets out of this repo: `branding.json` and `src/*-logo.png` are
 > git-ignored. A real brand lives only in the local config, never committed.
