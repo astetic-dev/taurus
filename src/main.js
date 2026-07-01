@@ -520,20 +520,66 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   term.open(termPane);
   fit.fit();
 
-  // Muis-overname (mouse-tracking) van de agent onderscheppen. Een TUI zoals
-  // Claude Code zet via DECSET (ESC[?1000h..1006h) de muis-rapportage aan, zodat
-  // de muis naar de agent gaat i.p.v. naar lokale tekstselectie -- dan moet je
-  // Shift+slepen om te selecteren, en wordt een rechtsklik ook naar de agent
-  // gestuurd. Standaard (agentMouse uit) negeren we die sequenties via de
-  // parser-hook: gewoon slepen selecteert, het wiel scrollt de scrollback, en
-  // rechtsklik plakt enkel. Andere DECSET-modi (bracketed paste 2004, alt-screen
-  // 1049, cursor 25, ...) laten we ongemoeid. Aanzetten geeft de agent de muis terug.
+  // Muis-overname (mouse-tracking) van de agent onderscheppen voor de KNOPPEN.
+  // Een TUI zoals Claude Code zet via DECSET (ESC[?1000h..1006h) de muis-rapportage
+  // aan, zodat de muis naar de agent gaat i.p.v. naar lokale tekstselectie -- dan
+  // moet je Shift+slepen om te selecteren en gaat ook een rechtsklik naar de agent.
+  // Standaard (agentMouse uit) onderscheppen we die sequenties: slepen selecteert
+  // lokaal en rechtsklik plakt enkel. We ONTHOUDEN wel wat de TUI vroeg (appMouseOn
+  // + SGR-encoding), zodat we het WIEL alsnog kunnen doorsturen -- zie de wiel-
+  // handler hieronder. Andere DECSET-modi (bracketed paste 2004, alt-screen 1049,
+  // cursor 25, ...) laten we ongemoeid. Aanzetten geeft de agent de muis helemaal terug.
+  let appMouseOn = false;  // TUI vroeg muis-events (1000/1002/1003)
+  let appMouseSgr = false; // TUI wil SGR-encoding (1006)
   const MOUSE_MODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
   const firstParam = (params) => { const p = params && params.length ? params[0] : 0; return Array.isArray(p) ? (p[0] || 0) : (p || 0); };
-  const mouseGuard = (params) => (!settings.agentMouse && MOUSE_MODES.has(firstParam(params)));
+  const mouseMode = (on) => (params) => {
+    // Volg alle params (bv. ESC[?1002;1006h) voor de vlaggen; de swallow-beslissing
+    // blijft op de eerste param, net als voorheen (geen regressie op gebundelde modi).
+    const n = params && params.length ? params.length : 0;
+    for (let i = 0; i < n; i++) {
+      const raw = params[i];
+      const m = Array.isArray(raw) ? (raw[0] || 0) : (raw || 0);
+      if (m === 1000 || m === 1002 || m === 1003) appMouseOn = on;
+      else if (m === 1006) appMouseSgr = on;
+    }
+    return !settings.agentMouse && MOUSE_MODES.has(firstParam(params));
+  };
   if (term.parser && term.parser.registerCsiHandler) {
-    term.parser.registerCsiHandler({ prefix: "?", final: "h" }, mouseGuard); // DECSET (aan)
-    term.parser.registerCsiHandler({ prefix: "?", final: "l" }, mouseGuard); // DECRST (uit)
+    term.parser.registerCsiHandler({ prefix: "?", final: "h" }, mouseMode(true));  // DECSET (aan)
+    term.parser.registerCsiHandler({ prefix: "?", final: "l" }, mouseMode(false)); // DECRST (uit)
+  }
+
+  // Muiswiel (#35). De knoppen blijven lokaal, maar het WIEL sturen we naar de TUI
+  // door als die full-screen draait (alt-screen) en muis-tracking wilde: dan scrollt
+  // Claude z'n eigen transcript -- xterm heeft in het alt-screen immers geen eigen
+  // scrollback. In de normale buffer scrollt het wiel gewoon onze lokale scrollback.
+  // Zonder deze doorstuur bleef het wiel steken op xterm's wiel->pijltjes-vertaling,
+  // die de agent als history-navigatie ("commando-log") las. Met agentMouse aan
+  // handelt xterm het wiel zelf af (de agent heeft dan de hele muis).
+  const cellUnderWheel = (e) => {
+    try {
+      const host = term.element || termPane;
+      const r = host.getBoundingClientRect();
+      const col = Math.min(term.cols, Math.max(1, Math.floor((e.clientX - r.left) / (r.width / term.cols)) + 1));
+      const row = Math.min(term.rows, Math.max(1, Math.floor((e.clientY - r.top) / (r.height / term.rows)) + 1));
+      return { col, row };
+    } catch (_) { return { col: 1, row: 1 }; }
+  };
+  if (term.attachCustomWheelEventHandler) {
+    term.attachCustomWheelEventHandler((e) => {
+      if (settings.agentMouse) return true; // agent heeft de muis: xterm/TUI handelt het wiel af
+      if (term.buffer.active.type !== "alternate") return true; // normale buffer: xterm scrollt de scrollback
+      if (appMouseOn) { // full-screen TUI met muis: stuur een wiel-rapport zodat die z'n transcript scrollt
+        const btn = e.deltaY < 0 ? 64 : 65; // 64 = omhoog, 65 = omlaag
+        const { col, row } = cellUnderWheel(e);
+        const seq = appMouseSgr
+          ? `\x1b[<${btn};${col};${row}M`
+          : `\x1b[M${String.fromCharCode(32 + btn)}${String.fromCharCode(32 + col)}${String.fromCharCode(32 + row)}`;
+        invoke("write_session", { id, data: seq });
+      }
+      return false; // niet lokaal afhandelen / geen pijltjes naar de TUI
+    });
   }
 
   const session = {
