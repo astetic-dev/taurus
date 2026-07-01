@@ -131,7 +131,7 @@ async function applyBranding() {
     // Het branding-thema wordt een eigen, selecteerbare skin "brand": de vars
     // hangen onder html[data-skin="brand"] (niet :root), zodat het naast de
     // ingebouwde skins staat en niemand het per ongeluk overschrijft. Het label
-    // in de Thema-lijst komt uit de lokale branding (ondertitel/naam) — er staat
+    // in de Thema-lijst komt uit de lokale branding (skinName/appName) — er staat
     // dus niets merkspecifieks in de publieke code.
     const decls = Object.entries(b.theme)
       .filter(([k, v]) => /^--[\w-]+$/.test(k) && typeof v === "string" && !/[<>{}]/.test(v))
@@ -145,7 +145,7 @@ async function applyBranding() {
       let st = document.getElementById("taurus-branding");
       if (!st) { st = document.createElement("style"); st.id = "taurus-branding"; document.head.appendChild(st); }
       st.textContent = `html[data-skin="brand"] { ${decls.join(" ")} }`;
-      addBrandSkinOption(b.subtitle || b.appName || "Custom");
+      addBrandSkinOption(b.skinName || b.appName || "Custom");
     }
   }
   if (b.windowTitle) {
