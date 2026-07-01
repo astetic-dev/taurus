@@ -135,6 +135,7 @@ Taurus; remove it to get Taurus back. Every field is optional:
   "logo": "C:\\ProgramData\\Acme\\logo.png",
   "windowTitle": "Acme Agent Launcher",
   "skin": "default",
+  "skinName": "Acme",
   "theme": { "--accent": "#3b82f6", "--bg": "#0b1220", "--bg-panel": "#11182a" }
 }
 ```
@@ -144,6 +145,9 @@ Taurus; remove it to get Taurus back. Every field is optional:
   `--text`, `--text-dim`, `--accent` (and `--term-bg` / `--term-fg` / `--term-sel`
   for the terminal).
 - `skin` sets the **default theme** (see *Skins* below).
+- `skinName` labels the branding-derived theme in the **⚙ Settings → Theme**
+  dropdown (e.g. `"NEXUS"`); falls back to `appName` if omitted. Use it when your
+  `subtitle` is a tagline that would read oddly as a theme name.
 - `font` sets the UI font family (e.g. `"'IBM Plex Mono', monospace"`). IBM Plex
   Mono ships bundled (offline); any installed/CSS font name also works.
 - `garble` (`true`/`false`) toggles the hover **letter-scramble** effect on the

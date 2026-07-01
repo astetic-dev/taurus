@@ -699,6 +699,8 @@ struct BrandingConfig {
     #[serde(default)]
     skin: String, // optionele default-skin (bv. "winxp"); leeg = geen default
     #[serde(default)]
+    skin_name: String, // label voor de merk-skin in de Thema-lijst (bv. "NEXUS"); leeg = val terug op appName
+    #[serde(default)]
     font: String, // optioneel UI-lettertype (bv. "'IBM Plex Mono', monospace")
     #[serde(default)]
     garble: Option<bool>, // garble-hover forceren aan/uit; None = default (aan bij merk-skin)
@@ -713,6 +715,7 @@ struct Branding {
     window_title: String,
     theme: HashMap<String, String>,
     skin: String,
+    skin_name: String,
     font: String,
     garble: Option<bool>,
 }
@@ -797,6 +800,7 @@ fn branding() -> Branding {
         window_title: cfg.window_title,
         theme: cfg.theme,
         skin: cfg.skin,
+        skin_name: cfg.skin_name,
         font: cfg.font,
         garble: cfg.garble,
     }

@@ -4,6 +4,7 @@
   "logo": "C:\\ProgramData\\Acme\\logo.png",
   "windowTitle": "Acme Agent Launcher",
   "skin": "default",
+  "skinName": "Acme",
   "font": "'IBM Plex Mono', monospace",
   "garble": true,
   "theme": {
