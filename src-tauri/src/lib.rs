@@ -679,7 +679,12 @@ fn debug_log(line: String) {
 // het bestand, dan komen lege velden terug en blijft de UI gewoon Taurus. Zo kan
 // iedereen rebranden zonder de code te wijzigen, en blijft de default-build
 // identiek. Bedrijfsspecifieke branding hoort puur in dat lokale bestand thuis.
+// De JSON-sleutels zijn camelCase (appName, windowTitle) -- net als
+// branding.example.json, de README en de Branding-uitvoer hieronder. Zonder deze
+// rename werden appName/windowTitle stil genegeerd (serde zocht app_name/
+// window_title), waardoor de titel op de default "Taurus" bleef staan (#31).
 #[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 struct BrandingConfig {
     #[serde(default)]
     app_name: String,
