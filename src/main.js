@@ -48,9 +48,8 @@ const I18N = {
     restore_failed: "Hervatten mislukt voor:",
     copy_failed: "✗ Kopiëren naar klembord mislukt:",
     err_need_project: "✗ Minstens één project met naam én pad nodig.",
-    dropper: "Bestanden", dropper_hint: "Sleep bestand of map hierheen",
+    dropper: "DROPZONE", dropper_hint: "Sleep bestand of map hierheen",
     dz_move: "Verplaats", dz_copy: "Kopieer", dz_prompt: "Alleen pad", dz_paste: "Plak object",
-    dp_copy: "Kopieer", dp_terminal: "Terminal",
     dropper_need_project: "Kies eerst een project of open een sessie",
     dropper_no_session: "Geen actieve terminal om het pad in te plaatsen",
     dropper_save_failed: "✗ Opslaan in input-map mislukt:",
@@ -101,9 +100,8 @@ const I18N = {
     restore_failed: "Could not resume:",
     copy_failed: "✗ Copy to clipboard failed:",
     err_need_project: "✗ Need at least one project with a name and a path.",
-    dropper: "Files", dropper_hint: "Drag a file or folder here",
+    dropper: "DROPZONE", dropper_hint: "Drag a file or folder here",
     dz_move: "Move", dz_copy: "Copy", dz_prompt: "Path only", dz_paste: "Paste object",
-    dp_copy: "Copy", dp_terminal: "Terminal",
     dropper_need_project: "Pick a project or open a session first",
     dropper_no_session: "No active terminal to insert the path into",
     dropper_save_failed: "✗ Could not save into the input folder:",
@@ -1196,36 +1194,29 @@ function dropperCwd() {
 }
 
 // Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
-// door een spatie zodat je meteen door kunt typen).
-function insertPathIntoTerminal(absPath) {
+// door een spatie zodat je meteen door kunt typen). `silent` = geen melding als er
+// geen actieve terminal is (voor auto-invoegen bij een drop op het startscherm).
+function insertPathIntoTerminal(absPath, silent) {
   const s = sessions.get(current);
-  if (!s) { toast(t("dropper_no_session"), "err"); return; }
+  if (!s) { if (!silent) toast(t("dropper_no_session"), "err"); return; }
   const arg = /\s/.test(absPath) ? `"${absPath}"` : absPath;
   invoke("write_session", { id: s.id, data: arg + " " });
 }
 
-// Voeg een resultaatregel toe: bestandsnaam (volledig pad als tooltip) + Kopieer- en
-// Terminal-knop. textContent i.p.v. innerHTML zodat een rare bestandsnaam nooit als
-// HTML geinterpreteerd wordt.
+// Voeg een net geplaatst bestand toe aan het overzicht -- ALLEEN wat jij deze sessie
+// dropt/plakt, niet de hele input-map. Op een gedeelde X:-map staan daar ook de
+// bestanden van collega's; die zou een dir-listing tonen en je focus wegnemen.
+// Nieuwste bovenaan; klik plaatst het volledige pad in de prompt. textContent i.p.v.
+// innerHTML zodat een rare bestandsnaam nooit als HTML wordt uitgevoerd.
 function addDropperEntry(absPath) {
   const list = els.dropperList;
   if (!list) return;
   const name = absPath.split(/[\\/]/).pop() || absPath;
   const row = document.createElement("div");
   row.className = "dropper-item";
-  const nm = document.createElement("span");
-  nm.className = "dropper-name";
-  nm.textContent = name;
-  nm.title = absPath;
-  const copyBtn = document.createElement("button");
-  copyBtn.className = "dropper-act";
-  copyBtn.textContent = t("dp_copy");
-  copyBtn.addEventListener("click", () => copyToClipboard(absPath));
-  const termBtn = document.createElement("button");
-  termBtn.className = "dropper-act";
-  termBtn.textContent = t("dp_terminal");
-  termBtn.addEventListener("click", () => insertPathIntoTerminal(absPath));
-  row.append(nm, copyBtn, termBtn);
+  row.textContent = name;
+  row.title = absPath;
+  row.addEventListener("click", () => insertPathIntoTerminal(absPath));
   list.prepend(row);
 }
 
@@ -1271,8 +1262,15 @@ function wireFileDropper() {
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
     for (const src of paths) {
       try {
-        if (mode === "prompt") addDropperEntry(src);
-        else addDropperEntry(await invoke("save_dropped_path", { src, cwd, mode }));
+        // Alleen pad: geen bestandsactie, enkel het bestaande pad in de prompt.
+        // Verplaats/Kopieer: naar input\, dan het nieuwe pad in de prompt en in de lijst.
+        if (mode === "prompt") {
+          insertPathIntoTerminal(src, true);
+        } else {
+          const dest = await invoke("save_dropped_path", { src, cwd, mode });
+          insertPathIntoTerminal(dest, true);
+          addDropperEntry(dest);
+        }
       } catch (err) {
         dbg(`drop ${mode} FAIL: ${err}`);
         toast(t("dropper_save_failed") + " " + err, "err");
@@ -1284,7 +1282,8 @@ function wireFileDropper() {
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
     try {
-      addDropperEntry(await invoke("save_clipboard_to_input", { cwd }));
+      const paths = await invoke("save_clipboard_to_input", { cwd });
+      for (const p of paths) { insertPathIntoTerminal(p, true); addDropperEntry(p); }
     } catch (err) {
       dbg(`paste-object FAIL: ${err}`);
       toast(t("dropper_paste_failed") + " " + err, "err");

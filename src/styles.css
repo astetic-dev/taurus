@@ -256,6 +256,14 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 }
 
 /* ---- File-dropper (sidebar) ---- */
+/* Gecentreerd label met flankerende lijnen: ---- DROPZONE ---- */
+.dropzone-label {
+  display: flex; align-items: center; gap: 8px;
+  text-align: center;
+}
+.dropzone-label::before, .dropzone-label::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
 .file-dropper {
   flex: none;
   margin: 2px 0 6px;
@@ -309,31 +317,20 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 .dropper-paste .dropper-paste-ico svg { width: 100%; height: 100%; display: block; }
 .dropper-list { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 150px; overflow-y: auto; }
 .dropper-list:empty { display: none; }
+/* Klikbare regel = overzicht van input\; klik plaatst het volledige pad in de prompt. */
 .dropper-item {
-  display: flex; align-items: center; gap: 6px;
+  display: block;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 5px 7px;
-}
-.dropper-item .dropper-name {
-  flex: 1; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 5px 8px;
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 11px;
   color: var(--text);
-}
-.dropper-item .dropper-act {
-  flex: none;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  border-radius: 5px;
-  padding: 3px 6px;
-  font-size: 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   cursor: pointer;
 }
-.dropper-item .dropper-act:hover { color: var(--accent); border-color: var(--accent); }
+.dropper-item:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---- Sidebar footer ---- */
 .sidebar-footer { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }

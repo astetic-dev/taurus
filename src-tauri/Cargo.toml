@@ -34,5 +34,11 @@ png = "0.17"
 # wat Tauri 2 al in de tree heeft, zodat er geen extra versie bijkomt.
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
-windows = "0.61"
+# Features voor het uitlezen van op het klembord gekopieerde bestanden (CF_HDROP)
+# zodat "Plak object" ook een in Verkenner gekopieerd bestand aankan.
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_DataExchange",
+  "Win32_UI_Shell",
+] }
 

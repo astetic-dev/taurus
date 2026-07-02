@@ -717,16 +717,83 @@ fn save_dropped_path(src: String, cwd: String, mode: String) -> Result<String, S
     Ok(dest.to_string_lossy().into_owned())
 }
 
-// Sla de inhoud van het klembord op als bestand in <cwd>\input en geef het
-// absolute pad terug. Eerst een afbeelding proberen (opgeslagen als PNG), anders
-// tekst (.txt). Voor "objecten" (geplakte tekst/afbeelding die nog geen bestand
-// zijn) -- die kunnen bij ingeschakelde native drop niet via slepen binnenkomen.
+// Lees de op het klembord gekopieerde bestandspaden (Verkenner Ctrl+C zet een
+// CF_HDROP-lijst op het klembord). De clipboard-manager-plugin kent alleen
+// tekst/HTML/afbeelding, dus dit gaat rechtstreeks via de Win32-klembord-API.
+#[cfg(windows)]
+fn clipboard_file_paths() -> Vec<String> {
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
+    use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+    const CF_HDROP: u32 = 15;
+    let mut out: Vec<String> = Vec::new();
+    unsafe {
+        if IsClipboardFormatAvailable(CF_HDROP).is_err() {
+            return out;
+        }
+        if OpenClipboard(None).is_err() {
+            return out;
+        }
+        if let Ok(handle) = GetClipboardData(CF_HDROP) {
+            let hdrop = HDROP(handle.0);
+            let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, None);
+            for i in 0..count {
+                let len = DragQueryFileW(hdrop, i, None);
+                if len == 0 {
+                    continue;
+                }
+                let mut buf = vec![0u16; (len as usize) + 1];
+                let got = DragQueryFileW(hdrop, i, Some(buf.as_mut_slice()));
+                if got > 0 {
+                    out.push(String::from_utf16_lossy(&buf[..got as usize]));
+                }
+            }
+        }
+        let _ = CloseClipboard();
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn clipboard_file_paths() -> Vec<String> {
+    Vec::new()
+}
+
+// Sla de inhoud van het klembord op als bestand(en) in <cwd>\input en geef de
+// absolute paden terug. Volgorde: eerst gekopieerde BESTANDEN (Ctrl+C in
+// Verkenner -> die kopieren we in), dan een AFBEELDING (als PNG), dan TEKST
+// (.txt). Zo werkt "Plak object" ook voor een gekopieerd bestand -- niet alleen
+// voor tekst/afbeelding die nog geen bestand zijn.
 #[tauri::command]
-fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<String, String> {
+fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
     let input_dir = Path::new(&cwd).join("input");
     std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
 
+    // 1) Gekopieerde bestanden/mappen (CF_HDROP) -> kopieer ze in de input-map.
+    let files = clipboard_file_paths();
+    if !files.is_empty() {
+        let mut saved = Vec::new();
+        for f in files {
+            let src = Path::new(&f);
+            if !src.exists() {
+                continue;
+            }
+            let name = match src.file_name() {
+                Some(n) => n,
+                None => continue,
+            };
+            let dest = unique_path(input_dir.join(name));
+            copy_recursive(src, &dest).map_err(|e| e.to_string())?;
+            saved.push(dest.to_string_lossy().into_owned());
+        }
+        if !saved.is_empty() {
+            return Ok(saved);
+        }
+    }
+
+    // 2) Afbeelding op het klembord -> PNG.
     if let Ok(img) = app.clipboard().read_image() {
         let (w, h) = (img.width(), img.height());
         let rgba = img.rgba();
@@ -738,17 +805,18 @@ fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<String, String
             enc.set_depth(png::BitDepth::Eight);
             let mut writer = enc.write_header().map_err(|e| e.to_string())?;
             writer.write_image_data(rgba).map_err(|e| e.to_string())?;
-            return Ok(dest.to_string_lossy().into_owned());
+            return Ok(vec![dest.to_string_lossy().into_owned()]);
         }
     }
 
+    // 3) Tekst.
     let text = app.clipboard().read_text().map_err(|e| e.to_string())?;
     if text.is_empty() {
-        return Err("klembord is leeg".to_string());
+        return Err("klembord bevat geen bestand, afbeelding of tekst".to_string());
     }
     let dest = unique_path(input_dir.join("pasted.txt"));
     std::fs::write(&dest, text).map_err(|e| e.to_string())?;
-    Ok(dest.to_string_lossy().into_owned())
+    Ok(vec![dest.to_string_lossy().into_owned()])
 }
 
 // Schrijf tekst naar het Windows-klembord via native code i.p.v. de WebView2
