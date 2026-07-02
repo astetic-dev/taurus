@@ -54,7 +54,7 @@ const I18N = {
     dropper_no_session: "Geen actieve terminal om het pad in te plaatsen",
     dropper_save_failed: "✗ Opslaan in input-map mislukt:",
     dropper_paste_failed: "✗ Plakken van object mislukt:",
-    reload: "Herlaad", new_project: "Nieuw project",
+    reload: "Herlaad", new_project: "Nieuw project", add_file: "Bestand toevoegen",
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
   },
   en: {
@@ -108,7 +108,7 @@ const I18N = {
     dropper_no_session: "No active terminal to insert the path into",
     dropper_save_failed: "✗ Could not save into the input folder:",
     dropper_paste_failed: "✗ Could not paste object:",
-    reload: "Reload", new_project: "New project",
+    reload: "Reload", new_project: "New project", add_file: "Add file",
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
   },
 };
@@ -1331,6 +1331,59 @@ function wireFileDropper() {
   });
 }
 
+// De + op de DROPZONE: kies een bestand elders op de computer (de dialoog start in
+// de input-map). Staat het gekozen bestand al IN input -> pad meteen in de prompt.
+// Komt het van elders -> vraag Verplaats/Kopieer/Alleen-pad (er is geen drop-positie
+// om op te hittesten, dus een kleine keuze-rij bovenin de dropper).
+async function addFileViaPicker() {
+  const cwd = dropperCwd();
+  if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+  const inputDir = cwd.replace(/\//g, "\\").replace(/\\+$/, "") + "\\input";
+  let file = null;
+  try { file = await invoke("pick_file", { startDir: inputDir }); } catch (_) { return; }
+  if (!file) return; // geannuleerd
+  const nf = file.replace(/\//g, "\\");
+  const parent = nf.slice(0, nf.lastIndexOf("\\"));
+  if (parent.toLowerCase() === inputDir.toLowerCase()) {
+    // Al in de input-map: gewoon het pad in de prompt (en in het overzicht).
+    insertPathIntoTerminal(file, true);
+    addDropperEntry(file);
+  } else {
+    showFileChooser(file, cwd); // van elders: vraag wat er moet gebeuren
+  }
+}
+
+// Kleine keuze-rij bovenin de dropper voor een van elders gekozen bestand.
+function showFileChooser(file, cwd) {
+  const list = els.dropperList;
+  if (!list) return;
+  const row = document.createElement("div");
+  row.className = "dropper-choose";
+  const nm = document.createElement("div");
+  nm.className = "dc-name";
+  nm.textContent = file.split(/[\\/]/).pop() || file;
+  nm.title = file;
+  const btns = document.createElement("div");
+  btns.className = "dc-btns";
+  const run = async (mode) => {
+    row.remove();
+    try {
+      const dest = mode === "prompt" ? file : await invoke("save_dropped_path", { src: file, cwd, mode });
+      insertPathIntoTerminal(dest, true);
+      if (mode !== "prompt") addDropperEntry(dest);
+    } catch (err) { dbg(`pick ${mode} FAIL: ${err}`); toast(t("dropper_save_failed") + " " + err, "err"); }
+  };
+  const mk = (label, cls, fn) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.addEventListener("click", fn); return b; };
+  btns.append(
+    mk(t("dz_move"), "", () => run("move")),
+    mk(t("dz_copy"), "", () => run("copy")),
+    mk(t("dz_prompt"), "", () => run("prompt")),
+    mk("✕", "dc-x", () => row.remove()),
+  );
+  row.append(nm, btns);
+  list.prepend(row);
+}
+
 /* ============ init ============ */
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
@@ -1395,6 +1448,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
+  document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
   document.querySelector("#settings-cancel").addEventListener("click", () => els.settingsModal.classList.add("hidden"));
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));

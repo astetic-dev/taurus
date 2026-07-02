@@ -107,6 +107,22 @@ fn pick_folder(app: AppHandle) -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
+// Bestand-kiezer voor de dropzone-+. Start in `start_dir` (de input-map); die
+// maken we zo nodig eerst aan zodat de dialoog daar echt opent. Geeft het gekozen
+// absolute pad terug (None bij annuleren).
+#[tauri::command]
+fn pick_file(app: AppHandle, start_dir: String) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let _ = std::fs::create_dir_all(&start_dir);
+    let mut b = app.dialog().file();
+    if Path::new(&start_dir).is_dir() {
+        b = b.set_directory(&start_dir);
+    }
+    b.blocking_pick_file()
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn path_exists(path: String) -> bool {
     Path::new(&path).is_dir()
@@ -1054,6 +1070,7 @@ pub fn run() {
             get_projects,
             save_projects,
             pick_folder,
+            pick_file,
             path_exists,
             app_version,
             has_claude_md,

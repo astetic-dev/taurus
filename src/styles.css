@@ -372,6 +372,28 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
   cursor: pointer;
 }
 .dropper-item:hover { border-color: var(--accent); color: var(--accent); }
+/* Keuze-rij wanneer een via de + gekozen bestand van ELDERS komt: move/copy/alleen-pad. */
+.dropper-choose {
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  padding: 6px 7px;
+  margin-bottom: 5px;
+}
+.dropper-choose .dc-name {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: 5px;
+}
+.dropper-choose .dc-btns { display: flex; gap: 4px; }
+.dropper-choose .dc-btns button {
+  flex: 1;
+  background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 5px; padding: 3px 4px; font-size: 10px; cursor: pointer;
+}
+.dropper-choose .dc-btns button:hover { color: var(--accent); border-color: var(--accent); }
+.dropper-choose .dc-btns .dc-x { flex: none; padding: 3px 7px; }
 
 /* ---- Sidebar footer ---- */
 .sidebar-footer { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
