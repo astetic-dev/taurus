@@ -48,6 +48,9 @@ consistently. That's what Taurus is for.
 - **Live status** — optionally shows Claude's current activity verb on the tab.
 - **In-app project editor** — add/edit/remove launch buttons (name, folder with a
   browse dialog, colour, default title/task, mode).
+- **Groups & filter** — give projects an optional group to collapse them under
+  clickable sidebar headers, and filter a long list live from a search box that
+  appears once you have eight or more projects.
 - **Per-project mode** — start in `default`, `plan` or `auto` (`--permission-mode`).
 - **Per-project agent + model** — launch `claude` (Claude Code) or `agy` (a
   Gemini-backed agent CLI), optionally pinned to a model, set per project and
@@ -104,7 +107,8 @@ Edit them with the in-app **Projects** editor, or by hand. Format:
     "mode": "default",
     "agent": "claude",
     "model": "",
-    "command": ""
+    "command": "",
+    "group": ""
   }
 ]
 ```
@@ -117,6 +121,11 @@ Edit them with the in-app **Projects** editor, or by hand. Format:
   `--model`.
 - `command` (optional) — run a different program instead of the agent for this
   project (verbatim, no agent flags). Takes precedence over `agent`/`model`.
+- `group` (optional) — projects with the same group collapse under one clickable
+  header in the sidebar (name + count). Named groups start collapsed; what you
+  expand is remembered. Empty = ungrouped at the top, exactly as before. With
+  eight or more projects a filter box appears above the list; typing filters on
+  label, path and group and temporarily shows all matches expanded.
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
 

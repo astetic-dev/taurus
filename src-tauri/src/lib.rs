@@ -32,6 +32,10 @@ struct Project {
     // Model voor de agent (vrije tekst). Leeg = de eigen default van de agent.
     #[serde(default)]
     model: String,
+    // Optionele groep: projecten met dezelfde groep vouwen in de sidebar samen
+    // onder een klikbare kop. Leeg = los bovenaan (gedrag van voorheen).
+    #[serde(default)]
+    group: String,
 }
 
 // Lege defaults: een verse installatie start zonder projecten. De gebruiker

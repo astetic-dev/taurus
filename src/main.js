@@ -34,6 +34,8 @@ const I18N = {
     cap_button: "▸ Knop in het linkermenu", cap_workdir: "Werkmap (lokaal C: of netwerk X:)",
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
+    cap_group: "Groep (optioneel — vouwt samen in het menu)", ph_group: "bijv. Klanten",
+    filter_ph: "Filter projecten…",
     search_ph: "Zoeken…",
     ctx_restart: "↻ Herstart (resume gesprek)", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
     preview_none: "(geen .html in de werkmap)", preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten",
@@ -88,6 +90,8 @@ const I18N = {
     cap_button: "▸ Button in the left menu", cap_workdir: "Working folder (local C: or network X:)",
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
+    cap_group: "Group (optional — collapses in the menu)", ph_group: "e.g. Clients",
+    filter_ph: "Filter projects…",
     search_ph: "Search…",
     ctx_restart: "↻ Restart (resume conversation)", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
     preview_none: "(no .html in the working folder)", preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview",
@@ -359,6 +363,7 @@ const DEFAULT_SETTINGS = {
   persistSessions: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
+  expandedGroups: [], // sidebar-groepen die de gebruiker heeft opengeklapt (dicht = default)
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -403,32 +408,69 @@ function escapeHtml(s) {
 function modalOpen() { return !!document.querySelector(".modal:not(.hidden)"); }
 
 /* ============ projecten ============ */
+// Live filtertekst boven de projectlijst (leeg = geen filter).
+let projectFilter = "";
+
+function projectCard(p) {
+  const card = document.createElement("div");
+  card.className = "project-card" + (p === selected ? " selected" : "");
+  card.style.borderLeftColor = p.accent || "#7c9cff";
+  card.innerHTML =
+    `<div class="pc-label">${escapeHtml(p.label)}</div>` +
+    `<div class="pc-loc ${locClass(p.path)}">${locText(p.path)}</div>` +
+    `<div class="pc-actions">` +
+      `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
+      `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
+    `</div>` +
+    `<div class="pc-confirm">` +
+      `<span>${escapeHtml(t("confirm_delete"))}</span>` +
+      `<button class="pc-yes">${escapeHtml(t("yes"))}</button>` +
+      `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
+    `</div>`;
+  card.addEventListener("click", () => { selectProject(p, card); showView("new"); });
+  // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
+  card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
+  card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
+  card.querySelector(".pc-confirm").addEventListener("click", (e) => e.stopPropagation());
+  card.querySelector(".pc-no").addEventListener("click", (e) => { e.stopPropagation(); card.classList.remove("confirming"); });
+  card.querySelector(".pc-yes").addEventListener("click", (e) => { e.stopPropagation(); deleteProject(p); });
+  return card;
+}
+
+// Lijst hertekenen: eerst de losse projecten (zonder groep), daarna per groep
+// een inklapbare kop. Genoemde groepen staan standaard dicht; de opengeklapte
+// set staat in settings.expandedGroups. Een actieve filter toont ALLE treffers,
+// ongeacht in/uitgeklapt, en negeert kaal-lege groepen vanzelf.
 function renderProjects() {
   els.list.innerHTML = "";
+  const q = projectFilter.trim().toLowerCase();
+  // De filterbalk pas tonen als de lijst groot genoeg is om filteren te lonen.
+  els.projectFilter.classList.toggle("hidden", projects.length < 8 && !q);
+  const match = (p) => !q || `${p.label} ${p.path} ${p.group || ""}`.toLowerCase().includes(q);
+  const grouped = new Map(); // groepnaam -> projecten, in volgorde van eerste voorkomen
   for (const p of projects) {
-    const card = document.createElement("div");
-    card.className = "project-card";
-    card.style.borderLeftColor = p.accent || "#7c9cff";
-    card.innerHTML =
-      `<div class="pc-label">${escapeHtml(p.label)}</div>` +
-      `<div class="pc-loc ${locClass(p.path)}">${locText(p.path)}</div>` +
-      `<div class="pc-actions">` +
-        `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
-        `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
-      `</div>` +
-      `<div class="pc-confirm">` +
-        `<span>${escapeHtml(t("confirm_delete"))}</span>` +
-        `<button class="pc-yes">${escapeHtml(t("yes"))}</button>` +
-        `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
-      `</div>`;
-    card.addEventListener("click", () => { selectProject(p, card); showView("new"); });
-    // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
-    card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
-    card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
-    card.querySelector(".pc-confirm").addEventListener("click", (e) => e.stopPropagation());
-    card.querySelector(".pc-no").addEventListener("click", (e) => { e.stopPropagation(); card.classList.remove("confirming"); });
-    card.querySelector(".pc-yes").addEventListener("click", (e) => { e.stopPropagation(); deleteProject(p); });
-    els.list.appendChild(card);
+    if (!match(p)) continue;
+    const g = (p.group || "").trim();
+    if (!grouped.has(g)) grouped.set(g, []);
+    grouped.get(g).push(p);
+  }
+  for (const p of grouped.get("") || []) els.list.appendChild(projectCard(p));
+  for (const [g, list] of grouped) {
+    if (!g) continue;
+    const open = q ? true : (settings.expandedGroups || []).includes(g);
+    const head = document.createElement("div");
+    head.className = "group-head" + (open ? " open" : "");
+    head.innerHTML = `<span class="gh-arrow">${open ? "▾" : "▸"}</span>` +
+      `<span class="gh-name">${escapeHtml(g)}</span><span class="gh-count">${list.length}</span>`;
+    head.addEventListener("click", () => {
+      const set = new Set(settings.expandedGroups || []);
+      set.has(g) ? set.delete(g) : set.add(g);
+      settings.expandedGroups = [...set];
+      saveSettings();
+      renderProjects();
+    });
+    els.list.appendChild(head);
+    if (open) for (const p of list) els.list.appendChild(projectCard(p));
   }
 }
 
@@ -1096,7 +1138,7 @@ function saveSettingsFromForm() {
 /* ============ project-editor ============ */
 let editRows = [];
 function slugify(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project"; }
-function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "" }; }
+function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "", group: "" }; }
 function openEditor() {
   editRows = projects.map((p) => ({ ...p }));
   if (editRows.length === 0) editRows.push(blankRow());
@@ -1126,6 +1168,8 @@ function renderEditor() {
           <input class="e-title" type="text" placeholder="${escapeHtml(t("ph_title"))}" value="${escapeHtml(r.title || "")}" /></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_task"))}</span>
           <input class="e-task" type="text" placeholder="${escapeHtml(t("ph_task"))}" value="${escapeHtml(r.task || "")}" /></div>
+        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_group"))}</span>
+          <input class="e-group" type="text" list="dl-egroup" autocomplete="off" placeholder="${escapeHtml(t("ph_group"))}" value="${escapeHtml(r.group || "")}" /></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_agent"))}</span>
           <select class="e-agent">
             <option value="claude"${(r.agent || "claude") === "claude" ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
@@ -1143,6 +1187,7 @@ function renderEditor() {
     row.querySelector(".e-path").addEventListener("input", (e) => (editRows[i].path = e.target.value));
     row.querySelector(".e-title").addEventListener("input", (e) => (editRows[i].title = e.target.value));
     row.querySelector(".e-task").addEventListener("input", (e) => (editRows[i].task = e.target.value));
+    row.querySelector(".e-group").addEventListener("input", (e) => (editRows[i].group = e.target.value));
     row.querySelector(".e-mode").addEventListener("change", (e) => (editRows[i].mode = e.target.value));
     row.querySelector(".e-model").addEventListener("input", (e) => (editRows[i].model = e.target.value));
     // Agent wisselen herrendert de rij zodat model-suggesties EN modus-opties
@@ -1158,11 +1203,18 @@ function renderEditor() {
     row.querySelector(".e-del").addEventListener("click", () => { editRows.splice(i, 1); renderEditor(); });
     els.editorRows.appendChild(row);
   });
+  // Eén gedeelde datalist met alle bestaande groepsnamen (uit editor én lijst),
+  // zodat een groep kiezen typo-vrij is maar vrije tekst mogelijk blijft.
+  const names = [...new Set([...editRows, ...projects].map((r) => (r.group || "").trim()).filter(Boolean))].sort();
+  const dl = document.createElement("datalist");
+  dl.id = "dl-egroup";
+  dl.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
+  els.editorRows.appendChild(dl);
 }
 async function saveEditor() {
   const cleaned = editRows
     .filter((r) => r.label.trim() && r.path.trim())
-    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: r.command || "" }));
+    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: r.command || "", group: (r.group || "").trim() }));
   if (cleaned.length === 0) { els.editorStatus.textContent = t("err_need_project"); els.editorStatus.className = "status-msg err"; return; }
   try { await invoke("save_projects", { projects: cleaned }); projects = cleaned; renderProjects(); els.editorModal.classList.add("hidden"); }
   catch (e) { els.editorStatus.textContent = "✗ " + e; els.editorStatus.className = "status-msg err"; }
@@ -1388,6 +1440,7 @@ function showFileChooser(file, cwd) {
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
     list: document.querySelector("#project-list"),
+    projectFilter: document.querySelector("#project-filter"),
     tabbar: document.querySelector("#tabbar"),
     launchView: document.querySelector("#launch-view"),
     terminals: document.querySelector("#terminals"),
@@ -1443,6 +1496,11 @@ window.addEventListener("DOMContentLoaded", () => {
     els.modelInput.value = "";
     fillModelDatalist(els.modelSuggestions, els.agentInput.value);
     fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value);
+  });
+  // Projectfilter: live hertekenen; Esc wist en geeft focus terug aan de lijst.
+  els.projectFilter.addEventListener("input", () => { projectFilter = els.projectFilter.value; renderProjects(); });
+  els.projectFilter.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); projectFilter = els.projectFilter.value = ""; renderProjects(); els.projectFilter.blur(); }
   });
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
