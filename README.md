@@ -52,6 +52,10 @@ consistently. That's what Taurus is for.
 - **Per-project agent + model** — launch `claude` (Claude Code) or `agy` (a
   Gemini-backed agent CLI), optionally pinned to a model, set per project and
   overridable per session.
+- **Explorer column** — optional VS Code-style file tree of the working folder
+  (🗂 in the top bar): follows the selected project or active tab, folders
+  expand/collapse lazily, clicking a file drops its full path into the active
+  terminal, right-click opens it in the OS.
 - **Inline HTML preview** — right-click a tab → *HTML preview*, or click an `.html`
   path in the terminal; it renders beside (or instead of) the terminal.
 - **Restart / resume** — right-click a tab to restart the session and resume the

@@ -43,14 +43,17 @@ html, body {
 }
 button, input, select, textarea { font-family: var(--ui-font); }
 
+/* Flex i.p.v. grid: de optionele verkenner-kolom kan zo verdwijnen (display:
+   none) zonder dat de overige kolommen verschuiven. */
 .app {
-  display: grid;
-  grid-template-columns: 250px 1fr;
+  display: flex;
   height: 100vh;
 }
 
 /* ---- Sidebar ---- */
 .sidebar {
+  flex: none;
+  width: 250px;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   display: flex;
@@ -58,6 +61,33 @@ button, input, select, textarea { font-family: var(--ui-font); }
   padding: 16px 12px;
   min-height: 0;
 }
+
+/* ---- Verkenner-kolom (optioneel, VS Code-stijl boom van de werkmap) ---- */
+.explorer {
+  flex: none;
+  width: 230px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 8px 8px;
+  min-height: 0;
+}
+.explorer-root {
+  font-size: 12px; font-weight: 600; color: var(--text);
+  padding: 4px 8px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.explorer-tree { flex: 1; overflow-y: auto; overflow-x: hidden; font-size: 12px; }
+.exp-row {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 6px; border-radius: 4px; cursor: pointer;
+  color: var(--text-dim); white-space: nowrap;
+}
+.exp-row:hover { background: var(--bg-card-hover); color: var(--text); }
+.exp-row.dir { color: var(--text); }
+.exp-arrow { width: 12px; flex: none; font-size: 10px; }
+.exp-name { overflow: hidden; text-overflow: ellipsis; }
+.exp-hint { color: var(--text-dim); padding: 8px; font-size: 12px; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 18px; }
 .brand-mark { font-size: 28px; color: var(--accent); line-height: 1; }
 .brand-title { font-size: 18px; font-weight: 700; letter-spacing: .3px; }
@@ -116,7 +146,7 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .reload-btn:hover { color: var(--text); border-color: var(--accent); }
 
 /* ---- Panel ---- */
-.panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.panel { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .hidden { display: none !important; }
 
 /* ---- Tabbalk ---- */

@@ -637,6 +637,40 @@ fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+// ===== Verkenner-kolom =====
+// Eén map niet-recursief oplijsten voor de boomweergave: mappen eerst, daarna
+// bestanden, beide alfabetisch. De boom laadt lui (per uitklap), dus dit blijft
+// goedkoop; 1000 entries is de vangrail voor extreem volle mappen.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TreeEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+}
+
+#[tauri::command]
+fn list_dir(path: String) -> Vec<TreeEntry> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&path) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            out.push(TreeEntry {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                path: p.to_string_lossy().into_owned(),
+                is_dir: p.is_dir(),
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    out.truncate(1000);
+    out
+}
+
 #[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
     std::process::Command::new("explorer")
@@ -1083,6 +1117,7 @@ pub fn run() {
             resize_session,
             close_session,
             list_html,
+            list_dir,
             read_file,
             open_folder,
             save_dropped_path,

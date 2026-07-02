@@ -56,6 +56,9 @@ const I18N = {
     dropper_paste_failed: "✗ Plakken van object mislukt:",
     reload: "Herlaad", new_project: "Nieuw project", add_file: "Bestand toevoegen",
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
+    explorer: "VERKENNER", exp_toggle: "Verkenner-kolom aan/uit", exp_refresh: "Vernieuwen",
+    exp_no_root: "Kies een project of open een sessie om de werkmap te zien.",
+    exp_empty: "(leeg)",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Projects",
@@ -110,6 +113,9 @@ const I18N = {
     dropper_paste_failed: "✗ Could not paste object:",
     reload: "Reload", new_project: "New project", add_file: "Add file",
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
+    explorer: "EXPLORER", exp_toggle: "Toggle explorer column", exp_refresh: "Refresh",
+    exp_no_root: "Pick a project or open a session to see its working folder.",
+    exp_empty: "(empty)",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -359,6 +365,7 @@ const DEFAULT_SETTINGS = {
   persistSessions: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
+  showExplorer: false, // verkenner-kolom naast de projectlijst
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -466,6 +473,7 @@ async function selectProject(p, card) {
   let hasMd = false;
   try { hasMd = await invoke("has_claude_md", { path: p.path }); } catch (_) {}
   els.claudeWarn.classList.toggle("hidden", hasMd);
+  syncExplorerRoot();
 }
 async function loadProjects() { projects = await invoke("get_projects"); renderProjects(); }
 
@@ -531,6 +539,7 @@ function showView(target) {
     if (s) { s.awaiting = false; refitTerm(s); s.term.focus(); }
   }
   renderTabs();
+  syncExplorerRoot();
 }
 
 /* ============ sessie starten ============ */
@@ -1384,10 +1393,97 @@ function showFileChooser(file, cwd) {
   list.prepend(row);
 }
 
+/* ============ verkenner-kolom ============ */
+// Optionele boomweergave van de werkmap naast de projectlijst (VS Code-stijl).
+// De wortel volgt de context (actieve sessie, anders het geselecteerde project);
+// mappen laden lui per uitklap; een klik op een bestand plaatst het pad in de
+// actieve terminal (zelfde gedrag als de DROPZONE "alleen pad").
+let explorerRoot = null;
+const explorerOpen = new Set(); // opengeklapte submappen (absolute paden)
+
+function applyExplorerVisibility() {
+  els.explorer.classList.toggle("hidden", !settings.showExplorer);
+  if (settings.showExplorer) syncExplorerRoot(true);
+  resizeActive(); // kolom erbij/eraf = andere terminalbreedte
+}
+
+function toggleExplorer() {
+  settings.showExplorer = !settings.showExplorer;
+  saveSettings();
+  applyExplorerVisibility();
+}
+
+// Wortel bijwerken als de context wisselt; `force` hertekent ook bij gelijke
+// wortel (gebruikt bij het aanzetten van de kolom en de vernieuw-knop).
+function syncExplorerRoot(force) {
+  if (!settings.showExplorer) return;
+  const root = dropperCwd();
+  if (root === explorerRoot && !force) return;
+  if (root !== explorerRoot) explorerOpen.clear();
+  explorerRoot = root;
+  renderExplorer();
+}
+
+async function renderExplorer() {
+  const name = explorerRoot ? explorerRoot.replace(/[\\/]+$/, "").split(/[\\/]/).pop() : "—";
+  els.explorerRootLbl.textContent = name;
+  els.explorerRootLbl.title = explorerRoot || "";
+  els.explorerTree.innerHTML = "";
+  if (!explorerRoot) {
+    const d = document.createElement("div");
+    d.className = "exp-hint";
+    d.textContent = t("exp_no_root");
+    els.explorerTree.appendChild(d);
+    return;
+  }
+  await renderExplorerDir(els.explorerTree, explorerRoot, 0);
+}
+
+async function renderExplorerDir(container, path, depth) {
+  let entries = [];
+  try { entries = await invoke("list_dir", { path }); } catch (_) {}
+  if (depth === 0 && entries.length === 0) {
+    const d = document.createElement("div");
+    d.className = "exp-hint";
+    d.textContent = t("exp_empty");
+    container.appendChild(d);
+    return;
+  }
+  for (const en of entries) {
+    const open = en.isDir && explorerOpen.has(en.path);
+    const row = document.createElement("div");
+    row.className = "exp-row" + (en.isDir ? " dir" : "");
+    row.style.paddingLeft = 8 + depth * 14 + "px";
+    row.innerHTML = `<span class="exp-arrow">${en.isDir ? (open ? "▾" : "▸") : ""}</span><span class="exp-name"></span>`;
+    row.querySelector(".exp-name").textContent = en.name;
+    row.title = en.path;
+    row.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (en.isDir) {
+        open ? explorerOpen.delete(en.path) : explorerOpen.add(en.path);
+        renderExplorer();
+      } else {
+        insertPathIntoTerminal(en.path);
+      }
+    });
+    // Rechtsklik: open in het OS (map in Verkenner; bestand met z'n standaard-app).
+    row.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      invoke("open_folder", { path: en.path }).catch(() => {});
+    });
+    container.appendChild(row);
+    if (open) await renderExplorerDir(container, en.path, depth + 1);
+  }
+}
+
 /* ============ init ============ */
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
     list: document.querySelector("#project-list"),
+    explorer: document.querySelector("#explorer"),
+    explorerRootLbl: document.querySelector("#explorer-root"),
+    explorerTree: document.querySelector("#explorer-tree"),
     tabbar: document.querySelector("#tabbar"),
     launchView: document.querySelector("#launch-view"),
     terminals: document.querySelector("#terminals"),
@@ -1446,6 +1542,8 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
+  document.querySelector("#explorer-btn").addEventListener("click", toggleExplorer);
+  document.querySelector("#explorer-refresh").addEventListener("click", () => syncExplorerRoot(true));
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
@@ -1475,6 +1573,7 @@ window.addEventListener("DOMContentLoaded", () => {
   applyI18n();
   wireGarble();
   wireFileDropper();
+  applyExplorerVisibility();
   // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);

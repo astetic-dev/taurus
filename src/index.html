@@ -79,10 +79,20 @@
         <div id="app-version" class="app-version"></div>
       </aside>
 
+      <aside id="explorer" class="explorer hidden">
+        <div class="section-head">
+          <div class="sidebar-label dropzone-label" data-i18n="explorer">VERKENNER</div>
+          <button id="explorer-refresh" class="icon-btn sec-add" data-i18n-title="exp_refresh">⟳</button>
+        </div>
+        <div id="explorer-root" class="explorer-root" title=""></div>
+        <div id="explorer-tree" class="explorer-tree"></div>
+      </aside>
+
       <main class="panel">
         <div class="topbar">
           <div id="tabbar" class="tabbar"></div>
           <div class="top-controls">
+            <button id="explorer-btn" class="icon-btn" data-i18n-title="exp_toggle">🗂</button>
             <button id="settings-btn" class="icon-btn" data-i18n-title="settings">⚙</button>
             <button id="reload-btn" class="icon-btn" data-i18n-title="reload">⟳</button>
           </div>
