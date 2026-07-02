@@ -243,27 +243,37 @@ fn session_state(path: String, uuid: String) -> SessionState {
     }
 }
 
-// Welk uitvoerbaar bestand hoort bij deze agent? Leeg/"claude" -> claude.exe,
-// "agy" -> agy.exe (de Gemini-agent-CLI).
-fn agent_exe(agent: &str) -> &'static str {
+// Basisnaam van de agent-CLI: leeg/"claude" -> claude, "agy" -> agy.
+fn agent_base(agent: &str) -> &'static str {
     match agent {
-        "agy" => "agy.exe",
-        _ => "claude.exe",
+        "agy" => "agy",
+        _ => "claude",
     }
 }
 
-// Zoek het exe van de agent via PATH, met fallback naar de kale naam.
-fn resolve_program(agent: &str) -> String {
-    let exe = agent_exe(agent);
+// Zoek de agent-CLI via PATH. Geeft (programma, prefix-args) terug: een echte
+// .exe start direct; een npm-shim (.cmd/.bat, zoals `npm install -g
+// @anthropic-ai/claude-code` oplevert) kan CreateProcess niet zelf starten en
+// loopt daarom via `cmd.exe /c <pad>`. Zoekvolgorde per PATH-map: .exe voor
+// .cmd/.bat (zoals PATHEXT). Fallback: de kale exe-naam.
+fn resolve_program(agent: &str) -> (String, Vec<String>) {
+    let base = agent_base(agent);
     if let Ok(paths) = std::env::var("PATH") {
         for p in std::env::split_paths(&paths) {
-            let cand = p.join(exe);
-            if cand.is_file() {
-                return cand.to_string_lossy().into_owned();
+            for ext in ["exe", "cmd", "bat"] {
+                let cand = p.join(format!("{}.{}", base, ext));
+                if cand.is_file() {
+                    let full = cand.to_string_lossy().into_owned();
+                    return if ext == "exe" {
+                        (full, Vec::new())
+                    } else {
+                        ("cmd.exe".into(), vec!["/c".into(), full])
+                    };
+                }
             }
         }
     }
-    exe.to_string()
+    (format!("{}.exe", base), Vec::new())
 }
 
 // Een actieve terminal-sessie: de PTY-master (voor resize), de writer (stdin)
@@ -388,8 +398,7 @@ fn build_command(
     model: &str,
     full_paths: bool,
 ) -> (String, Vec<String>) {
-    let program = resolve_program(agent);
-    let mut a: Vec<String> = Vec::new();
+    let (program, mut a) = resolve_program(agent);
     match agent {
         // agy (Antigravity/Gemini-agent): kent geen --session-id / -n /
         // --permission-mode / --append-system-prompt. Modus: auto -> alle tools
