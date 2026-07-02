@@ -25,6 +25,9 @@ tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 portable-pty = "0.8"
+# PNG-encoder om een geplakte klembord-afbeelding (RGBA uit clipboard-manager)
+# als bestand in de input-map weg te schrijven. Klein, pure-Rust.
+png = "0.17"
 
 # Windows-only: nodig om de WebView2 browser-accelerator-keys (F5, Ctrl+R,
 # Ctrl+Shift+R, devtools) uit te zetten via een COM-call. Versies gepind op

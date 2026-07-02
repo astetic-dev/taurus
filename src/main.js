@@ -48,6 +48,13 @@ const I18N = {
     restore_failed: "Hervatten mislukt voor:",
     copy_failed: "✗ Kopiëren naar klembord mislukt:",
     err_need_project: "✗ Minstens één project met naam én pad nodig.",
+    dropper: "Bestanden", dropper_hint: "Sleep bestand of map hierheen",
+    dz_move: "Verplaats", dz_copy: "Kopieer", dz_prompt: "Alleen pad", dz_paste: "Plak object",
+    dp_copy: "Kopieer", dp_terminal: "Terminal",
+    dropper_need_project: "Kies eerst een project of open een sessie",
+    dropper_no_session: "Geen actieve terminal om het pad in te plaatsen",
+    dropper_save_failed: "✗ Opslaan in input-map mislukt:",
+    dropper_paste_failed: "✗ Plakken van object mislukt:",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Projects",
@@ -94,6 +101,13 @@ const I18N = {
     restore_failed: "Could not resume:",
     copy_failed: "✗ Copy to clipboard failed:",
     err_need_project: "✗ Need at least one project with a name and a path.",
+    dropper: "Files", dropper_hint: "Drag a file or folder here",
+    dz_move: "Move", dz_copy: "Copy", dz_prompt: "Path only", dz_paste: "Paste object",
+    dp_copy: "Copy", dp_terminal: "Terminal",
+    dropper_need_project: "Pick a project or open a session first",
+    dropper_no_session: "No active terminal to insert the path into",
+    dropper_save_failed: "✗ Could not save into the input folder:",
+    dropper_paste_failed: "✗ Could not paste object:",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -1165,6 +1179,119 @@ document.addEventListener("keydown", (e) => {
   }
 }, true);
 
+/* ============ file-dropper (sidebar) ============ */
+// Sleep een bestand of map het venster in -> Verplaats/Kopieer naar <werkmap>\input,
+// of Alleen-pad (post enkel het bestaande pad). Objecten (geplakte tekst/afbeelding)
+// lopen via de Plak-knop. Native drop blijft aan (dragDropEnabled = default), dus we
+// luisteren naar de Tauri drag-drop-events, niet naar HTML5 DOM-drop -- die vuren bij
+// ingeschakelde native drop niet. De drop-positie (physical px) hittesten we tegen de
+// drie zones om de modus te bepalen; buiten de dropper negeren we de drop.
+
+// Doel-werkmap: de actieve sessie, anders het geselecteerde project, anders geen.
+function dropperCwd() {
+  const s = sessions.get(current);
+  if (s && s.path) return s.path;
+  if (selected && selected.path) return selected.path;
+  return null;
+}
+
+// Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
+// door een spatie zodat je meteen door kunt typen).
+function insertPathIntoTerminal(absPath) {
+  const s = sessions.get(current);
+  if (!s) { toast(t("dropper_no_session"), "err"); return; }
+  const arg = /\s/.test(absPath) ? `"${absPath}"` : absPath;
+  invoke("write_session", { id: s.id, data: arg + " " });
+}
+
+// Voeg een resultaatregel toe: bestandsnaam (volledig pad als tooltip) + Kopieer- en
+// Terminal-knop. textContent i.p.v. innerHTML zodat een rare bestandsnaam nooit als
+// HTML geinterpreteerd wordt.
+function addDropperEntry(absPath) {
+  const list = els.dropperList;
+  if (!list) return;
+  const name = absPath.split(/[\\/]/).pop() || absPath;
+  const row = document.createElement("div");
+  row.className = "dropper-item";
+  const nm = document.createElement("span");
+  nm.className = "dropper-name";
+  nm.textContent = name;
+  nm.title = absPath;
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "dropper-act";
+  copyBtn.textContent = t("dp_copy");
+  copyBtn.addEventListener("click", () => copyToClipboard(absPath));
+  const termBtn = document.createElement("button");
+  termBtn.className = "dropper-act";
+  termBtn.textContent = t("dp_terminal");
+  termBtn.addEventListener("click", () => insertPathIntoTerminal(absPath));
+  row.append(nm, copyBtn, termBtn);
+  list.prepend(row);
+}
+
+function wireFileDropper() {
+  const panel = els.fileDropper;
+  if (!panel) return;
+  const zoneEls = [...panel.querySelectorAll(".dz")];
+
+  // Physical -> CSS px voor het hittesten (Tauri geeft physical; getBoundingClientRect
+  // is CSS). Buiten de dropper -> null (drop negeren). In de dropper maar niet op een
+  // zone -> "prompt" (veilige default, ook bij een snelle drop voordat je mikt).
+  function modeAt(pos) {
+    if (!pos) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const x = pos.x / dpr, y = pos.y / dpr;
+    const pr = panel.getBoundingClientRect();
+    if (x < pr.left || x > pr.right || y < pr.top || y > pr.bottom) return null;
+    for (const el of zoneEls) {
+      const r = el.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el.dataset.mode;
+    }
+    return "prompt";
+  }
+  function highlight(mode) {
+    panel.classList.toggle("dropzone-active", mode != null);
+    zoneEls.forEach((el) => el.classList.toggle("hot", el.dataset.mode === mode));
+  }
+  function cool() {
+    panel.classList.remove("dropzone-active");
+    zoneEls.forEach((el) => el.classList.remove("hot"));
+  }
+
+  listen("tauri://drag-enter", (e) => highlight(modeAt(e.payload && e.payload.position)));
+  listen("tauri://drag-over", (e) => highlight(modeAt(e.payload && e.payload.position)));
+  listen("tauri://drag-leave", cool);
+  listen("tauri://drag-drop", async (e) => {
+    cool();
+    const mode = modeAt(e.payload && e.payload.position);
+    if (!mode) return; // buiten de dropper: negeren
+    const paths = (e.payload && e.payload.paths) || [];
+    if (!paths.length) return;
+    const cwd = dropperCwd();
+    if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    for (const src of paths) {
+      try {
+        if (mode === "prompt") addDropperEntry(src);
+        else addDropperEntry(await invoke("save_dropped_path", { src, cwd, mode }));
+      } catch (err) {
+        dbg(`drop ${mode} FAIL: ${err}`);
+        toast(t("dropper_save_failed") + " " + err, "err");
+      }
+    }
+  });
+
+  els.dropperPaste.addEventListener("click", async () => {
+    const cwd = dropperCwd();
+    if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    try {
+      addDropperEntry(await invoke("save_clipboard_to_input", { cwd }));
+    } catch (err) {
+      dbg(`paste-object FAIL: ${err}`);
+      toast(t("dropper_paste_failed") + " " + err, "err");
+    }
+  });
+}
+
 /* ============ init ============ */
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
@@ -1211,6 +1338,9 @@ window.addEventListener("DOMContentLoaded", () => {
     editorRows: document.querySelector("#editor-rows"),
     editorStatus: document.querySelector("#editor-status"),
     appVersion: document.querySelector("#app-version"),
+    fileDropper: document.querySelector("#file-dropper"),
+    dropperList: document.querySelector("#dropper-list"),
+    dropperPaste: document.querySelector("#dropper-paste"),
   });
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
@@ -1251,6 +1381,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadSettings();
   applyI18n();
   wireGarble();
+  wireFileDropper();
   // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);

@@ -17,6 +17,10 @@ projects.json
 projects.real.json
 /out
 
+# File-dropper: dropped/pasted files land in <working dir>/input. When Taurus
+# runs inside its own repo, that folder shows up here as a runtime artifact.
+/input/
+
 # White-label branding is a local config item — keep brands out of the repo.
 # Real branding lives in %APPDATA%\Taurus\branding.json (+ a logo); these are
 # only here in case someone keeps a copy in the working tree for testing.
