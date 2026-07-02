@@ -350,7 +350,9 @@ const sessions = new Map();
 const els = {};
 
 const DEFAULT_SETTINGS = {
-  lang: "nl",
+  // Standaardtaal volgt het OS: alleen een Nederlandstalig systeem start in het
+  // Nederlands; al het andere in het Engels. Een opgeslagen keuze wint altijd.
+  lang: (navigator.language || "en").toLowerCase().startsWith("nl") ? "nl" : "en",
   fontSize: 13, scrollback: 8000, cursorBlink: true,
   htmlView: "split",
   copyOnSelect: true, pasteOnRightClick: true, ctrlShiftCV: true,
