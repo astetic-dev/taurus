@@ -51,6 +51,10 @@ consistently. That's what Taurus is for.
 - **Groups & filter** — give projects an optional group to collapse them under
   clickable sidebar headers, and filter a long list live from a search box that
   appears once you have eight or more projects.
+- **Scan a folder** — in the Projects editor, pick a root folder and every
+  subfolder carrying a `CLAUDE.md`/`AGENTS.md` (two levels deep) is added as an
+  editable row — label from the folder name, group from the parent folder —
+  ready to tweak and save.
 - **Per-project mode** — start in `default`, `plan` or `auto` (`--permission-mode`).
 - **Per-project agent + model** — launch `claude` (Claude Code) or `agy` (a
   Gemini-backed agent CLI), optionally pinned to a model, set per project and

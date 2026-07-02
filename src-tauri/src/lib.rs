@@ -155,6 +155,82 @@ fn has_claude_md(path: String) -> bool {
     false
 }
 
+// ===== Scan-import =====
+// Heeft deze map een agent-instructiebestand (CLAUDE.md of AGENTS.md,
+// hoofdletterongevoelig)? Zo'n map is een kandidaat-project voor de editor.
+fn has_agent_md(dir: &Path) -> bool {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    for entry in rd.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if name == "claude.md" || name == "agents.md" {
+            return true;
+        }
+    }
+    false
+}
+
+#[derive(serde::Serialize)]
+struct ScanHit {
+    path: String,
+    name: String,
+    parent: String, // naam van de tussenliggende map (leeg als direct onder de root)
+}
+
+fn scan_projects_walk(root: &Path, dir: &Path, depth: i32, out: &mut Vec<ScanHit>) {
+    if depth < 0 {
+        return;
+    }
+    // Zelfde overslaan-lijst als scan_html: gegenereerde/zware mappen.
+    let skip = ["node_modules", ".git", "target", "dist", ".next", "vendor", "bin", "obj"];
+    let rd = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    for entry in rd.flatten() {
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if skip.contains(&name.to_lowercase().as_str()) || name.starts_with('.') {
+            continue;
+        }
+        if has_agent_md(&p) {
+            let parent = p
+                .parent()
+                .filter(|par| *par != root)
+                .and_then(|par| par.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            out.push(ScanHit {
+                path: p.to_string_lossy().into_owned(),
+                name,
+                parent,
+            });
+        } else {
+            // Alleen afdalen in mappen die zelf geen project zijn: een project-
+            // map met een eigen CLAUDE.md is het eindpunt, niet een container.
+            scan_projects_walk(root, &p, depth - 1, out);
+        }
+    }
+}
+
+// Vind projectmappen (met CLAUDE.md/AGENTS.md) onder `root`, max 2 niveaus
+// diep. De frontend voegt de treffers als bewerkbare editor-rijen toe; hier
+// wordt niets opgeslagen.
+#[tauri::command]
+fn scan_projects(root: String) -> Vec<ScanHit> {
+    let root_path = Path::new(&root);
+    let mut out = Vec::new();
+    scan_projects_walk(root_path, root_path, 1, &mut out);
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.truncate(500);
+    out
+}
+
 // ===== Persistente sessies =====
 // Een opgeslagen sessie: genoeg om bij de volgende start `claude --resume <uuid>`
 // te doen. De `id` is een vluchtige UI-handle; de `uuid` is het anker.
@@ -1087,6 +1163,7 @@ pub fn run() {
             path_exists,
             app_version,
             has_claude_md,
+            scan_projects,
             save_sessions,
             get_sessions,
             session_state,

@@ -35,6 +35,9 @@ const I18N = {
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     cap_group: "Groep (optioneel — vouwt samen in het menu)", ph_group: "bijv. Klanten",
+    editor_scan: "📂 Scan een map…",
+    scan_result: "{found} projectmappen gevonden, {added} toegevoegd (nog niet opgeslagen)",
+    scan_none: "Geen mappen met CLAUDE.md/AGENTS.md gevonden.",
     filter_ph: "Filter projecten…",
     search_ph: "Zoeken…",
     ctx_restart: "↻ Herstart (resume gesprek)", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
@@ -91,6 +94,9 @@ const I18N = {
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     cap_group: "Group (optional — collapses in the menu)", ph_group: "e.g. Clients",
+    editor_scan: "📂 Scan a folder…",
+    scan_result: "{found} project folders found, {added} added (not saved yet)",
+    scan_none: "No folders with a CLAUDE.md/AGENTS.md found.",
     filter_ph: "Filter projects…",
     search_ph: "Search…",
     ctx_restart: "↻ Restart (resume conversation)", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
@@ -1211,6 +1217,33 @@ function renderEditor() {
   dl.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
   els.editorRows.appendChild(dl);
 }
+// Scan-import: kies een map, laat de backend projectmappen (met CLAUDE.md/
+// AGENTS.md) zoeken en voeg nieuwe treffers als bewerkbare rijen toe. Er wordt
+// pas iets opgeslagen als de gebruiker op Opslaan klikt.
+async function scanIntoEditor() {
+  let dir = null;
+  try { dir = await invoke("pick_folder"); } catch (_) { return; }
+  if (!dir) return; // geannuleerd
+  let hits = [];
+  try { hits = await invoke("scan_projects", { root: dir }); }
+  catch (e) { els.editorStatus.textContent = "✗ " + e; els.editorStatus.className = "status-msg err"; return; }
+  if (hits.length === 0) { els.editorStatus.textContent = t("scan_none"); els.editorStatus.className = "status-msg"; return; }
+  const norm = (p) => (p || "").toLowerCase().replace(/[\\/]+$/, "");
+  const have = new Set(editRows.map((r) => norm(r.path)));
+  let added = 0;
+  for (const h of hits) {
+    if (have.has(norm(h.path))) continue;
+    have.add(norm(h.path));
+    editRows.push({ ...blankRow(), label: h.name, path: h.path, title: h.name, group: h.parent || "" });
+    added++;
+  }
+  // Een nog lege beginregel opruimen zodat de import niet achter een spookrij hangt.
+  if (added > 0) editRows = editRows.filter((r) => r.label.trim() || r.path.trim());
+  renderEditor();
+  els.editorStatus.textContent = t("scan_result").replace("{found}", hits.length).replace("{added}", added);
+  els.editorStatus.className = "status-msg";
+}
+
 async function saveEditor() {
   const cleaned = editRows
     .filter((r) => r.label.trim() && r.path.trim())
@@ -1512,6 +1545,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
   document.querySelector("#editor-save").addEventListener("click", saveEditor);
   document.querySelector("#editor-add").addEventListener("click", () => { editRows.push(blankRow()); renderEditor(); });
+  document.querySelector("#editor-scan").addEventListener("click", scanIntoEditor);
   document.querySelector("#search-next").addEventListener("click", () => doSearch(1));
   document.querySelector("#search-prev").addEventListener("click", () => doSearch(-1));
   document.querySelector("#search-close").addEventListener("click", closeSearch);
