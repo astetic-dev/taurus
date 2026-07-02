@@ -23,7 +23,10 @@
           <div class="brand-sub" data-i18n="brand_sub">Agent Launcher</div>
         </div>
 
-        <div class="sidebar-label" data-i18n="projects">Projecten</div>
+        <div class="section-head">
+          <div class="sidebar-label dropzone-label" data-i18n="projects">Projecten</div>
+          <button id="add-project-btn" class="icon-btn sec-add" data-i18n-title="new_project">＋</button>
+        </div>
         <div id="project-list" class="project-list"></div>
 
         <div class="sidebar-label dropzone-label" data-i18n="dropper">DROPZONE</div>
@@ -70,16 +73,17 @@
           <div id="dropper-list" class="dropper-list"></div>
         </div>
 
-        <div class="sidebar-footer">
-          <button id="edit-btn" class="foot-btn" data-i18n="foot_projects">✎ Projecten</button>
-          <button id="settings-btn" class="foot-btn" data-i18n="foot_settings">⚙ Instellingen</button>
-          <button id="reload-btn" class="foot-btn" data-i18n="foot_reload">⟳ Herlaad</button>
-        </div>
         <div id="app-version" class="app-version"></div>
       </aside>
 
       <main class="panel">
-        <div id="tabbar" class="tabbar"></div>
+        <div class="topbar">
+          <div id="tabbar" class="tabbar"></div>
+          <div class="top-controls">
+            <button id="settings-btn" class="icon-btn" data-i18n-title="settings">⚙</button>
+            <button id="reload-btn" class="icon-btn" data-i18n-title="reload">⟳</button>
+          </div>
+        </div>
 
         <div class="stage">
           <section id="launch-view" class="launch-view">

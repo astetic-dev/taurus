@@ -82,6 +82,27 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .pc-loc.local { color: var(--green); }
 .pc-loc.net { color: var(--orange); }
 
+/* Hover-acties op een projectkaart: bewerken + verwijderen (met bevestiging). */
+.project-card { position: relative; }
+.pc-actions { position: absolute; top: 6px; right: 6px; display: none; gap: 4px; }
+.project-card:hover .pc-actions { display: flex; }
+.pc-actions button {
+  background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 5px; padding: 1px 6px; font-size: 11px; line-height: 1.5; cursor: pointer;
+}
+.pc-actions .pc-edit:hover { color: var(--accent); border-color: var(--accent); }
+.pc-actions .pc-del:hover { color: var(--red); border-color: var(--red); }
+.pc-confirm {
+  display: none; position: absolute; inset: 0;
+  align-items: center; justify-content: center; gap: 8px;
+  background: var(--bg-card); border-radius: 8px; font-size: 12px; color: var(--text);
+}
+.project-card.confirming .pc-confirm { display: flex; }
+.project-card.confirming .pc-actions { display: none; }
+.pc-confirm button { border-radius: 5px; padding: 3px 12px; cursor: pointer; border: 1px solid var(--border); font-size: 12px; }
+.pc-confirm .pc-yes { background: var(--red); color: #fff; border-color: var(--red); }
+.pc-confirm .pc-no { background: transparent; color: var(--text-dim); }
+
 .reload-btn {
   margin-top: 10px;
   background: transparent;
@@ -137,6 +158,26 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .tab .tab-close:hover { color: var(--red); }
 .tab.newtab { color: var(--accent); border-top-color: transparent; background: transparent; font-weight: 600; }
 .tab.newtab.active { background: var(--bg); }
+
+/* ---- Topbar met de tabs links en (rechtsboven) instellingen + herlaad ---- */
+.topbar { display: flex; align-items: stretch; }
+.topbar .tabbar { flex: 1; }
+.top-controls {
+  flex: none; display: flex; align-items: center; gap: 6px;
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.icon-btn {
+  background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 6px; padding: 5px 9px; font-size: 14px; line-height: 1; cursor: pointer;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--accent); }
+
+/* Sectiekop: gecentreerd label (---- PROJECTS ----) met een + rechts. */
+.section-head { display: flex; align-items: center; gap: 6px; }
+.section-head .dropzone-label { flex: 1; }
+.sec-add { padding: 2px 8px; font-size: 15px; }
 
 /* ---- Stage ---- */
 .stage { position: relative; flex: 1; min-height: 0; }

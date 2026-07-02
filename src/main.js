@@ -54,6 +54,8 @@ const I18N = {
     dropper_no_session: "Geen actieve terminal om het pad in te plaatsen",
     dropper_save_failed: "✗ Opslaan in input-map mislukt:",
     dropper_paste_failed: "✗ Plakken van object mislukt:",
+    reload: "Herlaad", new_project: "Nieuw project",
+    edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Projects",
@@ -106,6 +108,8 @@ const I18N = {
     dropper_no_session: "No active terminal to insert the path into",
     dropper_save_failed: "✗ Could not save into the input folder:",
     dropper_paste_failed: "✗ Could not paste object:",
+    reload: "Reload", new_project: "New project",
+    edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -113,6 +117,7 @@ function applyI18n() {
   const d = I18N[settings.lang] || I18N.nl;
   document.querySelectorAll("[data-i18n]").forEach((el) => { const k = el.getAttribute("data-i18n"); if (d[k] != null) el.textContent = d[k]; });
   document.querySelectorAll("[data-i18n-ph]").forEach((el) => { const k = el.getAttribute("data-i18n-ph"); if (d[k] != null) el.placeholder = d[k]; });
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => { const k = el.getAttribute("data-i18n-title"); if (d[k] != null) el.title = d[k]; });
   document.documentElement.lang = settings.lang || "nl";
 }
 
@@ -404,10 +409,39 @@ function renderProjects() {
     const card = document.createElement("div");
     card.className = "project-card";
     card.style.borderLeftColor = p.accent || "#7c9cff";
-    card.innerHTML = `<div class="pc-label">${escapeHtml(p.label)}</div><div class="pc-loc ${locClass(p.path)}">${locText(p.path)}</div>`;
+    card.innerHTML =
+      `<div class="pc-label">${escapeHtml(p.label)}</div>` +
+      `<div class="pc-loc ${locClass(p.path)}">${locText(p.path)}</div>` +
+      `<div class="pc-actions">` +
+        `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
+        `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
+      `</div>` +
+      `<div class="pc-confirm">` +
+        `<span>${escapeHtml(t("confirm_delete"))}</span>` +
+        `<button class="pc-yes">${escapeHtml(t("yes"))}</button>` +
+        `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
+      `</div>`;
     card.addEventListener("click", () => { selectProject(p, card); showView("new"); });
+    // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
+    card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
+    card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
+    card.querySelector(".pc-confirm").addEventListener("click", (e) => e.stopPropagation());
+    card.querySelector(".pc-no").addEventListener("click", (e) => { e.stopPropagation(); card.classList.remove("confirming"); });
+    card.querySelector(".pc-yes").addEventListener("click", (e) => { e.stopPropagation(); deleteProject(p); });
     els.list.appendChild(card);
   }
+}
+
+// Verwijder een project (na bevestiging in de kaart). Persist, herteken; als het
+// geselecteerde project verdwijnt, terug naar het lege startformulier.
+async function deleteProject(p) {
+  const next = projects.filter((x) => x !== p);
+  try {
+    await invoke("save_projects", { projects: next });
+    projects = next;
+    if (selected === p) { selected = null; resetLaunchForm(); }
+    renderProjects();
+  } catch (e) { toast("✗ " + e, "err"); }
 }
 async function selectProject(p, card) {
   selected = p;
@@ -1070,6 +1104,12 @@ function openEditor() {
   els.editorStatus.textContent = "";
   els.editorModal.classList.remove("hidden");
 }
+// Zelfde editor, maar meteen met een verse lege regel (de + bij PROJECTS).
+function openEditorAdd() {
+  openEditor();
+  editRows.push(blankRow());
+  renderEditor();
+}
 function renderEditor() {
   els.editorRows.innerHTML = "";
   editRows.forEach((r, i) => {
@@ -1354,7 +1394,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
-  document.querySelector("#edit-btn").addEventListener("click", openEditor);
+  document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
   document.querySelector("#settings-cancel").addEventListener("click", () => els.settingsModal.classList.add("hidden"));
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
