@@ -3927,8 +3927,9 @@ dependencies = [
 
 [[package]]
 name = "taurus"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
+ "png 0.17.16",
  "portable-pty",
  "serde",
  "serde_json",

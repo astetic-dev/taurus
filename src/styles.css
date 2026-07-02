@@ -82,6 +82,27 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .pc-loc.local { color: var(--green); }
 .pc-loc.net { color: var(--orange); }
 
+/* Hover-acties op een projectkaart: bewerken + verwijderen (met bevestiging). */
+.project-card { position: relative; }
+.pc-actions { position: absolute; top: 6px; right: 6px; display: none; gap: 4px; }
+.project-card:hover .pc-actions { display: flex; }
+.pc-actions button {
+  background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 5px; padding: 1px 6px; font-size: 11px; line-height: 1.5; cursor: pointer;
+}
+.pc-actions .pc-edit:hover { color: var(--accent); border-color: var(--accent); }
+.pc-actions .pc-del:hover { color: var(--red); border-color: var(--red); }
+.pc-confirm {
+  display: none; position: absolute; inset: 0;
+  align-items: center; justify-content: center; gap: 8px;
+  background: var(--bg-card); border-radius: 8px; font-size: 12px; color: var(--text);
+}
+.project-card.confirming .pc-confirm { display: flex; }
+.project-card.confirming .pc-actions { display: none; }
+.pc-confirm button { border-radius: 5px; padding: 3px 12px; cursor: pointer; border: 1px solid var(--border); font-size: 12px; }
+.pc-confirm .pc-yes { background: var(--red); color: #fff; border-color: var(--red); }
+.pc-confirm .pc-no { background: transparent; color: var(--text-dim); }
+
 .reload-btn {
   margin-top: 10px;
   background: transparent;
@@ -137,6 +158,26 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .tab .tab-close:hover { color: var(--red); }
 .tab.newtab { color: var(--accent); border-top-color: transparent; background: transparent; font-weight: 600; }
 .tab.newtab.active { background: var(--bg); }
+
+/* ---- Topbar met de tabs links en (rechtsboven) instellingen + herlaad ---- */
+.topbar { display: flex; align-items: stretch; }
+.topbar .tabbar { flex: 1; }
+.top-controls {
+  flex: none; display: flex; align-items: center; gap: 6px;
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.icon-btn {
+  background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 6px; padding: 5px 9px; font-size: 14px; line-height: 1; cursor: pointer;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--accent); }
+
+/* Sectiekop: gecentreerd label (---- PROJECTS ----) met een + rechts. */
+.section-head { display: flex; align-items: center; gap: 6px; }
+.section-head .dropzone-label { flex: 1; }
+.sec-add { padding: 2px 8px; font-size: 15px; }
 
 /* ---- Stage ---- */
 .stage { position: relative; flex: 1; min-height: 0; }
@@ -254,6 +295,105 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
   margin: 0 auto 8px;
   filter: drop-shadow(0 4px 12px rgba(0,0,0,.45));
 }
+
+/* ---- File-dropper (sidebar) ---- */
+/* Gecentreerd label met flankerende lijnen: ---- DROPZONE ---- */
+.dropzone-label {
+  display: flex; align-items: center; gap: 8px;
+  text-align: center;
+}
+.dropzone-label::before, .dropzone-label::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+.file-dropper {
+  flex: none;
+  margin: 2px 0 6px;
+  padding: 10px;
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-card) 45%, transparent);
+  transition: border-color .12s, background .12s;
+}
+/* Licht alleen op tijdens het slepen (dropzone-active). */
+.file-dropper.dropzone-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.dropper-hint { font-size: 10.5px; color: var(--text-dim); text-align: center; margin-bottom: 8px; letter-spacing: .2px; }
+.dropper-zones { display: flex; gap: 6px; }
+.dz {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 9px 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  color: var(--text-dim);
+  transition: color .12s, border-color .12s, background .12s, transform .07s;
+}
+.dz .dz-ico { width: 22px; height: 22px; }
+.dz .dz-ico svg { width: 100%; height: 100%; display: block; }
+.dz .dz-lbl { font-size: 10px; letter-spacing: .2px; text-align: center; line-height: 1.1; }
+/* Zone onder de cursor tijdens het slepen. */
+.dz.hot {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
+  transform: translateY(-1px);
+}
+.dropper-paste {
+  width: 100%;
+  margin-top: 8px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dropper-paste:hover { color: var(--text); border-color: var(--accent); }
+.dropper-paste .dropper-paste-ico { width: 15px; height: 15px; }
+.dropper-paste .dropper-paste-ico svg { width: 100%; height: 100%; display: block; }
+.dropper-list { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 150px; overflow-y: auto; }
+.dropper-list:empty { display: none; }
+/* Klikbare regel = overzicht van input\; klik plaatst het volledige pad in de prompt. */
+.dropper-item {
+  display: block;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer;
+}
+.dropper-item:hover { border-color: var(--accent); color: var(--accent); }
+/* Keuze-rij wanneer een via de + gekozen bestand van ELDERS komt: move/copy/alleen-pad. */
+.dropper-choose {
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  padding: 6px 7px;
+  margin-bottom: 5px;
+}
+.dropper-choose .dc-name {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: 5px;
+}
+.dropper-choose .dc-btns { display: flex; gap: 4px; }
+.dropper-choose .dc-btns button {
+  flex: 1;
+  background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 5px; padding: 3px 4px; font-size: 10px; cursor: pointer;
+}
+.dropper-choose .dc-btns button:hover { color: var(--accent); border-color: var(--accent); }
+.dropper-choose .dc-btns .dc-x { flex: none; padding: 3px 7px; }
 
 /* ---- Sidebar footer ---- */
 .sidebar-footer { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }

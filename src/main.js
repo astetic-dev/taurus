@@ -48,6 +48,14 @@ const I18N = {
     restore_failed: "Hervatten mislukt voor:",
     copy_failed: "✗ Kopiëren naar klembord mislukt:",
     err_need_project: "✗ Minstens één project met naam én pad nodig.",
+    dropper: "DROPZONE", dropper_hint: "Sleep bestand of map hierheen",
+    dz_move: "Verplaats", dz_copy: "Kopieer", dz_prompt: "Alleen pad", dz_paste: "Plak object",
+    dropper_need_project: "Kies eerst een project of open een sessie",
+    dropper_no_session: "Geen actieve terminal om het pad in te plaatsen",
+    dropper_save_failed: "✗ Opslaan in input-map mislukt:",
+    dropper_paste_failed: "✗ Plakken van object mislukt:",
+    reload: "Herlaad", new_project: "Nieuw project", add_file: "Bestand toevoegen",
+    edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Projects",
@@ -94,6 +102,14 @@ const I18N = {
     restore_failed: "Could not resume:",
     copy_failed: "✗ Copy to clipboard failed:",
     err_need_project: "✗ Need at least one project with a name and a path.",
+    dropper: "DROPZONE", dropper_hint: "Drag a file or folder here",
+    dz_move: "Move", dz_copy: "Copy", dz_prompt: "Path only", dz_paste: "Paste object",
+    dropper_need_project: "Pick a project or open a session first",
+    dropper_no_session: "No active terminal to insert the path into",
+    dropper_save_failed: "✗ Could not save into the input folder:",
+    dropper_paste_failed: "✗ Could not paste object:",
+    reload: "Reload", new_project: "New project", add_file: "Add file",
+    edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -101,6 +117,7 @@ function applyI18n() {
   const d = I18N[settings.lang] || I18N.nl;
   document.querySelectorAll("[data-i18n]").forEach((el) => { const k = el.getAttribute("data-i18n"); if (d[k] != null) el.textContent = d[k]; });
   document.querySelectorAll("[data-i18n-ph]").forEach((el) => { const k = el.getAttribute("data-i18n-ph"); if (d[k] != null) el.placeholder = d[k]; });
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => { const k = el.getAttribute("data-i18n-title"); if (d[k] != null) el.title = d[k]; });
   document.documentElement.lang = settings.lang || "nl";
 }
 
@@ -392,10 +409,39 @@ function renderProjects() {
     const card = document.createElement("div");
     card.className = "project-card";
     card.style.borderLeftColor = p.accent || "#7c9cff";
-    card.innerHTML = `<div class="pc-label">${escapeHtml(p.label)}</div><div class="pc-loc ${locClass(p.path)}">${locText(p.path)}</div>`;
+    card.innerHTML =
+      `<div class="pc-label">${escapeHtml(p.label)}</div>` +
+      `<div class="pc-loc ${locClass(p.path)}">${locText(p.path)}</div>` +
+      `<div class="pc-actions">` +
+        `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
+        `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
+      `</div>` +
+      `<div class="pc-confirm">` +
+        `<span>${escapeHtml(t("confirm_delete"))}</span>` +
+        `<button class="pc-yes">${escapeHtml(t("yes"))}</button>` +
+        `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
+      `</div>`;
     card.addEventListener("click", () => { selectProject(p, card); showView("new"); });
+    // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
+    card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
+    card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
+    card.querySelector(".pc-confirm").addEventListener("click", (e) => e.stopPropagation());
+    card.querySelector(".pc-no").addEventListener("click", (e) => { e.stopPropagation(); card.classList.remove("confirming"); });
+    card.querySelector(".pc-yes").addEventListener("click", (e) => { e.stopPropagation(); deleteProject(p); });
     els.list.appendChild(card);
   }
+}
+
+// Verwijder een project (na bevestiging in de kaart). Persist, herteken; als het
+// geselecteerde project verdwijnt, terug naar het lege startformulier.
+async function deleteProject(p) {
+  const next = projects.filter((x) => x !== p);
+  try {
+    await invoke("save_projects", { projects: next });
+    projects = next;
+    if (selected === p) { selected = null; resetLaunchForm(); }
+    renderProjects();
+  } catch (e) { toast("✗ " + e, "err"); }
 }
 async function selectProject(p, card) {
   selected = p;
@@ -1058,6 +1104,12 @@ function openEditor() {
   els.editorStatus.textContent = "";
   els.editorModal.classList.remove("hidden");
 }
+// Zelfde editor, maar meteen met een verse lege regel (de + bij PROJECTS).
+function openEditorAdd() {
+  openEditor();
+  editRows.push(blankRow());
+  renderEditor();
+}
 function renderEditor() {
   els.editorRows.innerHTML = "";
   editRows.forEach((r, i) => {
@@ -1165,6 +1217,173 @@ document.addEventListener("keydown", (e) => {
   }
 }, true);
 
+/* ============ file-dropper (sidebar) ============ */
+// Sleep een bestand of map het venster in -> Verplaats/Kopieer naar <werkmap>\input,
+// of Alleen-pad (post enkel het bestaande pad). Objecten (geplakte tekst/afbeelding)
+// lopen via de Plak-knop. Native drop blijft aan (dragDropEnabled = default), dus we
+// luisteren naar de Tauri drag-drop-events, niet naar HTML5 DOM-drop -- die vuren bij
+// ingeschakelde native drop niet. De drop-positie (physical px) hittesten we tegen de
+// drie zones om de modus te bepalen; buiten de dropper negeren we de drop.
+
+// Doel-werkmap: de actieve sessie, anders het geselecteerde project, anders geen.
+function dropperCwd() {
+  const s = sessions.get(current);
+  if (s && s.path) return s.path;
+  if (selected && selected.path) return selected.path;
+  return null;
+}
+
+// Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
+// door een spatie zodat je meteen door kunt typen). `silent` = geen melding als er
+// geen actieve terminal is (voor auto-invoegen bij een drop op het startscherm).
+function insertPathIntoTerminal(absPath, silent) {
+  const s = sessions.get(current);
+  if (!s) { if (!silent) toast(t("dropper_no_session"), "err"); return; }
+  const arg = /\s/.test(absPath) ? `"${absPath}"` : absPath;
+  invoke("write_session", { id: s.id, data: arg + " " });
+}
+
+// Voeg een net geplaatst bestand toe aan het overzicht -- ALLEEN wat jij deze sessie
+// dropt/plakt, niet de hele input-map. Op een gedeelde X:-map staan daar ook de
+// bestanden van collega's; die zou een dir-listing tonen en je focus wegnemen.
+// Nieuwste bovenaan; klik plaatst het volledige pad in de prompt. textContent i.p.v.
+// innerHTML zodat een rare bestandsnaam nooit als HTML wordt uitgevoerd.
+function addDropperEntry(absPath) {
+  const list = els.dropperList;
+  if (!list) return;
+  const name = absPath.split(/[\\/]/).pop() || absPath;
+  const row = document.createElement("div");
+  row.className = "dropper-item";
+  row.textContent = name;
+  row.title = absPath;
+  row.addEventListener("click", () => insertPathIntoTerminal(absPath));
+  list.prepend(row);
+}
+
+function wireFileDropper() {
+  const panel = els.fileDropper;
+  if (!panel) return;
+  const zoneEls = [...panel.querySelectorAll(".dz")];
+
+  // Physical -> CSS px voor het hittesten (Tauri geeft physical; getBoundingClientRect
+  // is CSS). Buiten de dropper -> null (drop negeren). In de dropper maar niet op een
+  // zone -> "prompt" (veilige default, ook bij een snelle drop voordat je mikt).
+  function modeAt(pos) {
+    if (!pos) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const x = pos.x / dpr, y = pos.y / dpr;
+    const pr = panel.getBoundingClientRect();
+    if (x < pr.left || x > pr.right || y < pr.top || y > pr.bottom) return null;
+    for (const el of zoneEls) {
+      const r = el.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el.dataset.mode;
+    }
+    return "prompt";
+  }
+  function highlight(mode) {
+    panel.classList.toggle("dropzone-active", mode != null);
+    zoneEls.forEach((el) => el.classList.toggle("hot", el.dataset.mode === mode));
+  }
+  function cool() {
+    panel.classList.remove("dropzone-active");
+    zoneEls.forEach((el) => el.classList.remove("hot"));
+  }
+
+  listen("tauri://drag-enter", (e) => highlight(modeAt(e.payload && e.payload.position)));
+  listen("tauri://drag-over", (e) => highlight(modeAt(e.payload && e.payload.position)));
+  listen("tauri://drag-leave", cool);
+  listen("tauri://drag-drop", async (e) => {
+    cool();
+    const mode = modeAt(e.payload && e.payload.position);
+    if (!mode) return; // buiten de dropper: negeren
+    const paths = (e.payload && e.payload.paths) || [];
+    if (!paths.length) return;
+    const cwd = dropperCwd();
+    if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    for (const src of paths) {
+      try {
+        // Alleen pad: geen bestandsactie, enkel het bestaande pad in de prompt.
+        // Verplaats/Kopieer: naar input\, dan het nieuwe pad in de prompt en in de lijst.
+        if (mode === "prompt") {
+          insertPathIntoTerminal(src, true);
+        } else {
+          const dest = await invoke("save_dropped_path", { src, cwd, mode });
+          insertPathIntoTerminal(dest, true);
+          addDropperEntry(dest);
+        }
+      } catch (err) {
+        dbg(`drop ${mode} FAIL: ${err}`);
+        toast(t("dropper_save_failed") + " " + err, "err");
+      }
+    }
+  });
+
+  els.dropperPaste.addEventListener("click", async () => {
+    const cwd = dropperCwd();
+    if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    try {
+      const paths = await invoke("save_clipboard_to_input", { cwd });
+      for (const p of paths) { insertPathIntoTerminal(p, true); addDropperEntry(p); }
+    } catch (err) {
+      dbg(`paste-object FAIL: ${err}`);
+      toast(t("dropper_paste_failed") + " " + err, "err");
+    }
+  });
+}
+
+// De + op de DROPZONE: kies een bestand elders op de computer (de dialoog start in
+// de input-map). Staat het gekozen bestand al IN input -> pad meteen in de prompt.
+// Komt het van elders -> vraag Verplaats/Kopieer/Alleen-pad (er is geen drop-positie
+// om op te hittesten, dus een kleine keuze-rij bovenin de dropper).
+async function addFileViaPicker() {
+  const cwd = dropperCwd();
+  if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+  const inputDir = cwd.replace(/\//g, "\\").replace(/\\+$/, "") + "\\input";
+  let file = null;
+  try { file = await invoke("pick_file", { startDir: inputDir }); } catch (_) { return; }
+  if (!file) return; // geannuleerd
+  const nf = file.replace(/\//g, "\\");
+  const parent = nf.slice(0, nf.lastIndexOf("\\"));
+  if (parent.toLowerCase() === inputDir.toLowerCase()) {
+    // Al in de input-map: gewoon het pad in de prompt (en in het overzicht).
+    insertPathIntoTerminal(file, true);
+    addDropperEntry(file);
+  } else {
+    showFileChooser(file, cwd); // van elders: vraag wat er moet gebeuren
+  }
+}
+
+// Kleine keuze-rij bovenin de dropper voor een van elders gekozen bestand.
+function showFileChooser(file, cwd) {
+  const list = els.dropperList;
+  if (!list) return;
+  const row = document.createElement("div");
+  row.className = "dropper-choose";
+  const nm = document.createElement("div");
+  nm.className = "dc-name";
+  nm.textContent = file.split(/[\\/]/).pop() || file;
+  nm.title = file;
+  const btns = document.createElement("div");
+  btns.className = "dc-btns";
+  const run = async (mode) => {
+    row.remove();
+    try {
+      const dest = mode === "prompt" ? file : await invoke("save_dropped_path", { src: file, cwd, mode });
+      insertPathIntoTerminal(dest, true);
+      if (mode !== "prompt") addDropperEntry(dest);
+    } catch (err) { dbg(`pick ${mode} FAIL: ${err}`); toast(t("dropper_save_failed") + " " + err, "err"); }
+  };
+  const mk = (label, cls, fn) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.addEventListener("click", fn); return b; };
+  btns.append(
+    mk(t("dz_move"), "", () => run("move")),
+    mk(t("dz_copy"), "", () => run("copy")),
+    mk(t("dz_prompt"), "", () => run("prompt")),
+    mk("✕", "dc-x", () => row.remove()),
+  );
+  row.append(nm, btns);
+  list.prepend(row);
+}
+
 /* ============ init ============ */
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
@@ -1211,6 +1430,9 @@ window.addEventListener("DOMContentLoaded", () => {
     editorRows: document.querySelector("#editor-rows"),
     editorStatus: document.querySelector("#editor-status"),
     appVersion: document.querySelector("#app-version"),
+    fileDropper: document.querySelector("#file-dropper"),
+    dropperList: document.querySelector("#dropper-list"),
+    dropperPaste: document.querySelector("#dropper-paste"),
   });
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
@@ -1225,7 +1447,8 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
-  document.querySelector("#edit-btn").addEventListener("click", openEditor);
+  document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
+  document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
   document.querySelector("#settings-cancel").addEventListener("click", () => els.settingsModal.classList.add("hidden"));
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
@@ -1251,6 +1474,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadSettings();
   applyI18n();
   wireGarble();
+  wireFileDropper();
   // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);

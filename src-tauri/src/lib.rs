@@ -107,6 +107,22 @@ fn pick_folder(app: AppHandle) -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
+// Bestand-kiezer voor de dropzone-+. Start in `start_dir` (de input-map); die
+// maken we zo nodig eerst aan zodat de dialoog daar echt opent. Geeft het gekozen
+// absolute pad terug (None bij annuleren).
+#[tauri::command]
+fn pick_file(app: AppHandle, start_dir: String) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let _ = std::fs::create_dir_all(&start_dir);
+    let mut b = app.dialog().file();
+    if Path::new(&start_dir).is_dir() {
+        b = b.set_directory(&start_dir);
+    }
+    b.blocking_pick_file()
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn path_exists(path: String) -> bool {
     Path::new(&path).is_dir()
@@ -630,6 +646,195 @@ fn open_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// ===== File-dropper: gedropte bestanden/mappen -> <cwd>\input =====
+// De sidebar-dropper laat een bestand of map verplaatsen/kopieren naar een
+// "input"-submap van de werkmap van de actieve sessie (of het geselecteerde
+// project). Zo landt een bestand op een voorspelbare plek en is het pad direct
+// bruikbaar voor de agent. "Alleen pad" doet geen bestandsactie (frontend post
+// het bestaande pad); geplakte objecten lopen via save_clipboard_to_input.
+
+// Geef een bestemmingspad dat nog niet bestaat: "naam.ext", dan "naam (2).ext",
+// "naam (3).ext", ... zodat een drop nooit een bestaand bestand overschrijft.
+fn unique_path(dest: std::path::PathBuf) -> std::path::PathBuf {
+    if !dest.exists() {
+        return dest;
+    }
+    let parent = dest.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let stem = dest
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = dest.extension().map(|e| e.to_string_lossy().into_owned());
+    let mut n = 2u32;
+    loop {
+        let name = match &ext {
+            Some(e) => format!("{} ({}).{}", stem, n, e),
+            None => format!("{} ({})", stem, n),
+        };
+        let cand = parent.join(name);
+        if !cand.exists() {
+            return cand;
+        }
+        n += 1;
+    }
+}
+
+// Kopieer een bestand of (recursief) een hele map naar `dest`.
+fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        std::fs::create_dir_all(dest)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            copy_recursive(&entry.path(), &dest.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(src, dest)?;
+        Ok(())
+    }
+}
+
+// Verplaats of kopieer een gedropt bestand/map naar <cwd>\input. `mode` is
+// "move" of "copy". Geeft het absolute bestemmingspad terug.
+#[tauri::command]
+fn save_dropped_path(src: String, cwd: String, mode: String) -> Result<String, String> {
+    let src_path = Path::new(&src);
+    if !src_path.exists() {
+        return Err(format!("bron bestaat niet: {}", src));
+    }
+    let name = src_path
+        .file_name()
+        .ok_or_else(|| "bron heeft geen naam".to_string())?;
+    let input_dir = Path::new(&cwd).join("input");
+    std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
+    let dest = unique_path(input_dir.join(name));
+
+    match mode.as_str() {
+        "move" => {
+            // Snel pad: rename werkt op hetzelfde volume voor bestanden EN mappen.
+            // Ander volume (C: -> X:) laat rename falen -> recursief kopieren en
+            // daarna de bron wissen.
+            if std::fs::rename(src_path, &dest).is_err() {
+                copy_recursive(src_path, &dest).map_err(|e| e.to_string())?;
+                let rm = if src_path.is_dir() {
+                    std::fs::remove_dir_all(src_path)
+                } else {
+                    std::fs::remove_file(src_path)
+                };
+                rm.map_err(|e| e.to_string())?;
+            }
+        }
+        "copy" => copy_recursive(src_path, &dest).map_err(|e| e.to_string())?,
+        other => return Err(format!("onbekende modus: {}", other)),
+    }
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+// Lees de op het klembord gekopieerde bestandspaden (Verkenner Ctrl+C zet een
+// CF_HDROP-lijst op het klembord). De clipboard-manager-plugin kent alleen
+// tekst/HTML/afbeelding, dus dit gaat rechtstreeks via de Win32-klembord-API.
+#[cfg(windows)]
+fn clipboard_file_paths() -> Vec<String> {
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
+    use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+    const CF_HDROP: u32 = 15;
+    let mut out: Vec<String> = Vec::new();
+    unsafe {
+        if IsClipboardFormatAvailable(CF_HDROP).is_err() {
+            return out;
+        }
+        if OpenClipboard(None).is_err() {
+            return out;
+        }
+        if let Ok(handle) = GetClipboardData(CF_HDROP) {
+            let hdrop = HDROP(handle.0);
+            let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, None);
+            for i in 0..count {
+                let len = DragQueryFileW(hdrop, i, None);
+                if len == 0 {
+                    continue;
+                }
+                let mut buf = vec![0u16; (len as usize) + 1];
+                let got = DragQueryFileW(hdrop, i, Some(buf.as_mut_slice()));
+                if got > 0 {
+                    out.push(String::from_utf16_lossy(&buf[..got as usize]));
+                }
+            }
+        }
+        let _ = CloseClipboard();
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn clipboard_file_paths() -> Vec<String> {
+    Vec::new()
+}
+
+// Sla de inhoud van het klembord op als bestand(en) in <cwd>\input en geef de
+// absolute paden terug. Volgorde: eerst gekopieerde BESTANDEN (Ctrl+C in
+// Verkenner -> die kopieren we in), dan een AFBEELDING (als PNG), dan TEKST
+// (.txt). Zo werkt "Plak object" ook voor een gekopieerd bestand -- niet alleen
+// voor tekst/afbeelding die nog geen bestand zijn.
+#[tauri::command]
+fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let input_dir = Path::new(&cwd).join("input");
+    std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
+
+    // 1) Gekopieerde bestanden/mappen (CF_HDROP) -> kopieer ze in de input-map.
+    let files = clipboard_file_paths();
+    if !files.is_empty() {
+        let mut saved = Vec::new();
+        for f in files {
+            let src = Path::new(&f);
+            if !src.exists() {
+                continue;
+            }
+            let name = match src.file_name() {
+                Some(n) => n,
+                None => continue,
+            };
+            let dest = unique_path(input_dir.join(name));
+            copy_recursive(src, &dest).map_err(|e| e.to_string())?;
+            saved.push(dest.to_string_lossy().into_owned());
+        }
+        if !saved.is_empty() {
+            return Ok(saved);
+        }
+    }
+
+    // 2) Afbeelding op het klembord -> PNG.
+    if let Ok(img) = app.clipboard().read_image() {
+        let (w, h) = (img.width(), img.height());
+        let rgba = img.rgba();
+        if w > 0 && h > 0 && rgba.len() as u32 == w * h * 4 {
+            let dest = unique_path(input_dir.join("pasted.png"));
+            let file = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut writer = enc.write_header().map_err(|e| e.to_string())?;
+            writer.write_image_data(rgba).map_err(|e| e.to_string())?;
+            return Ok(vec![dest.to_string_lossy().into_owned()]);
+        }
+    }
+
+    // 3) Tekst.
+    let text = app.clipboard().read_text().map_err(|e| e.to_string())?;
+    if text.is_empty() {
+        return Err("klembord bevat geen bestand, afbeelding of tekst".to_string());
+    }
+    let dest = unique_path(input_dir.join("pasted.txt"));
+    std::fs::write(&dest, text).map_err(|e| e.to_string())?;
+    Ok(vec![dest.to_string_lossy().into_owned()])
+}
+
 // Schrijf tekst naar het Windows-klembord via native code i.p.v. de WebView2
 // browser-API. Een WebView2/Edge-update kan navigator.clipboard.writeText IN de
 // webview blokkeren (kopieren-bij-selectie en Ctrl+Shift+C deden niets meer),
@@ -865,6 +1070,7 @@ pub fn run() {
             get_projects,
             save_projects,
             pick_folder,
+            pick_file,
             path_exists,
             app_version,
             has_claude_md,
@@ -879,6 +1085,8 @@ pub fn run() {
             list_html,
             read_file,
             open_folder,
+            save_dropped_path,
+            save_clipboard_to_input,
             copy_to_clipboard,
             branding,
             debug_log

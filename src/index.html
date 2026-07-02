@@ -23,19 +23,70 @@
           <div class="brand-sub" data-i18n="brand_sub">Agent Launcher</div>
         </div>
 
-        <div class="sidebar-label" data-i18n="projects">Projecten</div>
+        <div class="section-head">
+          <div class="sidebar-label dropzone-label" data-i18n="projects">Projecten</div>
+          <button id="add-project-btn" class="icon-btn sec-add" data-i18n-title="new_project">＋</button>
+        </div>
         <div id="project-list" class="project-list"></div>
 
-        <div class="sidebar-footer">
-          <button id="edit-btn" class="foot-btn" data-i18n="foot_projects">✎ Projecten</button>
-          <button id="settings-btn" class="foot-btn" data-i18n="foot_settings">⚙ Instellingen</button>
-          <button id="reload-btn" class="foot-btn" data-i18n="foot_reload">⟳ Herlaad</button>
+        <div class="section-head">
+          <div class="sidebar-label dropzone-label" data-i18n="dropper">DROPZONE</div>
+          <button id="add-file-btn" class="icon-btn sec-add" data-i18n-title="add_file">＋</button>
         </div>
+        <div id="file-dropper" class="file-dropper">
+          <div class="dropper-hint" data-i18n="dropper_hint">Sleep bestand of map hierheen</div>
+          <div class="dropper-zones">
+            <div class="dz" data-mode="move">
+              <span class="dz-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3v10" /><path d="M8 9l4 4 4-4" />
+                  <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+                </svg>
+              </span>
+              <span class="dz-lbl" data-i18n="dz_move">Verplaats</span>
+            </div>
+            <div class="dz" data-mode="copy">
+              <span class="dz-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="11" height="11" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </span>
+              <span class="dz-lbl" data-i18n="dz_copy">Kopieer</span>
+            </div>
+            <div class="dz" data-mode="prompt">
+              <span class="dz-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 21s-6-5.686-6-10a6 6 0 0 1 12 0c0 4.314-6 10-6 10z" />
+                  <circle cx="12" cy="11" r="2" />
+                </svg>
+              </span>
+              <span class="dz-lbl" data-i18n="dz_prompt">Alleen pad</span>
+            </div>
+          </div>
+          <button id="dropper-paste" class="dropper-paste" type="button">
+            <span class="dropper-paste-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="8" y="3" width="8" height="4" rx="1" />
+                <path d="M9 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3" />
+              </svg>
+            </span>
+            <span data-i18n="dz_paste">Plak object</span>
+          </button>
+          <div id="dropper-list" class="dropper-list"></div>
+        </div>
+
         <div id="app-version" class="app-version"></div>
       </aside>
 
       <main class="panel">
-        <div id="tabbar" class="tabbar"></div>
+        <div class="topbar">
+          <div id="tabbar" class="tabbar"></div>
+          <div class="top-controls">
+            <button id="settings-btn" class="icon-btn" data-i18n-title="settings">⚙</button>
+            <button id="reload-btn" class="icon-btn" data-i18n-title="reload">⟳</button>
+          </div>
+        </div>
 
         <div class="stage">
           <section id="launch-view" class="launch-view">
