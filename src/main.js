@@ -62,6 +62,7 @@ const I18N = {
     sb_toggle: "Projectkolom in-/uitklappen",
     cp_insert: "Pad in de terminal plaatsen", cp_close: "Preview sluiten",
     cp_binary: "(geen tekstbestand — rechtsklik in de boom om extern te openen)",
+    cp_md_toggle: "Markdown opgemaakt/ruw",
     cp_truncated: "… (afgekapt — bestand is groter)",
   },
   en: {
@@ -123,6 +124,7 @@ const I18N = {
     sb_toggle: "Collapse/expand the project column",
     cp_insert: "Insert path into the terminal", cp_close: "Close preview",
     cp_binary: "(not a text file — right-click it in the tree to open externally)",
+    cp_md_toggle: "Markdown rendered/raw",
     cp_truncated: "… (truncated — file is larger)",
   },
 };
@@ -1460,22 +1462,91 @@ function toggleSidebar() {
 // Enkel klikken op een bestand in de boom toont de inhoud (alleen-lezen) in
 // een paneel boven de terminal; dubbelklik plaatst het pad in de terminal
 // (het oude enkelklik-gedrag). Groot bestand: afkappen, geen tekst: hint.
+// Markdown rendert standaard opgemaakt; de MD-knop wisselt ruw <-> opgemaakt.
 const CP_MAX_CHARS = 200_000;
 let contextPath = null;
+let contextText = "";
+let contextRendered = false;
+
+function isMarkdownPath(p) { return /\.(md|markdown)$/i.test(p || ""); }
+
+// Minimale, veilige Markdown-renderer. VEILIG-DOOR-ONTWERP: alle bestandstekst
+// gaat eerst door escapeHtml; daarna plakken wij zelf alleen vaste tags erop.
+// Links: alleen https?:// en #-ankers; al het andere blijft platte tekst.
+// Bewust geen externe parser/sanitizer -- dit dekt CLAUDE.md/README-gebruik.
+function renderMarkdown(src) {
+  const safeHref = (u) => (/^(https?:\/\/|#)/i.test(u) ? u : null);
+  const inline = (s) => {
+    s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, txt, url) => {
+      const h = safeHref(url);
+      return h ? `<a href="${h}" target="_blank" rel="noopener">${txt}</a>` : m;
+    });
+    return s;
+  };
+  const out = [];
+  // Code-fences eerst afsplitsen: binnen een fence geen verdere opmaak.
+  const parts = src.split(/^```[^\n]*$/m);
+  parts.forEach((part, pi) => {
+    if (pi % 2 === 1) { out.push(`<pre class="md-code">${escapeHtml(part.replace(/^\n|\n$/g, ""))}</pre>`); return; }
+    const lines = part.split("\n");
+    let list = null; // "ul" | "ol" | null
+    const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+    let para = [];
+    const flushPara = () => { if (para.length) { out.push(`<p>${inline(para.join(" "))}</p>`); para = []; } };
+    for (const raw of lines) {
+      const line = escapeHtml(raw);
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) { flushPara(); closeList(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+      if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { flushPara(); closeList(); out.push("<hr>"); continue; }
+      const bq = line.match(/^&gt;\s?(.*)$/);
+      if (bq) { flushPara(); closeList(); out.push(`<blockquote>${inline(bq[1])}</blockquote>`); continue; }
+      const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+      const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (ul || ol) {
+        flushPara();
+        const kind = ul ? "ul" : "ol";
+        if (list !== kind) { closeList(); out.push(`<${kind}>`); list = kind; }
+        out.push(`<li>${inline((ul || ol)[1])}</li>`);
+        continue;
+      }
+      if (!line.trim()) { flushPara(); closeList(); continue; }
+      para.push(line);
+    }
+    flushPara(); closeList();
+  });
+  return out.join("\n");
+}
+
+function renderContextBody() {
+  if (contextRendered) {
+    els.cpBody.classList.add("md");
+    els.cpBody.innerHTML = renderMarkdown(contextText);
+  } else {
+    els.cpBody.classList.remove("md");
+    els.cpBody.textContent = contextText;
+  }
+  els.cpMd.classList.toggle("active", contextRendered);
+  els.cpBody.scrollTop = 0;
+}
 
 async function showContextPreview(path, name) {
   contextPath = path;
   els.cpName.textContent = name;
   els.cpName.title = path;
-  let body;
+  let ok = true;
   try {
     const txt = await invoke("read_file", { path });
-    body = txt.length > CP_MAX_CHARS ? txt.slice(0, CP_MAX_CHARS) + "\n" + t("cp_truncated") : txt;
+    contextText = txt.length > CP_MAX_CHARS ? txt.slice(0, CP_MAX_CHARS) + "\n" + t("cp_truncated") : txt;
   } catch (_) {
-    body = t("cp_binary");
+    contextText = t("cp_binary");
+    ok = false;
   }
-  els.cpBody.textContent = body;
-  els.cpBody.scrollTop = 0;
+  contextRendered = ok && isMarkdownPath(path);
+  els.cpMd.classList.toggle("hidden", !(ok && isMarkdownPath(path)));
+  renderContextBody();
   els.contextPane.classList.remove("hidden");
   resizeActive();
 }
@@ -1576,6 +1647,7 @@ window.addEventListener("DOMContentLoaded", () => {
     contextPane: document.querySelector("#context-pane"),
     cpName: document.querySelector("#cp-name"),
     cpBody: document.querySelector("#cp-body"),
+    cpMd: document.querySelector("#cp-md"),
     tabbar: document.querySelector("#tabbar"),
     launchView: document.querySelector("#launch-view"),
     terminals: document.querySelector("#terminals"),
@@ -1639,6 +1711,7 @@ window.addEventListener("DOMContentLoaded", () => {
   els.sidebarToggle.addEventListener("click", toggleSidebar);
   document.querySelector("#cp-close").addEventListener("click", closeContextPreview);
   document.querySelector("#cp-insert").addEventListener("click", () => { if (contextPath) insertPathIntoTerminal(contextPath); });
+  els.cpMd.addEventListener("click", () => { contextRendered = !contextRendered; renderContextBody(); });
   wireExplorerResize();
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);

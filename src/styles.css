@@ -125,6 +125,32 @@ body.col-dragging { cursor: col-resize; user-select: none; }
   font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12px; line-height: 1.5;
   color: var(--text); white-space: pre-wrap; word-break: break-word;
 }
+.cp-md.active { color: var(--accent); border-color: var(--accent); }
+
+/* Opgemaakte Markdown-weergave in de preview. */
+.cp-body.md { white-space: normal; font-family: var(--ui-font); font-size: 13px; }
+.cp-body.md h1, .cp-body.md h2, .cp-body.md h3, .cp-body.md h4, .cp-body.md h5, .cp-body.md h6 {
+  margin: 14px 0 6px; line-height: 1.25;
+}
+.cp-body.md h1 { font-size: 19px; } .cp-body.md h2 { font-size: 16px; } .cp-body.md h3 { font-size: 14px; }
+.cp-body.md p { margin: 6px 0; }
+.cp-body.md ul, .cp-body.md ol { margin: 6px 0; padding-left: 22px; }
+.cp-body.md li { margin: 2px 0; }
+.cp-body.md code {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px;
+  padding: 0 4px; font-family: "IBM Plex Mono", Consolas, monospace; font-size: 11px;
+}
+.cp-body.md .md-code {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; margin: 8px 0; overflow-x: auto; white-space: pre;
+  font-family: "IBM Plex Mono", Consolas, monospace; font-size: 11px; line-height: 1.5;
+}
+.cp-body.md blockquote {
+  margin: 6px 0; padding: 2px 10px; border-left: 3px solid var(--accent);
+  color: var(--text-dim);
+}
+.cp-body.md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.cp-body.md a { color: var(--accent); }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 18px; }
 .brand-mark { font-size: 28px; color: var(--accent); line-height: 1; }
 .brand-title { font-size: 18px; font-weight: 700; letter-spacing: .3px; }
