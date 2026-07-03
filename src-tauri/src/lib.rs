@@ -1092,7 +1092,7 @@ fn start_capture() -> Result<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let device = cpal::default_host()
         .default_input_device()
-        .ok_or("geen microfoon gevonden")?;
+        .ok_or("no microphone found")?;
     let cfg = device.default_input_config().map_err(|e| e.to_string())?;
     let rate = cfg.sample_rate().0;
     let channels = cfg.channels();
@@ -1122,7 +1122,7 @@ fn start_capture() -> Result<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32
             err_fn,
             None,
         ),
-        f => return Err(format!("sample-formaat niet ondersteund: {:?}", f)),
+        f => return Err(format!("unsupported sample format: {:?}", f)),
     }
     .map_err(|e| e.to_string())?;
     stream.play().map_err(|e| e.to_string())?;
@@ -1165,12 +1165,12 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<RecCmd>) {
                         drop(stream); // stopt de opname
                         let samples = buf.lock().unwrap();
                         if samples.len() < 1600 {
-                            Err("opname te kort".to_string())
+                            Err("recording too short".to_string())
                         } else {
                             write_wav(&samples, rate, ch)
                         }
                     }
-                    None => Err("er loopt geen opname".to_string()),
+                    None => Err("no recording in progress".to_string()),
                 };
                 let _ = reply.send(res);
             }
@@ -1233,46 +1233,112 @@ fn stt_status(state: State<AppState>) -> SttStatus {
     }
 }
 
-// Download engine + model (tar.bz2) met PowerShell en pak ze uit met de
-// systeem-tar (bsdtar, standaard op Win10+). Draait los van de app; een
-// marker-bestand maakt de voortgang pollbaar en het log leesbaar.
+// Is de .downloading-marker een wees? De marker bevat het PID van het
+// PowerShell-downloadproces; leeft dat niet meer (crash, kill, reboot), dan
+// is de marker oud vuil en mag een nieuwe download gewoon starten.
+fn download_marker_stale(d: &Path) -> bool {
+    let pid = match std::fs::read_to_string(d.join(".downloading")) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => return false,
+    };
+    if pid.is_empty() || !pid.chars().all(|c| c.is_ascii_digit()) {
+        return true; // marker van een oude build zonder PID
+    }
+    let mut c = std::process::Command::new("tasklist");
+    c.args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    match c.output() {
+        Ok(o) => !String::from_utf8_lossy(&o.stdout).contains(&format!("\"{}\"", pid)),
+        Err(_) => false, // bij twijfel een lopende download niet overrulen
+    }
+}
+
+fn dl_log(d: &Path, msg: &str) {
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(d.join("download.log"))
+    {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
+// Download één bestand met PowerShell (blokkerend; wij zitten al op een
+// worker-thread). Eerst naar .part, daarna atomisch hernoemen zodat een
+// afgebroken download nooit voor een compleet bestand doorgaat.
+fn ps_fetch(url: &str, dest: &Path) -> Result<(), String> {
+    let part = dest.with_extension("part");
+    let u = url.replace('\'', "''");
+    let p = part.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; \
+         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+         Invoke-WebRequest -Uri '{u}' -OutFile '{p}' -UseBasicParsing"
+    );
+    let status = ps_encoded(&script).status().map_err(|e| e.to_string())?;
+    if !status.success() {
+        let _ = std::fs::remove_file(&part);
+        return Err(format!("download failed ({}): {}", status, url));
+    }
+    std::fs::rename(&part, dest).map_err(|e| e.to_string())
+}
+
+// .tar.bz2 in-process uitpakken. NIET de systeem-tar: die is niet overal met
+// bzip2 gebouwd (een zlib-only bsdtar hangt er stil op, gezien in het wild).
+fn extract_tar_bz2(archive: &Path, dest: &Path) -> Result<(), String> {
+    let f = std::fs::File::open(archive).map_err(|e| e.to_string())?;
+    let dec = bzip2::read::BzDecoder::new(std::io::BufReader::new(f));
+    tar::Archive::new(dec).unpack(dest).map_err(|e| e.to_string())
+}
+
+// Download engine + model en pak ze uit, op een eigen worker-thread. De
+// marker (met ons eigen PID) maakt de voortgang pollbaar via stt_status en
+// een wees-marker (app gecrasht/afgesloten) zelfherstellend bij de volgende
+// download-klik. Alles komt in download.log terecht.
 #[tauri::command]
 fn stt_download(engine_url: String, model_url: String) -> Result<(), String> {
     for u in [&engine_url, &model_url] {
         if !u.starts_with("https://") {
-            return Err(format!("alleen https-URL's: {}", u));
+            return Err(format!("https URLs only: {}", u));
         }
     }
     let d = stt_dir();
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
-    if d.join(".downloading").is_file() {
-        return Err("er loopt al een download".into());
+    let marker = d.join(".downloading");
+    if marker.is_file() {
+        if download_marker_stale(&d) {
+            let _ = std::fs::remove_file(&marker);
+        } else {
+            return Err("a download is already running".into());
+        }
     }
-    let dir = d.to_string_lossy().replace('\'', "''");
-    let e = engine_url.replace('\'', "''");
-    let m = model_url.replace('\'', "''");
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'; $d = '{dir}'; \
-         New-Item -ItemType File -Force (Join-Path $d '.downloading') | Out-Null; \
-         try {{ \
-           foreach ($u in @('{e}', '{m}')) {{ \
-             $f = Join-Path $d ([System.IO.Path]::GetFileName(([uri]$u).LocalPath)); \
-             if (-not (Test-Path $f)) {{ \
-               Add-Content (Join-Path $d 'download.log') \"downloading $u\"; \
-               [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
-               Invoke-WebRequest -Uri $u -OutFile $f -UseBasicParsing; \
-             }} \
-             Add-Content (Join-Path $d 'download.log') \"extracting $f\"; \
-             tar -xf $f -C $d; \
-           }} \
-           Add-Content (Join-Path $d 'download.log') 'done'; \
-         }} catch {{ \
-           Add-Content (Join-Path $d 'download.log') \"FAILED: $_\"; \
-         }} finally {{ \
-           Remove-Item (Join-Path $d '.downloading') -Force -ErrorAction SilentlyContinue; \
-         }}"
-    );
-    ps_encoded(&script).spawn().map(|_| ()).map_err(|e2| e2.to_string())
+    std::fs::write(&marker, std::process::id().to_string()).map_err(|e| e.to_string())?;
+    std::thread::spawn(move || {
+        let res = (|| -> Result<(), String> {
+            for url in [engine_url, model_url] {
+                let name = url.rsplit('/').next().unwrap_or("archive.tar.bz2");
+                let file = d.join(name);
+                if !file.is_file() {
+                    dl_log(&d, &format!("downloading {}", url));
+                    ps_fetch(&url, &file)?;
+                }
+                dl_log(&d, &format!("extracting {}", name));
+                extract_tar_bz2(&file, &d)?;
+            }
+            Ok(())
+        })();
+        match res {
+            Ok(()) => dl_log(&d, "done"),
+            Err(e) => dl_log(&d, &format!("FAILED: {}", e)),
+        }
+        let _ = std::fs::remove_file(d.join(".downloading"));
+    });
+    Ok(())
 }
 
 // Toggle: eerste aanroep start de opname, tweede stopt hem, transcribeert de
@@ -1291,7 +1357,7 @@ fn stt_toggle(state: State<AppState>) -> Result<SttToggle, String> {
     if !state.stt.recording.load(Ordering::Relaxed) {
         let (exe, tokens) = stt_paths();
         if exe.is_none() || tokens.is_none() {
-            return Err("STT-model niet geïnstalleerd — download het onder Instellingen → Spraak".into());
+            return Err("STT model not installed — download it under Settings → Voice".into());
         }
         state.stt.tx.send(RecCmd::Start).map_err(|e| e.to_string())?;
         state.stt.recording.store(true, Ordering::Relaxed);
@@ -1310,11 +1376,11 @@ fn stt_toggle(state: State<AppState>) -> Result<SttToggle, String> {
 
 fn transcribe(wav: &Path) -> Result<String, String> {
     let (exe, tokens) = stt_paths();
-    let (exe, tokens) = (exe.ok_or("engine ontbreekt")?, tokens.ok_or("model ontbreekt")?);
-    let model_dir = tokens.parent().ok_or("modelmap ontbreekt")?.to_path_buf();
+    let (exe, tokens) = (exe.ok_or("engine missing")?, tokens.ok_or("model missing")?);
+    let model_dir = tokens.parent().ok_or("model folder missing")?.to_path_buf();
     let onnx = |frag: &str| {
         find_under(&model_dir, &|n| n.contains(frag) && n.ends_with(".onnx"), 1)
-            .ok_or_else(|| format!("{}*.onnx niet gevonden in het model", frag))
+            .ok_or_else(|| format!("{}*.onnx not found in the model folder", frag))
     };
     let (enc, dec, joi) = (onnx("encoder")?, onnx("decoder")?, onnx("joiner")?);
     let mut c = std::process::Command::new(&exe);
@@ -1347,7 +1413,7 @@ fn transcribe(wav: &Path) -> Result<String, String> {
         }
     }
     Err(format!(
-        "geen transcript in sidecar-uitvoer: {}",
+        "no transcript in sidecar output: {}",
         all.chars().take(400).collect::<String>()
     ))
 }
