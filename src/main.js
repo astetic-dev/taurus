@@ -42,6 +42,25 @@ const I18N = {
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
     grp_sessions: "Sessies", set_persist: "Sessies onthouden en bij opstarten hervatten",
+    tab_general: "Algemeen", tab_theme: "Thema", tab_html: "HTML-preview", tab_terminal: "Terminal",
+    help_default: "Beweeg over een instelling voor uitleg.",
+    help_lang: "Taal van de interface: Nederlands of Engels. Wijziging is zichtbaar na Opslaan.",
+    help_fontsize: "Lettergrootte van de terminaltekst (punten).\nVoorbeeld: 13 = standaard; 15-16 leest prettiger op een groot scherm.",
+    help_scrollback: "Aantal regels terminaluitvoer dat bewaard blijft om terug te scrollen.\nVoorbeeld: 8000. Hoger = meer terug te lezen, maar meer geheugen per sessie.",
+    help_cursor: "Laat de tekstcursor in de terminal knipperen in plaats van stil te staan.",
+    help_persist: "Onthoudt open sessies en hervat ze bij het opstarten (--resume), zodat je verdergaat waar je gebleven was. Uit = elke start begint schoon.",
+    help_skin: "Visueel thema (skin) voor de hele app.\nVoorbeeld: 'Terminal (CRT)' = retro groen; 'Nord'/'Dracula' = donkere kleurschema's; 'Solarized Light' = licht.",
+    help_html_split: "Toont de HTML-preview naast de terminal (gesplitst), zodat je code en resultaat tegelijk ziet.",
+    help_html_full: "Toont de HTML-preview op het volledige venster en verbergt de terminal zolang de preview open is.",
+    help_fullpaths: "Vraagt Claude volledige bestandspaden te printen, zodat ze klikbaar worden.\nVoorbeeld: C:\\project\\index.html i.p.v. alleen index.html.",
+    help_copyselect: "Zodra je tekst in de terminal selecteert, gaat die automatisch naar het klembord - geen Ctrl+C nodig.",
+    help_pasteright: "Een rechtermuisklik in de terminal plakt de klembordinhoud.",
+    help_agentmouse: "Wie krijgt de muis in de terminal?\nUit: slepen selecteert tekst lokaal, rechtsklik plakt.\nAan: de agent (bijv. een TUI-menu) ontvangt klikken en scrollen. Geldt voor nieuwe sessies.",
+    help_ctrlshift: "Ctrl+Shift+C kopieert en Ctrl+Shift+V plakt in de terminal. De Shift-variant houdt gewone Ctrl+C vrij om een programma te onderbreken.",
+    help_weblinks: "Maakt URL's in de uitvoer klikbaar; ze openen in je standaardbrowser. Geldt voor nieuwe sessies.",
+    help_search: "Zoeken in de scrollback met Ctrl+Shift+F. Geldt voor nieuwe sessies.",
+    help_tabshortcuts: "Sneltoetsen voor tabs: Ctrl+Tab wisselt, Ctrl+1..9 springt naar een tab, Ctrl+T opent een nieuwe, Ctrl+W sluit de huidige.",
+    help_tabstatus: "Toont Claude's huidige bezigheid live op het tabblad.\nVoorbeeld: '✶ Orbiting…' terwijl Claude werkt; een stille groene stip = klaar/wachtend.",
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
     skin_default: "Standaard (donker)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
@@ -97,6 +116,25 @@ const I18N = {
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
     grp_sessions: "Sessions", set_persist: "Remember sessions and resume on startup",
+    tab_general: "General", tab_theme: "Theme", tab_html: "HTML preview", tab_terminal: "Terminal",
+    help_default: "Hover a setting for an explanation.",
+    help_lang: "Interface language: Dutch or English. Applies right after you Save.",
+    help_fontsize: "Font size of the terminal text (points).\nExample: 13 = default; 15-16 reads better on a large display.",
+    help_scrollback: "Number of terminal output lines kept for scrolling back.\nExample: 8000. Higher = more history, but more memory per session.",
+    help_cursor: "Make the terminal text cursor blink instead of staying solid.",
+    help_persist: "Remembers open sessions and resumes them on startup (--resume) so you continue where you left off. Off = every launch starts clean.",
+    help_skin: "Visual theme (skin) for the whole app.\nExample: 'Terminal (CRT)' = retro green; 'Nord'/'Dracula' = dark colour schemes; 'Solarized Light' = light.",
+    help_html_split: "Shows the HTML preview beside the terminal (split), so you see code and result at once.",
+    help_html_full: "Shows the HTML preview full-window, hiding the terminal while the preview is open.",
+    help_fullpaths: "Asks Claude to print full file paths so they become clickable.\nExample: C:\\project\\index.html instead of just index.html.",
+    help_copyselect: "As soon as you select text in the terminal it goes to the clipboard automatically - no Ctrl+C needed.",
+    help_pasteright: "A right-click in the terminal pastes the clipboard contents.",
+    help_agentmouse: "Who gets the mouse in the terminal?\nOff: dragging selects text locally, right-click pastes.\nOn: the agent (e.g. a TUI menu) receives clicks and scrolling. Applies to new sessions.",
+    help_ctrlshift: "Ctrl+Shift+C copies and Ctrl+Shift+V pastes in the terminal. The Shift variant keeps plain Ctrl+C free to interrupt a program.",
+    help_weblinks: "Makes URLs in the output clickable; they open in your default browser. Applies to new sessions.",
+    help_search: "Search the scrollback with Ctrl+Shift+F. Applies to new sessions.",
+    help_tabshortcuts: "Tab shortcuts: Ctrl+Tab switches, Ctrl+1..9 jumps to a tab, Ctrl+T opens a new one, Ctrl+W closes the current.",
+    help_tabstatus: "Shows Claude's current activity live on the tab.\nExample: '✶ Orbiting…' while Claude works; a steady green dot = done/waiting.",
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
     skin_default: "Default (dark)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
@@ -1155,7 +1193,24 @@ function doSearch(dir) {
 }
 
 /* ============ instellingen ============ */
+/* ============ instellingen: tabs + hover-uitleg ============ */
+function switchSettingsTab(name) {
+  els.settingsModal.querySelectorAll(".stab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  els.settingsModal.querySelectorAll(".spane").forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
+  hideHelpTip();
+}
+// Vast uitleg-paneel onderin de modal: toont de uitgebreide uitleg van de instelling
+// waar je overheen beweegt. Tekst komt uit de i18n-tabel (help_*), dus de taal volgt.
+// Niets gehoverd -> terug naar de standaard-hint. Een vast paneel i.p.v. een zwevende
+// tooltip zodat het ook in een smal venster (min. 720px) altijd past en leesbaar is.
+function showHelpTip(row) {
+  if (!els.helpTip) return;
+  els.helpTip.textContent = t(row.getAttribute("data-help-key")) || t("help_default");
+}
+function hideHelpTip() { if (els.helpTip) els.helpTip.textContent = t("help_default"); }
+
 function openSettings() {
+  switchSettingsTab("general");
   els.setLang.value = settings.lang;
   els.setFont.value = settings.fontSize;
   els.setScroll.value = settings.scrollback;
@@ -1209,6 +1264,7 @@ function saveSettingsFromForm() {
     applyI18n(); renderProjects(); renderTabs();
     if (selected) { els.locBadge.textContent = locText(selected.path); els.locBadge.className = "loc-badge " + locClass(selected.path); fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value); }
   }
+  hideHelpTip();
   els.settingsModal.classList.add("hidden");
 }
 
@@ -1545,6 +1601,7 @@ window.addEventListener("DOMContentLoaded", () => {
     agentInput: document.querySelector("#agent-input"),
     modelInput: document.querySelector("#model-input"),
     modelSuggestions: document.querySelector("#model-suggestions"),
+    helpTip: document.querySelector("#help-tip"),
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
     editorStatus: document.querySelector("#editor-status"),
@@ -1569,8 +1626,11 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
-  document.querySelector("#settings-cancel").addEventListener("click", () => els.settingsModal.classList.add("hidden"));
+  document.querySelector("#settings-cancel").addEventListener("click", () => { hideHelpTip(); els.settingsModal.classList.add("hidden"); });
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
+  // Tabs in het instellingen-menu + hover-uitleg per instelling.
+  els.settingsModal.querySelectorAll(".stab").forEach((b) => b.addEventListener("click", () => switchSettingsTab(b.dataset.tab)));
+  els.settingsModal.addEventListener("mouseover", (e) => { const row = e.target.closest("[data-help-key]"); if (row) showHelpTip(row); else hideHelpTip(); });
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
   document.querySelector("#editor-save").addEventListener("click", saveEditor);
   document.querySelector("#editor-add").addEventListener("click", () => { editRows.push(blankRow()); renderEditor(); });
