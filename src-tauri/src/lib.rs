@@ -274,9 +274,10 @@ struct Session {
     child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
-#[derive(Default)]
 struct AppState {
     sessions: Mutex<HashMap<String, Session>>,
+    // STT-opname: commando-kanaal naar de audio-thread + zichtbare status.
+    stt: SttState,
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
@@ -1011,6 +1012,346 @@ fn branding() -> Branding {
     }
 }
 
+// ===== Spraak (TTS + STT) =====
+// TTS: Windows-native stemmen via System.Speech (SAPI) in een PowerShell-
+// kindproces -- geen downloads, geen cloud, geen extra Rust-deps. Het script
+// gaat als -EncodedCommand (base64/UTF-16LE) mee zodat er geen enkel
+// quoting-probleem is met arbitraire tekst.
+fn ps_encoded(script: &str) -> std::process::Command {
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let mut c = std::process::Command::new("powershell.exe");
+    c.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &b64(&utf16)]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    c
+}
+
+#[tauri::command]
+fn list_tts_voices() -> Vec<String> {
+    let script = "Add-Type -AssemblyName System.Speech; \
+        (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() \
+        | ForEach-Object { $_.VoiceInfo.Name }";
+    match ps_encoded(script).output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+// Spreek tekst uit (asynchroon kindproces; blokkeert de UI nooit). Tekst wordt
+// afgekapt en PS-single-quote-ge-escaped; een onbekende stem valt stil terug
+// op de default.
+#[tauri::command]
+fn speak_text(text: String, voice: String, rate: i32) -> Result<(), String> {
+    let t: String = text.chars().take(2000).collect::<String>().replace('\'', "''");
+    if t.trim().is_empty() {
+        return Ok(());
+    }
+    let sel = {
+        let v = voice.replace('\'', "''");
+        if v.trim().is_empty() { String::new() } else { format!("try {{ $s.SelectVoice('{}') }} catch {{}}; ", v) }
+    };
+    let script = format!(
+        "Add-Type -AssemblyName System.Speech; \
+         $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
+         {}$s.Rate = {}; $s.Speak('{}')",
+        sel,
+        rate.clamp(-10, 10),
+        t
+    );
+    ps_encoded(&script).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+// --- STT: opname op een eigen audio-thread (cpal Streams zijn !Send) ---
+enum RecCmd {
+    Start,
+    // Antwoord: pad van de geschreven WAV, of een fout.
+    Stop(std::sync::mpsc::Sender<Result<std::path::PathBuf, String>>),
+}
+
+struct SttState {
+    tx: std::sync::mpsc::Sender<RecCmd>,
+    recording: std::sync::atomic::AtomicBool,
+}
+
+fn stt_dir() -> std::path::PathBuf {
+    config_dir().join("stt")
+}
+
+fn stt_wav_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("taurus-stt.wav")
+}
+
+fn start_capture() -> Result<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32, u16), String> {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    let device = cpal::default_host()
+        .default_input_device()
+        .ok_or("geen microfoon gevonden")?;
+    let cfg = device.default_input_config().map_err(|e| e.to_string())?;
+    let rate = cfg.sample_rate().0;
+    let channels = cfg.channels();
+    let buf = std::sync::Arc::new(Mutex::new(Vec::<f32>::new()));
+    let b2 = buf.clone();
+    let err_fn = |_e| {};
+    let stream = match cfg.sample_format() {
+        cpal::SampleFormat::F32 => device.build_input_stream(
+            &cfg.into(),
+            move |data: &[f32], _| b2.lock().unwrap().extend_from_slice(data),
+            err_fn,
+            None,
+        ),
+        cpal::SampleFormat::I16 => device.build_input_stream(
+            &cfg.into(),
+            move |data: &[i16], _| {
+                b2.lock().unwrap().extend(data.iter().map(|s| *s as f32 / 32768.0))
+            },
+            err_fn,
+            None,
+        ),
+        cpal::SampleFormat::U16 => device.build_input_stream(
+            &cfg.into(),
+            move |data: &[u16], _| {
+                b2.lock().unwrap().extend(data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0))
+            },
+            err_fn,
+            None,
+        ),
+        f => return Err(format!("sample-formaat niet ondersteund: {:?}", f)),
+    }
+    .map_err(|e| e.to_string())?;
+    stream.play().map_err(|e| e.to_string())?;
+    Ok((stream, buf, rate, channels))
+}
+
+// Multichannel middelen naar mono en als 16-bit PCM WAV wegschrijven op de
+// native samplerate (sherpa-onnx resamplet zelf).
+fn write_wav(buf: &[f32], rate: u32, channels: u16) -> Result<std::path::PathBuf, String> {
+    let path = stt_wav_path();
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).map_err(|e| e.to_string())?;
+    let ch = channels.max(1) as usize;
+    for frame in buf.chunks(ch) {
+        let mono: f32 = frame.iter().sum::<f32>() / ch as f32;
+        w.write_sample((mono.clamp(-1.0, 1.0) * 32767.0) as i16)
+            .map_err(|e| e.to_string())?;
+    }
+    w.finalize().map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+fn audio_thread(rx: std::sync::mpsc::Receiver<RecCmd>) {
+    let mut current: Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32, u16)> = None;
+    for cmd in rx {
+        match cmd {
+            RecCmd::Start => {
+                if current.is_none() {
+                    current = start_capture().ok();
+                }
+            }
+            RecCmd::Stop(reply) => {
+                let res = match current.take() {
+                    Some((stream, buf, rate, ch)) => {
+                        drop(stream); // stopt de opname
+                        let samples = buf.lock().unwrap();
+                        if samples.len() < 1600 {
+                            Err("opname te kort".to_string())
+                        } else {
+                            write_wav(&samples, rate, ch)
+                        }
+                    }
+                    None => Err("er loopt geen opname".to_string()),
+                };
+                let _ = reply.send(res);
+            }
+        }
+    }
+}
+
+// Zoek een bestand (op naam-predicaat) onder de stt-map, max `depth` niveaus.
+fn find_under(dir: &Path, pred: &dyn Fn(&str) -> bool, depth: i32) -> Option<std::path::PathBuf> {
+    if depth < 0 {
+        return None;
+    }
+    let rd = std::fs::read_dir(dir).ok()?;
+    let mut dirs = Vec::new();
+    for e in rd.flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        if p.is_file() && pred(&name) {
+            return Some(p);
+        }
+        if p.is_dir() {
+            dirs.push(p);
+        }
+    }
+    for d in dirs {
+        if let Some(hit) = find_under(&d, pred, depth - 1) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SttStatus {
+    engine: bool,
+    model: bool,
+    downloading: bool,
+    recording: bool,
+}
+
+fn stt_paths() -> (Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
+    let d = stt_dir();
+    let exe = find_under(&d, &|n| n == "sherpa-onnx-offline.exe", 3);
+    let tokens = find_under(&d, &|n| n == "tokens.txt", 3);
+    (exe, tokens)
+}
+
+#[tauri::command]
+fn stt_status(state: State<AppState>) -> SttStatus {
+    let (exe, tokens) = stt_paths();
+    SttStatus {
+        engine: exe.is_some(),
+        model: tokens.is_some(),
+        downloading: stt_dir().join(".downloading").is_file(),
+        recording: state
+            .stt
+            .recording
+            .load(std::sync::atomic::Ordering::Relaxed),
+    }
+}
+
+// Download engine + model (tar.bz2) met PowerShell en pak ze uit met de
+// systeem-tar (bsdtar, standaard op Win10+). Draait los van de app; een
+// marker-bestand maakt de voortgang pollbaar en het log leesbaar.
+#[tauri::command]
+fn stt_download(engine_url: String, model_url: String) -> Result<(), String> {
+    for u in [&engine_url, &model_url] {
+        if !u.starts_with("https://") {
+            return Err(format!("alleen https-URL's: {}", u));
+        }
+    }
+    let d = stt_dir();
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    if d.join(".downloading").is_file() {
+        return Err("er loopt al een download".into());
+    }
+    let dir = d.to_string_lossy().replace('\'', "''");
+    let e = engine_url.replace('\'', "''");
+    let m = model_url.replace('\'', "''");
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; $d = '{dir}'; \
+         New-Item -ItemType File -Force (Join-Path $d '.downloading') | Out-Null; \
+         try {{ \
+           foreach ($u in @('{e}', '{m}')) {{ \
+             $f = Join-Path $d ([System.IO.Path]::GetFileName(([uri]$u).LocalPath)); \
+             if (-not (Test-Path $f)) {{ \
+               Add-Content (Join-Path $d 'download.log') \"downloading $u\"; \
+               [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+               Invoke-WebRequest -Uri $u -OutFile $f -UseBasicParsing; \
+             }} \
+             Add-Content (Join-Path $d 'download.log') \"extracting $f\"; \
+             tar -xf $f -C $d; \
+           }} \
+           Add-Content (Join-Path $d 'download.log') 'done'; \
+         }} catch {{ \
+           Add-Content (Join-Path $d 'download.log') \"FAILED: $_\"; \
+         }} finally {{ \
+           Remove-Item (Join-Path $d '.downloading') -Force -ErrorAction SilentlyContinue; \
+         }}"
+    );
+    ps_encoded(&script).spawn().map(|_| ()).map_err(|e2| e2.to_string())
+}
+
+// Toggle: eerste aanroep start de opname, tweede stopt hem, transcribeert de
+// WAV met de sherpa-onnx sidecar (NeMo-transducer zoals Parakeet v3) en geeft
+// de tekst terug. De frontend plaatst die in de actieve terminal.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SttToggle {
+    recording: bool,
+    text: Option<String>,
+}
+
+#[tauri::command]
+fn stt_toggle(state: State<AppState>) -> Result<SttToggle, String> {
+    use std::sync::atomic::Ordering;
+    if !state.stt.recording.load(Ordering::Relaxed) {
+        let (exe, tokens) = stt_paths();
+        if exe.is_none() || tokens.is_none() {
+            return Err("STT-model niet geïnstalleerd — download het onder Instellingen → Spraak".into());
+        }
+        state.stt.tx.send(RecCmd::Start).map_err(|e| e.to_string())?;
+        state.stt.recording.store(true, Ordering::Relaxed);
+        return Ok(SttToggle { recording: true, text: None });
+    }
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    state
+        .stt
+        .tx
+        .send(RecCmd::Stop(reply_tx))
+        .map_err(|e| e.to_string())?;
+    state.stt.recording.store(false, Ordering::Relaxed);
+    let wav = reply_rx.recv().map_err(|e| e.to_string())??;
+    transcribe(&wav).map(|text| SttToggle { recording: false, text: Some(text) })
+}
+
+fn transcribe(wav: &Path) -> Result<String, String> {
+    let (exe, tokens) = stt_paths();
+    let (exe, tokens) = (exe.ok_or("engine ontbreekt")?, tokens.ok_or("model ontbreekt")?);
+    let model_dir = tokens.parent().ok_or("modelmap ontbreekt")?.to_path_buf();
+    let onnx = |frag: &str| {
+        find_under(&model_dir, &|n| n.contains(frag) && n.ends_with(".onnx"), 1)
+            .ok_or_else(|| format!("{}*.onnx niet gevonden in het model", frag))
+    };
+    let (enc, dec, joi) = (onnx("encoder")?, onnx("decoder")?, onnx("joiner")?);
+    let mut c = std::process::Command::new(&exe);
+    c.arg(format!("--encoder={}", enc.display()))
+        .arg(format!("--decoder={}", dec.display()))
+        .arg(format!("--joiner={}", joi.display()))
+        .arg(format!("--tokens={}", tokens.display()))
+        .arg("--model-type=nemo_transducer")
+        .arg(wav);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    let out = c.output().map_err(|e| e.to_string())?;
+    let all = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // sherpa-onnx-offline print per bestand een JSON-regel met o.a. "text".
+    for line in all.lines() {
+        let l = line.trim();
+        if l.starts_with('{') {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(l) {
+                if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
+                    return Ok(t.trim().to_string());
+                }
+            }
+        }
+    }
+    Err(format!(
+        "geen transcript in sidecar-uitvoer: {}",
+        all.chars().take(400).collect::<String>()
+    ))
+}
+
 // Zet op Windows de WebView2 browser-accelerator-keys uit (F5, Ctrl+R,
 // Ctrl+Shift+R, Ctrl+Shift+I/devtools enz.). Die toetsen herladen of
 // onderbreken de webview en wissen daarmee alle agent-tabs uit beeld terwijl de
@@ -1050,14 +1391,45 @@ fn kill_all_sessions(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Audio-thread voor STT: cpal-streams zijn !Send, dus één eigen thread
+    // bezit de stream; commands praten er via een kanaal mee.
+    let (stt_tx, stt_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || audio_thread(stt_rx));
+
     tauri::Builder::default()
-        .manage(AppState::default())
+        .manage(AppState {
+            sessions: Mutex::new(HashMap::new()),
+            stt: SttState {
+                tx: stt_tx,
+                recording: std::sync::atomic::AtomicBool::new(false),
+            },
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            // F9 = push-to-talk-toggle, ook zonder vensterfocus. Registratie
+            // aan de Rust-kant; de frontend krijgt een event en doet de rest.
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    if event.state() == ShortcutState::Pressed
+                        && shortcut.matches(tauri_plugin_global_shortcut::Modifiers::empty(), tauri_plugin_global_shortcut::Code::F9)
+                    {
+                        let _ = app.emit("stt-hotkey", ());
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             #[cfg(target_os = "windows")]
             disable_accelerator_keys(app.handle());
+            {
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                // Mislukte registratie (F9 elders in gebruik) is geen ramp:
+                // de mic-knop in de topbar blijft werken.
+                let _ = app.global_shortcut().register("F9");
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1089,6 +1461,11 @@ pub fn run() {
             save_clipboard_to_input,
             copy_to_clipboard,
             branding,
+            list_tts_voices,
+            speak_text,
+            stt_status,
+            stt_download,
+            stt_toggle,
             debug_log
         ])
         .run(tauri::generate_context!())

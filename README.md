@@ -52,6 +52,13 @@ consistently. That's what Taurus is for.
 - **Per-project agent + model** — launch `claude` (Claude Code) or `agy` (a
   Gemini-backed agent CLI), optionally pinned to a model, set per project and
   overridable per session.
+- **Voice** — the terminal talks and listens. TTS via the Windows-native
+  voices (optional "agent is ready" announcement, right-click a tab to speak
+  the selection; voice/rate in Settings). Push-to-talk STT: F9 or the 🎙
+  button records, a local sherpa-onnx sidecar transcribes (NVIDIA Parakeet
+  TDT v3 by default, downloaded on demand from Settings → Voice), and the
+  text lands at the active prompt. Fully offline; the model list can follow
+  a registry URL so new models appear without an app update.
 - **Inline HTML preview** — right-click a tab → *HTML preview*, or click an `.html`
   path in the terminal; it renders beside (or instead of) the terminal.
 - **Restart / resume** — right-click a tab to restart the session and resume the

@@ -83,6 +83,7 @@
         <div class="topbar">
           <div id="tabbar" class="tabbar"></div>
           <div class="top-controls">
+            <button id="mic-btn" class="icon-btn" data-i18n-title="stt_head">🎙</button>
             <button id="settings-btn" class="icon-btn" data-i18n-title="settings">⚙</button>
             <button id="reload-btn" class="icon-btn" data-i18n-title="reload">⟳</button>
           </div>
@@ -222,6 +223,26 @@
         <div class="setting-group">
           <h3 data-i18n="grp_sessions">Sessies</h3>
           <label class="srow check"><input id="set-persist" type="checkbox" /> <span data-i18n="set_persist">Sessies onthouden en bij opstarten hervatten</span></label>
+        </div>
+
+        <div class="setting-group">
+          <h3 data-i18n="grp_voice">Spraak</h3>
+          <label class="srow check"><input id="set-tts-on" type="checkbox" /> <span data-i18n="tts_enable">Spreek uit wanneer een agent klaar is</span></label>
+          <label class="srow"><span data-i18n="tts_voice">Stem</span>
+            <select id="set-tts-voice"></select>
+          </label>
+          <label class="srow"><span data-i18n="tts_rate">Spreeksnelheid</span>
+            <span class="v-row"><input id="set-tts-rate" type="number" min="-10" max="10" step="1" /><button id="set-tts-test" class="icon-btn" type="button" data-i18n="tts_test">Test</button></span>
+          </label>
+          <div class="hint" data-i18n="stt_head">Spraak naar tekst (F9 of 🎙 = opname aan/uit)</div>
+          <label class="srow"><span data-i18n="stt_model">Model</span>
+            <span class="v-row"><select id="set-stt-model"></select><button id="set-stt-download" class="icon-btn" type="button" data-i18n="stt_download">Download</button></span>
+          </label>
+          <div id="stt-state" class="stt-state"></div>
+          <label class="srow check"><input id="set-stt-autosend" type="checkbox" /> <span data-i18n="stt_autosend">Transcript direct versturen (Enter)</span></label>
+          <label class="srow"><span data-i18n="stt_registry">Modellenbibliotheek-URL</span>
+            <span class="v-row"><input id="set-stt-registry" type="text" placeholder="https://…/voice-registry.json" /><button id="set-stt-refresh" class="icon-btn" type="button" data-i18n="stt_refresh">Vernieuw lijst</button></span>
+          </label>
         </div>
 
         <div class="modal-actions">

@@ -56,6 +56,17 @@ const I18N = {
     dropper_paste_failed: "✗ Plakken van object mislukt:",
     reload: "Herlaad", new_project: "Nieuw project", add_file: "Bestand toevoegen",
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
+    grp_voice: "Spraak", tts_enable: "Spreek uit wanneer een agent klaar is",
+    tts_voice: "Stem", tts_rate: "Spreeksnelheid", tts_test: "Test",
+    tts_ready: "{title} is klaar",
+    ctx_speak: "🔊 Selectie uitspreken",
+    stt_head: "Spraak naar tekst (F9 of 🎙 = opname aan/uit)",
+    stt_model: "Model", stt_download: "Download",
+    stt_downloading: "Bezig met downloaden… (zie stt\\download.log)",
+    stt_ready_lbl: "geïnstalleerd", stt_missing_lbl: "niet geïnstalleerd",
+    stt_autosend: "Transcript direct versturen (Enter)",
+    stt_registry: "Modellenbibliotheek-URL", stt_refresh: "Vernieuw lijst",
+    stt_failed: "✗ Transcriptie mislukt:", stt_rec: "● Opname… (F9 = stop)",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Projects",
@@ -110,6 +121,17 @@ const I18N = {
     dropper_paste_failed: "✗ Could not paste object:",
     reload: "Reload", new_project: "New project", add_file: "Add file",
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
+    grp_voice: "Voice", tts_enable: "Speak when an agent is ready",
+    tts_voice: "Voice", tts_rate: "Speaking rate", tts_test: "Test",
+    tts_ready: "{title} is ready",
+    ctx_speak: "🔊 Speak selection",
+    stt_head: "Speech to text (F9 or 🎙 toggles recording)",
+    stt_model: "Model", stt_download: "Download",
+    stt_downloading: "Downloading… (see stt\\download.log)",
+    stt_ready_lbl: "installed", stt_missing_lbl: "not installed",
+    stt_autosend: "Send transcript immediately (Enter)",
+    stt_registry: "Model library URL", stt_refresh: "Refresh list",
+    stt_failed: "✗ Transcription failed:", stt_rec: "● Recording… (F9 = stop)",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -359,6 +381,10 @@ const DEFAULT_SETTINGS = {
   persistSessions: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
+  ttsEnabled: false, ttsVoice: "", ttsRate: 0, // Windows-native TTS
+  sttAutoSend: false, // transcript meteen met Enter versturen
+  sttModel: "", // gekozen model uit de bibliotheek (leeg = eerste)
+  sttRegistry: "", // optionele modellenbibliotheek-URL (JSON); leeg = ingebouwde lijst
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -961,7 +987,11 @@ setInterval(() => {
     // Spinner ~1,5s niet gezien -> beurt klaar. Wacht op input = flash (mits niet actief).
     if (s.working && now - s.lastSpin > 1500) {
       s.working = false; s.status = null;
-      if (s.id !== current && !s.exited) s.awaiting = true;
+      if (s.id !== current && !s.exited) {
+        s.awaiting = true;
+        // Hoorbare melding naast de tab-flash (optioneel, Instellingen → Spraak).
+        speak(t("tts_ready").replace("{title}", s.title || "agent"));
+      }
       changed = true;
     }
   }
@@ -993,11 +1023,17 @@ function openTabMenu(x, y, id) {
   m.innerHTML = `
     <div class="ctx-item" data-act="restart">${t("ctx_restart")}</div>
     <div class="ctx-item" data-act="preview">${t("ctx_preview")}</div>
+    <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
     <div class="ctx-item" data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
   m.querySelector('[data-act="restart"]').addEventListener("click", () => restartSession(id));
   m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
+  m.querySelector('[data-act="speak"]').addEventListener("click", () => {
+    closeTabMenu();
+    const sel = s.term.getSelection();
+    if (sel) speak(sel, true); // force: uitspreken is hier expliciet gevraagd
+  });
   m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
   document.body.appendChild(m);
@@ -1056,7 +1092,30 @@ function openSettings() {
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
   els.setSkin.value = settings.skin || brandingSkin || (brandHasTheme ? "brand" : "default");
+  // Spraak: stemmen één keer ophalen, STT-modellenlijst + status verversen.
+  els.ttsOn.checked = settings.ttsEnabled;
+  els.ttsRate.value = settings.ttsRate | 0;
+  if (!els.ttsVoiceSel.options.length) {
+    invoke("list_tts_voices").then((vs) => {
+      els.ttsVoiceSel.innerHTML = `<option value=""></option>` +
+        vs.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+      els.ttsVoiceSel.value = settings.ttsVoice || "";
+    }).catch(() => {});
+  } else {
+    els.ttsVoiceSel.value = settings.ttsVoice || "";
+  }
+  els.sttAutoSend.checked = settings.sttAutoSend;
+  els.sttRegistryInput.value = settings.sttRegistry || "";
+  fillSttModelSelect();
+  refreshSttStatus();
   els.settingsModal.classList.remove("hidden");
+}
+
+function fillSttModelSelect() {
+  els.sttModelSel.innerHTML = sttModels
+    .map((m) => `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${m.size ? ` (${escapeHtml(m.size)})` : ""}</option>`)
+    .join("");
+  els.sttModelSel.value = currentSttModel()?.name || "";
 }
 function saveSettingsFromForm() {
   const langChanged = settings.lang !== els.setLang.value;
@@ -1076,6 +1135,12 @@ function saveSettingsFromForm() {
   settings.fullPaths = els.setFullPaths.checked;
   settings.persistSessions = els.setPersist.checked;
   settings.skin = els.setSkin.value;
+  settings.ttsEnabled = els.ttsOn.checked;
+  settings.ttsVoice = els.ttsVoiceSel.value;
+  settings.ttsRate = Math.min(10, Math.max(-10, parseInt(els.ttsRate.value) || 0));
+  settings.sttAutoSend = els.sttAutoSend.checked;
+  settings.sttModel = els.sttModelSel.value;
+  settings.sttRegistry = els.sttRegistryInput.value.trim();
   applySkin(settings.skin);
   saveSettings();
   persistSessionsToDisk();
@@ -1384,6 +1449,86 @@ function showFileChooser(file, cwd) {
   list.prepend(row);
 }
 
+/* ============ spraak: TTS + STT ============ */
+// TTS via Windows-native stemmen (SAPI); STT via lokale sherpa-onnx sidecar
+// (Parakeet v3). Modellenbibliotheek: ingebouwde lijst, optioneel vervangen
+// door een registry-JSON zodat nieuwe modellen zonder app-update verschijnen.
+const DEFAULT_STT_MODELS = [
+  {
+    name: "Parakeet TDT 0.6b v3 (int8, EN+EU talen)",
+    engineUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-win-x64-shared-MT-Release.tar.bz2",
+    modelUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+    size: "~486 MB",
+  },
+];
+let sttModels = [...DEFAULT_STT_MODELS];
+let sttRecording = false;
+let sttBusy = false;
+
+function speak(text, force) {
+  if (!force && !settings.ttsEnabled) return;
+  invoke("speak_text", { text, voice: settings.ttsVoice || "", rate: settings.ttsRate | 0 }).catch(() => {});
+}
+
+async function loadSttModels() {
+  if (!settings.sttRegistry) { sttModels = [...DEFAULT_STT_MODELS]; return; }
+  try {
+    const r = await fetch(settings.sttRegistry, { cache: "no-store" });
+    const j = await r.json();
+    if (Array.isArray(j.models) && j.models.length) sttModels = j.models;
+  } catch (_) { /* offline: hou de huidige lijst */ }
+}
+
+function currentSttModel() {
+  return sttModels.find((m) => m.name === settings.sttModel) || sttModels[0];
+}
+
+function setMicUi() {
+  els.micBtn.classList.toggle("rec", sttRecording);
+  els.micBtn.title = sttRecording ? t("stt_rec") : t("stt_head");
+}
+
+// Opname aan/uit (F9 of de 🎙-knop). Bij stop: transcriberen en het resultaat
+// in de actieve terminal plaatsen (optioneel meteen versturen).
+async function sttToggle() {
+  if (sttBusy) return;
+  sttBusy = true;
+  try {
+    const r = await invoke("stt_toggle");
+    sttRecording = !!r.recording;
+    setMicUi();
+    if (!r.recording && r.text) {
+      const s = sessions.get(current);
+      if (s) {
+        invoke("write_session", { id: s.id, data: r.text + (settings.sttAutoSend ? "\r" : "") });
+      } else {
+        copyToClipboard(r.text);
+        toast(r.text.slice(0, 120), "");
+      }
+    }
+  } catch (e) {
+    sttRecording = false;
+    setMicUi();
+    toast(t("stt_failed") + " " + e, "err");
+  } finally {
+    sttBusy = false;
+  }
+}
+
+// Instellingen → Spraak: statusregel + downloadknop, gepolld zolang de modal
+// open staat of er een download loopt.
+async function refreshSttStatus() {
+  let st = { engine: false, model: false, downloading: false };
+  try { st = await invoke("stt_status"); } catch (_) {}
+  const ok = st.engine && st.model;
+  els.sttState.textContent = st.downloading ? t("stt_downloading") : (ok ? t("stt_ready_lbl") : t("stt_missing_lbl"));
+  els.sttState.className = "stt-state " + (ok ? "ok" : "miss");
+  els.sttDownload.disabled = !!st.downloading || ok;
+  if (st.downloading && !els.settingsModal.classList.contains("hidden")) {
+    setTimeout(refreshSttStatus, 3000);
+  }
+}
+
 /* ============ init ============ */
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
@@ -1421,6 +1566,15 @@ window.addEventListener("DOMContentLoaded", () => {
     setFullPaths: document.querySelector("#set-fullpaths"),
     setPersist: document.querySelector("#set-persist"),
     setSkin: document.querySelector("#set-skin"),
+    micBtn: document.querySelector("#mic-btn"),
+    ttsOn: document.querySelector("#set-tts-on"),
+    ttsVoiceSel: document.querySelector("#set-tts-voice"),
+    ttsRate: document.querySelector("#set-tts-rate"),
+    sttModelSel: document.querySelector("#set-stt-model"),
+    sttDownload: document.querySelector("#set-stt-download"),
+    sttState: document.querySelector("#stt-state"),
+    sttAutoSend: document.querySelector("#set-stt-autosend"),
+    sttRegistryInput: document.querySelector("#set-stt-registry"),
     toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
     agentInput: document.querySelector("#agent-input"),
@@ -1450,6 +1604,24 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
   document.querySelector("#settings-cancel").addEventListener("click", () => els.settingsModal.classList.add("hidden"));
+  // Spraak: mic-knop + F9-event uit de backend + instellingen-acties.
+  els.micBtn.addEventListener("click", sttToggle);
+  listen("stt-hotkey", sttToggle);
+  document.querySelector("#set-tts-test").addEventListener("click", () => {
+    // Test met de NU gekozen (nog niet opgeslagen) stem/snelheid.
+    invoke("speak_text", { text: t("tts_ready").replace("{title}", "Taurus"), voice: els.ttsVoiceSel.value, rate: parseInt(els.ttsRate.value) || 0 }).catch(() => {});
+  });
+  document.querySelector("#set-stt-download").addEventListener("click", async () => {
+    const m = sttModels.find((x) => x.name === els.sttModelSel.value) || sttModels[0];
+    if (!m) return;
+    try { await invoke("stt_download", { engineUrl: m.engineUrl, modelUrl: m.modelUrl }); } catch (e) { toast("✗ " + e, "err"); }
+    refreshSttStatus();
+  });
+  document.querySelector("#set-stt-refresh").addEventListener("click", async () => {
+    settings.sttRegistry = els.sttRegistryInput.value.trim();
+    await loadSttModels();
+    fillSttModelSelect();
+  });
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
   document.querySelector("#editor-save").addEventListener("click", saveEditor);
@@ -1475,6 +1647,8 @@ window.addEventListener("DOMContentLoaded", () => {
   applyI18n();
   wireGarble();
   wireFileDropper();
+  loadSttModels();
+  setMicUi();
   // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);
