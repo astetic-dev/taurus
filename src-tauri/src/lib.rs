@@ -1498,9 +1498,11 @@ pub fn run() {
     // Audio-thread voor STT: cpal-streams zijn !Send, dus één eigen thread
     // bezit de stream; commands praten er via een kanaal mee.
     let (stt_tx, stt_rx) = std::sync::mpsc::channel();
-    let stt_level = std::sync::Arc::new(Mutex::new(0.0f32));
-    let stt_level_thread = stt_level.clone();
-    std::thread::spawn(move || audio_thread(stt_rx, stt_level_thread));
+    // NB: niet 'stt_level' noemen -- dat zou de gelijknamige command-functie
+    // schaduwen in generate_handler! (E0618).
+    let mic_level = std::sync::Arc::new(Mutex::new(0.0f32));
+    let mic_level_thread = mic_level.clone();
+    std::thread::spawn(move || audio_thread(stt_rx, mic_level_thread));
 
     tauri::Builder::default()
         .manage(AppState {
@@ -1508,7 +1510,7 @@ pub fn run() {
             stt: SttState {
                 tx: stt_tx,
                 recording: std::sync::atomic::AtomicBool::new(false),
-                level: stt_level,
+                level: mic_level,
             },
         })
         .plugin(tauri_plugin_opener::init())
