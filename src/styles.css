@@ -128,7 +128,8 @@ button, input, select, textarea { font-family: var(--ui-font); }
   transition: color .12s, border-color .12s;
 }
 .record-btn:hover { border-color: var(--accent); color: var(--text); }
-.rec-mic { pointer-events: none; }
+.rec-mic { pointer-events: none; display: grid; place-items: center; }
+.rec-mic svg { width: 24px; height: 24px; }
 .rec-ring { position: absolute; inset: -2px; border-radius: 50%; pointer-events: none; opacity: 0; }
 .record-widget.listening .record-btn { color: var(--accent); border-color: var(--accent); }
 .record-widget.listening .rec-ring {
@@ -136,13 +137,6 @@ button, input, select, textarea { font-family: var(--ui-font); }
   transform: scale(calc(1 + var(--lvl, 0) * 0.45));
   box-shadow: 0 0 calc(6px + var(--lvl, 0) * 22px) calc(var(--lvl, 0) * 4px) var(--accent);
   transition: transform .07s linear, box-shadow .07s linear;
-}
-.rec-eq { display: none; align-items: flex-end; gap: 3px; height: 16px; }
-.record-widget.listening .rec-eq { display: flex; }
-.rec-eq i {
-  width: 3px; border-radius: 2px; background: var(--accent);
-  height: calc(3px + var(--lvl, 0) * 15px * var(--m, 1));
-  transition: height .07s linear;
 }
 .record-widget.transcribing .record-btn {
   color: var(--orange); border-color: var(--orange);
@@ -543,6 +537,10 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 /* Spraak-instellingen: samengestelde rijen + STT-status + opname-indicator. */
 .v-row { display: flex; align-items: center; gap: 6px; }
 .v-row input[type="text"] { min-width: 200px; }
+/* Spreeksnelheid: slider met langzaam/snel-labels. */
+.rate-row { gap: 8px; }
+.rate-lbl { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.rate-slider { flex: 1; min-width: 120px; accent-color: var(--accent); }
 .stt-state { font-size: 12px; padding: 2px 0 6px; color: var(--text-dim); }
 .stt-state.ok { color: var(--green); }
 .stt-state.miss { color: var(--orange); }

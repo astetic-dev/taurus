@@ -77,7 +77,7 @@ const I18N = {
     reload: "Herlaad", new_project: "Nieuwe agent", add_file: "Bestand toevoegen",
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
     grp_voice: "Spraak", tts_enable: "Spreek uit wanneer een agent klaar is",
-    tts_voice: "Stem", tts_rate: "Spreeksnelheid", tts_test: "Test",
+    tts_voice: "Stem", tts_rate: "Spreeksnelheid", tts_test: "Test", rate_slow: "langzaam", rate_fast: "snel",
     tts_ready: "{title} is klaar",
     ctx_speak: "🔊 Selectie uitspreken",
     stt_head: "Spraak naar tekst — F9 inhouden (of klik 🎙)",
@@ -163,7 +163,7 @@ const I18N = {
     reload: "Reload", new_project: "New agent", add_file: "Add file",
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
     grp_voice: "Voice", tts_enable: "Speak when an agent is ready",
-    tts_voice: "Voice", tts_rate: "Speaking rate", tts_test: "Test",
+    tts_voice: "Voice", tts_rate: "Speaking rate", tts_test: "Test", rate_slow: "slow", rate_fast: "fast",
     tts_ready: "{title} is ready",
     ctx_speak: "🔊 Speak selection",
     stt_head: "Speech to text — hold F9 (or click 🎙)",
@@ -1667,11 +1667,6 @@ function currentSttModel() {
   return sttModels.find((m) => m.name === settings.sttModel) || sttModels[0];
 }
 
-function setMicUi() {
-  els.micBtn.classList.toggle("rec", sttRecording);
-  els.micBtn.title = sttRecording ? t("stt_rec") : t("stt_head");
-}
-
 // Record-widget boven de DROPZONE: live equalizer-niveau + status.
 let sttLevelTimer = null;
 function setRecordLevel(v) {
@@ -1717,7 +1712,6 @@ async function sttReconcile() {
   try {
     const r = await invoke("stt_toggle");
     sttRecording = !!r.recording;
-    setMicUi();
     if (!r.recording && r.text) {
       const s = sessions.get(current);
       if (s) {
@@ -1729,7 +1723,6 @@ async function sttReconcile() {
     }
   } catch (e) {
     sttRecording = false;
-    setMicUi();
     toast(t("stt_failed") + " " + e, "err");
   } finally {
     sttBusy = false;
@@ -1789,7 +1782,6 @@ window.addEventListener("DOMContentLoaded", () => {
     setFullPaths: document.querySelector("#set-fullpaths"),
     setPersist: document.querySelector("#set-persist"),
     setSkin: document.querySelector("#set-skin"),
-    micBtn: document.querySelector("#mic-btn"),
     recordWidget: document.querySelector("#record-widget"),
     recordBtn: document.querySelector("#record-btn"),
     recordStatus: document.querySelector("#record-status"),
@@ -1833,7 +1825,6 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
   document.querySelector("#settings-cancel").addEventListener("click", () => { hideHelpTip(); els.settingsModal.classList.add("hidden"); });
   // Spraak: mic-knop + F9-event uit de backend + instellingen-acties.
-  els.micBtn.addEventListener("click", sttToggle);
   els.recordBtn.addEventListener("click", sttToggle); // grote opnameknop boven de DROPZONE
   listen("stt-ptt-down", sttPttDown); // F9 ingedrukt -> opnemen
   listen("stt-ptt-up", sttPttUp);     // F9 losgelaten -> stoppen + transcriberen
@@ -1881,7 +1872,6 @@ window.addEventListener("DOMContentLoaded", () => {
   wireGarble();
   wireFileDropper();
   loadSttModels();
-  setMicUi();
   // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);

@@ -32,9 +32,15 @@
         <div id="record-widget" class="record-widget">
           <button id="record-btn" class="record-btn" type="button" data-i18n-title="rec_idle">
             <span class="rec-ring" aria-hidden="true"></span>
-            <span class="rec-mic" aria-hidden="true">🎤</span>
+            <span class="rec-mic" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="2.5" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0" />
+                <line x1="12" y1="18" x2="12" y2="21.5" />
+                <line x1="8" y1="21.5" x2="16" y2="21.5" />
+              </svg>
+            </span>
           </button>
-          <div class="rec-eq" aria-hidden="true"><i style="--m:.5"></i><i style="--m:.9"></i><i style="--m:1"></i><i style="--m:.7"></i><i style="--m:1"></i><i style="--m:.6"></i><i style="--m:.8"></i></div>
           <div id="record-status" class="record-status" data-i18n="rec_idle">Klik om te dicteren</div>
         </div>
 
@@ -92,7 +98,6 @@
         <div class="topbar">
           <div id="tabbar" class="tabbar"></div>
           <div class="top-controls">
-            <button id="mic-btn" class="icon-btn" data-i18n-title="stt_head">🎙</button>
             <button id="settings-btn" class="icon-btn" data-i18n-title="settings">⚙</button>
             <button id="reload-btn" class="icon-btn" data-i18n-title="reload">⟳</button>
           </div>
@@ -264,7 +269,7 @@
                 <select id="set-tts-voice"></select>
               </label>
               <label class="srow"><span data-i18n="tts_rate">Spreeksnelheid</span>
-                <span class="v-row"><input id="set-tts-rate" type="number" min="-10" max="10" step="1" /><button id="set-tts-test" class="icon-btn" type="button" data-i18n="tts_test">Test</button></span>
+                <span class="v-row rate-row"><span class="rate-lbl" data-i18n="rate_slow">langzaam</span><input id="set-tts-rate" type="range" min="-10" max="10" step="1" class="rate-slider" /><span class="rate-lbl" data-i18n="rate_fast">snel</span><button id="set-tts-test" class="icon-btn" type="button" data-i18n="tts_test">Test</button></span>
               </label>
               <div class="hint" data-i18n="stt_head">Spraak naar tekst — F9 inhouden (of klik 🎙)</div>
               <label class="srow"><span data-i18n="stt_model">Model</span>
