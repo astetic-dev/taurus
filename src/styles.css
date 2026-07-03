@@ -88,6 +88,43 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .exp-arrow { width: 12px; flex: none; font-size: 10px; }
 .exp-name { overflow: hidden; text-overflow: ellipsis; }
 .exp-hint { color: var(--text-dim); padding: 8px; font-size: 12px; }
+
+/* Sleepgreep tussen verkenner en paneel. */
+.col-resize {
+  flex: none; width: 5px; cursor: col-resize;
+  background: transparent; border-right: 1px solid var(--border);
+}
+.col-resize:hover { background: var(--accent); opacity: .5; }
+body.col-dragging { cursor: col-resize; user-select: none; }
+
+/* Ingeklapte projectkolom: smalle rail met alleen de uitklap-knop. */
+.sidebar { position: relative; }
+.sidebar-toggle {
+  position: absolute; top: 8px; right: 6px; z-index: 2;
+  background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 5px; padding: 1px 6px; font-size: 12px; cursor: pointer;
+}
+.sidebar-toggle:hover { color: var(--text); border-color: var(--accent); }
+.sidebar.collapsed { width: 28px; padding: 34px 2px 8px; }
+.sidebar.collapsed > *:not(.sidebar-toggle) { display: none; }
+
+/* Context-preview boven de terminal (inhoud van het geselecteerde bestand). */
+.context-pane {
+  flex: none; height: 38%; min-height: 120px;
+  display: flex; flex-direction: column;
+  background: var(--bg-panel); border-bottom: 1px solid var(--border);
+}
+.cp-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border);
+}
+.cp-name { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-actions { display: flex; gap: 6px; flex: none; }
+.cp-body {
+  flex: 1; margin: 0; padding: 10px 12px; overflow: auto;
+  font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12px; line-height: 1.5;
+  color: var(--text); white-space: pre-wrap; word-break: break-word;
+}
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 18px; }
 .brand-mark { font-size: 28px; color: var(--accent); line-height: 1; }
 .brand-title { font-size: 18px; font-weight: 700; letter-spacing: .3px; }

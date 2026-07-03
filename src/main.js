@@ -59,6 +59,10 @@ const I18N = {
     explorer: "VERKENNER", exp_toggle: "Verkenner-kolom aan/uit", exp_refresh: "Vernieuwen",
     exp_no_root: "Kies een project of open een sessie om de werkmap te zien.",
     exp_empty: "(leeg)",
+    sb_toggle: "Projectkolom in-/uitklappen",
+    cp_insert: "Pad in de terminal plaatsen", cp_close: "Preview sluiten",
+    cp_binary: "(geen tekstbestand — rechtsklik in de boom om extern te openen)",
+    cp_truncated: "… (afgekapt — bestand is groter)",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Projects",
@@ -116,6 +120,10 @@ const I18N = {
     explorer: "EXPLORER", exp_toggle: "Toggle explorer column", exp_refresh: "Refresh",
     exp_no_root: "Pick a project or open a session to see its working folder.",
     exp_empty: "(empty)",
+    sb_toggle: "Collapse/expand the project column",
+    cp_insert: "Insert path into the terminal", cp_close: "Close preview",
+    cp_binary: "(not a text file — right-click it in the tree to open externally)",
+    cp_truncated: "… (truncated — file is larger)",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -366,6 +374,8 @@ const DEFAULT_SETTINGS = {
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
   showExplorer: false, // verkenner-kolom naast de projectlijst
+  explorerWidth: 230, // breedte van de verkenner-kolom (px, via de sleepgreep)
+  sidebarCollapsed: false, // projectkolom ingeklapt tot een smalle rail
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -1403,8 +1413,77 @@ const explorerOpen = new Set(); // opengeklapte submappen (absolute paden)
 
 function applyExplorerVisibility() {
   els.explorer.classList.toggle("hidden", !settings.showExplorer);
+  els.explorerResize.classList.toggle("hidden", !settings.showExplorer);
+  els.explorer.style.width = (settings.explorerWidth || 230) + "px";
   if (settings.showExplorer) syncExplorerRoot(true);
   resizeActive(); // kolom erbij/eraf = andere terminalbreedte
+}
+
+// Sleepgreep op de rand van de verkenner-kolom: breedte live volgen, bij
+// loslaten opslaan. Min/max houden de kolom bruikbaar op elk scherm.
+function wireExplorerResize() {
+  let dragging = false;
+  els.explorerResize.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    dragging = true;
+    document.body.classList.add("col-dragging");
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const left = els.explorer.getBoundingClientRect().left;
+    const w = Math.min(520, Math.max(140, e.clientX - left));
+    settings.explorerWidth = w;
+    els.explorer.style.width = w + "px";
+  });
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove("col-dragging");
+    saveSettings();
+    resizeActive();
+  });
+}
+
+// Projectkolom in-/uitklappen tot een smalle rail; de toestand blijft bewaard.
+function applySidebarCollapsed() {
+  els.sidebar.classList.toggle("collapsed", !!settings.sidebarCollapsed);
+  els.sidebarToggle.textContent = settings.sidebarCollapsed ? "»" : "«";
+  resizeActive();
+}
+function toggleSidebar() {
+  settings.sidebarCollapsed = !settings.sidebarCollapsed;
+  saveSettings();
+  applySidebarCollapsed();
+}
+
+// ===== Context-preview boven de terminal =====
+// Enkel klikken op een bestand in de boom toont de inhoud (alleen-lezen) in
+// een paneel boven de terminal; dubbelklik plaatst het pad in de terminal
+// (het oude enkelklik-gedrag). Groot bestand: afkappen, geen tekst: hint.
+const CP_MAX_CHARS = 200_000;
+let contextPath = null;
+
+async function showContextPreview(path, name) {
+  contextPath = path;
+  els.cpName.textContent = name;
+  els.cpName.title = path;
+  let body;
+  try {
+    const txt = await invoke("read_file", { path });
+    body = txt.length > CP_MAX_CHARS ? txt.slice(0, CP_MAX_CHARS) + "\n" + t("cp_truncated") : txt;
+  } catch (_) {
+    body = t("cp_binary");
+  }
+  els.cpBody.textContent = body;
+  els.cpBody.scrollTop = 0;
+  els.contextPane.classList.remove("hidden");
+  resizeActive();
+}
+
+function closeContextPreview() {
+  contextPath = null;
+  els.contextPane.classList.add("hidden");
+  resizeActive();
 }
 
 function toggleExplorer() {
@@ -1463,9 +1542,16 @@ async function renderExplorerDir(container, path, depth) {
         open ? explorerOpen.delete(en.path) : explorerOpen.add(en.path);
         renderExplorer();
       } else {
-        insertPathIntoTerminal(en.path);
+        showContextPreview(en.path, en.name);
       }
     });
+    if (!en.isDir) {
+      // Dubbelklik = pad in de terminal (het oude enkelklik-gedrag).
+      row.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        insertPathIntoTerminal(en.path);
+      });
+    }
     // Rechtsklik: open in het OS (map in Verkenner; bestand met z'n standaard-app).
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -1484,6 +1570,12 @@ window.addEventListener("DOMContentLoaded", () => {
     explorer: document.querySelector("#explorer"),
     explorerRootLbl: document.querySelector("#explorer-root"),
     explorerTree: document.querySelector("#explorer-tree"),
+    explorerResize: document.querySelector("#explorer-resize"),
+    sidebar: document.querySelector("#sidebar"),
+    sidebarToggle: document.querySelector("#sidebar-toggle"),
+    contextPane: document.querySelector("#context-pane"),
+    cpName: document.querySelector("#cp-name"),
+    cpBody: document.querySelector("#cp-body"),
     tabbar: document.querySelector("#tabbar"),
     launchView: document.querySelector("#launch-view"),
     terminals: document.querySelector("#terminals"),
@@ -1544,6 +1636,10 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#explorer-btn").addEventListener("click", toggleExplorer);
   document.querySelector("#explorer-refresh").addEventListener("click", () => syncExplorerRoot(true));
+  els.sidebarToggle.addEventListener("click", toggleSidebar);
+  document.querySelector("#cp-close").addEventListener("click", closeContextPreview);
+  document.querySelector("#cp-insert").addEventListener("click", () => { if (contextPath) insertPathIntoTerminal(contextPath); });
+  wireExplorerResize();
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
@@ -1574,6 +1670,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireGarble();
   wireFileDropper();
   applyExplorerVisibility();
+  applySidebarCollapsed();
   // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);
