@@ -164,69 +164,90 @@
       <div class="modal-box">
         <h2 data-i18n="settings">Instellingen</h2>
 
-        <div class="setting-group">
-          <h3 data-i18n="lang_label">Taal / Language</h3>
-          <label class="srow"><span data-i18n="lang_choose">Kies taal</span>
-            <select id="set-lang">
-              <option value="nl">Nederlands</option>
-              <option value="en">English</option>
-            </select>
-          </label>
+        <div class="settings-tabs" role="tablist">
+          <button type="button" class="stab active" data-tab="general" data-i18n="tab_general">Algemeen</button>
+          <button type="button" class="stab" data-tab="theme" data-i18n="tab_theme">Thema</button>
+          <button type="button" class="stab" data-tab="html" data-i18n="tab_html">HTML-preview</button>
+          <button type="button" class="stab" data-tab="terminal" data-i18n="tab_terminal">Terminal</button>
         </div>
 
-        <div class="setting-group">
-          <h3 data-i18n="grp_screen">Scherm</h3>
-          <label class="srow"><span data-i18n="set_font">Lettergrootte</span>
-            <input id="set-fontsize" type="number" min="8" max="28" />
-          </label>
-          <label class="srow"><span data-i18n="set_scroll">Scrollback (regels)</span>
-            <input id="set-scrollback" type="number" min="500" max="100000" step="500" />
-          </label>
-          <label class="srow check"><input id="set-cursorblink" type="checkbox" /> <span data-i18n="set_cursor">Cursor knippert</span></label>
+        <div class="settings-panes">
+          <!-- Algemeen: taal, scherm, sessies -->
+          <div class="spane active" data-pane="general">
+            <div class="setting-group">
+              <h3 data-i18n="lang_label">Taal / Language</h3>
+              <label class="srow" data-help-key="help_lang"><span data-i18n="lang_choose">Kies taal</span>
+                <select id="set-lang">
+                  <option value="nl">Nederlands</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+            </div>
+            <div class="setting-group">
+              <h3 data-i18n="grp_screen">Scherm</h3>
+              <label class="srow" data-help-key="help_fontsize"><span data-i18n="set_font">Lettergrootte</span>
+                <input id="set-fontsize" type="number" min="8" max="28" />
+              </label>
+              <label class="srow" data-help-key="help_scrollback"><span data-i18n="set_scroll">Scrollback (regels)</span>
+                <input id="set-scrollback" type="number" min="500" max="100000" step="500" />
+              </label>
+              <label class="srow check" data-help-key="help_cursor"><input id="set-cursorblink" type="checkbox" /> <span data-i18n="set_cursor">Cursor knippert</span></label>
+            </div>
+            <div class="setting-group">
+              <h3 data-i18n="grp_sessions">Sessies</h3>
+              <label class="srow check" data-help-key="help_persist"><input id="set-persist" type="checkbox" /> <span data-i18n="set_persist">Sessies onthouden en bij opstarten hervatten</span></label>
+            </div>
+          </div>
+
+          <!-- Thema -->
+          <div class="spane" data-pane="theme">
+            <div class="setting-group">
+              <h3 data-i18n="grp_theme">Thema</h3>
+              <label class="srow" data-help-key="help_skin"><span data-i18n="set_skin">Skin</span>
+                <select id="set-skin">
+                  <option value="default" data-i18n="skin_default">Standaard (donker)</option>
+                  <option value="retro-mac" data-i18n="skin_retromac">Retro Mac</option>
+                  <option value="aqua" data-i18n="skin_aqua">macOS Aqua</option>
+                  <option value="retro-win" data-i18n="skin_retrowin">Retro Windows</option>
+                  <option value="winxp" data-i18n="skin_winxp">Windows XP</option>
+                  <option value="terminal" data-i18n="skin_terminal">Terminal (CRT)</option>
+                  <option value="nord" data-i18n="skin_nord">Nord</option>
+                  <option value="dracula" data-i18n="skin_dracula">Dracula</option>
+                  <option value="solarized" data-i18n="skin_solarized">Solarized Light</option>
+                  <option value="catppuccin" data-i18n="skin_catppuccin">Catppuccin</option>
+                </select>
+              </label>
+              <div class="hint" data-i18n="skin_hint">Of zet een vaste default in branding.json (zie README).</div>
+            </div>
+          </div>
+
+          <!-- HTML-preview -->
+          <div class="spane" data-pane="html">
+            <div class="setting-group">
+              <h3 data-i18n="grp_html">HTML-preview</h3>
+              <label class="srow check" data-help-key="help_html_split"><input type="radio" name="htmlview" id="set-html-split" value="split" /> <span data-i18n="html_split">Naast de terminal (split)</span></label>
+              <label class="srow check" data-help-key="help_html_full"><input type="radio" name="htmlview" id="set-html-full" value="full" /> <span data-i18n="html_full">Volledig (verberg terminal)</span></label>
+              <label class="srow check" data-help-key="help_fullpaths"><input id="set-fullpaths" type="checkbox" /> <span data-i18n="set_fullpaths">Vraag Claude volledige paden te tonen (klikbaar)</span></label>
+            </div>
+          </div>
+
+          <!-- Terminal -->
+          <div class="spane" data-pane="terminal">
+            <div class="setting-group">
+              <h3><span data-i18n="grp_comfort">Terminal-comfort</span> <span class="opt" data-i18n="comfort_hint">(per voorkeur aan/uit)</span></h3>
+              <label class="srow check" data-help-key="help_copyselect"><input id="set-copyselect" type="checkbox" /> <span data-i18n="c_copy">Selectie kopieert automatisch</span></label>
+              <label class="srow check" data-help-key="help_pasteright"><input id="set-pasteright" type="checkbox" /> <span data-i18n="c_paste">Rechtermuisklik plakt</span></label>
+              <label class="srow check" data-help-key="help_agentmouse"><input id="set-agentmouse" type="checkbox" /> <span data-i18n="c_mouse">Agent mag de muis gebruiken</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
+              <label class="srow check" data-help-key="help_ctrlshift"><input id="set-ctrlshift" type="checkbox" /> <span data-i18n="c_ctrl">Ctrl+Shift+C / Ctrl+Shift+V</span></label>
+              <label class="srow check" data-help-key="help_weblinks"><input id="set-weblinks" type="checkbox" /> <span data-i18n="c_links">Klikbare links</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
+              <label class="srow check" data-help-key="help_search"><input id="set-search" type="checkbox" /> <span data-i18n="c_search">Zoeken in scrollback — Ctrl+Shift+F</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
+              <label class="srow check" data-help-key="help_tabshortcuts"><input id="set-tabshortcuts" type="checkbox" /> <span data-i18n="c_tabs">Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)</span></label>
+              <label class="srow check" data-help-key="help_tabstatus"><input id="set-tabstatus" type="checkbox" /> <span data-i18n="c_status">Live Claude-status op de tab (✶ Orbiting…)</span></label>
+            </div>
+          </div>
         </div>
 
-        <div class="setting-group">
-          <h3 data-i18n="grp_html">HTML-preview</h3>
-          <label class="srow check"><input type="radio" name="htmlview" id="set-html-split" value="split" /> <span data-i18n="html_split">Naast de terminal (split)</span></label>
-          <label class="srow check"><input type="radio" name="htmlview" id="set-html-full" value="full" /> <span data-i18n="html_full">Volledig (verberg terminal)</span></label>
-          <label class="srow check"><input id="set-fullpaths" type="checkbox" /> <span data-i18n="set_fullpaths">Vraag Claude volledige paden te tonen (klikbaar)</span></label>
-        </div>
-
-        <div class="setting-group">
-          <h3><span data-i18n="grp_comfort">Terminal-comfort</span> <span class="opt" data-i18n="comfort_hint">(per voorkeur aan/uit)</span></h3>
-          <label class="srow check"><input id="set-copyselect" type="checkbox" /> <span data-i18n="c_copy">Selectie kopieert automatisch</span></label>
-          <label class="srow check"><input id="set-pasteright" type="checkbox" /> <span data-i18n="c_paste">Rechtermuisklik plakt</span></label>
-          <label class="srow check"><input id="set-agentmouse" type="checkbox" /> <span data-i18n="c_mouse">Agent mag de muis gebruiken</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
-          <label class="srow check"><input id="set-ctrlshift" type="checkbox" /> <span data-i18n="c_ctrl">Ctrl+Shift+C / Ctrl+Shift+V</span></label>
-          <label class="srow check"><input id="set-weblinks" type="checkbox" /> <span data-i18n="c_links">Klikbare links</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
-          <label class="srow check"><input id="set-search" type="checkbox" /> <span data-i18n="c_search">Zoeken in scrollback — Ctrl+Shift+F</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
-          <label class="srow check"><input id="set-tabshortcuts" type="checkbox" /> <span data-i18n="c_tabs">Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)</span></label>
-          <label class="srow check"><input id="set-tabstatus" type="checkbox" /> <span data-i18n="c_status">Live Claude-status op de tab (✶ Orbiting…)</span></label>
-        </div>
-
-        <div class="setting-group">
-          <h3 data-i18n="grp_theme">Thema</h3>
-          <label class="srow"><span data-i18n="set_skin">Skin</span>
-            <select id="set-skin">
-              <option value="default" data-i18n="skin_default">Standaard (donker)</option>
-              <option value="retro-mac" data-i18n="skin_retromac">Retro Mac</option>
-              <option value="aqua" data-i18n="skin_aqua">macOS Aqua</option>
-              <option value="retro-win" data-i18n="skin_retrowin">Retro Windows</option>
-              <option value="winxp" data-i18n="skin_winxp">Windows XP</option>
-              <option value="terminal" data-i18n="skin_terminal">Terminal (CRT)</option>
-              <option value="nord" data-i18n="skin_nord">Nord</option>
-              <option value="dracula" data-i18n="skin_dracula">Dracula</option>
-              <option value="solarized" data-i18n="skin_solarized">Solarized Light</option>
-              <option value="catppuccin" data-i18n="skin_catppuccin">Catppuccin</option>
-            </select>
-          </label>
-          <div class="hint" data-i18n="skin_hint">Of zet een vaste default in branding.json (zie README).</div>
-        </div>
-
-        <div class="setting-group">
-          <h3 data-i18n="grp_sessions">Sessies</h3>
-          <label class="srow check"><input id="set-persist" type="checkbox" /> <span data-i18n="set_persist">Sessies onthouden en bij opstarten hervatten</span></label>
-        </div>
+        <div id="help-tip" class="help-panel" data-i18n="help_default">Beweeg over een instelling voor uitleg.</div>
 
         <div class="modal-actions">
           <button id="settings-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
