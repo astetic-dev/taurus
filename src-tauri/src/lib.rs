@@ -1033,7 +1033,6 @@ fn ps_encoded(script: &str) -> std::process::Command {
     c
 }
 
-#[tauri::command]
 // Draai een PS-script dat per stem "<taal>\t<naam>" print en voeg elke stem toe als
 // "<engine>|<taal>|<naam>" (taal = BCP-47, bijv. nl-NL). De frontend toont de taal
 // leesbaar en groepeert; speak_text kiest de engine op de tag (taal wordt genegeerd).
@@ -1054,6 +1053,7 @@ fn push_voices(out: &mut Vec<String>, engine: &str, script: &str) {
 // natuurlijke stemmen en andere talen zoals het Nederlandse 'Microsoft Frank', dat
 // alleen in OneCore staat), SAPI als backup. Niet filteren op "Natural" -- dan
 // zouden juist die stemmen wegvallen.
+#[tauri::command]
 fn list_tts_voices() -> Vec<String> {
     let mut out = Vec::new();
     push_voices(
