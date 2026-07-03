@@ -505,6 +505,15 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 .srow.check { justify-content: flex-start; gap: 10px; cursor: pointer; }
 .srow.check input { width: auto; }
 .opt { color: var(--text-dim); font-weight: 400; font-size: 11px; }
+
+/* Spraak-instellingen: samengestelde rijen + STT-status + opname-indicator. */
+.v-row { display: flex; align-items: center; gap: 6px; }
+.v-row input[type="text"] { min-width: 200px; }
+.stt-state { font-size: 12px; padding: 2px 0 6px; color: var(--text-dim); }
+.stt-state.ok { color: var(--green); }
+.stt-state.miss { color: var(--orange); }
+#mic-btn.rec { color: #fff; background: var(--red); border-color: var(--red); animation: mic-pulse 1.2s infinite; }
+@keyframes mic-pulse { 50% { opacity: .55; } }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 
 /* Instellingen: tab-strip + panes + hover-uitleg */
