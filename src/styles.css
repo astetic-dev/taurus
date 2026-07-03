@@ -189,14 +189,18 @@ button, input, select, textarea { font-family: var(--ui-font); }
   color: var(--text-dim);
 }
 .empty-glyph { font-size: 56px; opacity: .35; margin-bottom: 12px; }
+/* Primary line: draw the eye to the left menu. */
+.empty-lead { font-size: 15px; color: var(--text); max-width: 340px; text-align: center; line-height: 1.5; }
+/* Secondary line + browse button: clearly the lesser, one-off path. */
+.empty-oneoff { margin-top: 26px; font-size: 12px; color: var(--text-dim); }
 .browse-btn {
-  margin-top: 18px;
+  margin-top: 8px;
   background: transparent;
-  color: var(--text);
+  color: var(--text-dim);
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 9px 16px;
-  font-size: 13px;
+  padding: 7px 13px;
+  font-size: 12px;
   cursor: pointer;
 }
 .browse-btn:hover { border-color: var(--accent); color: var(--accent); }

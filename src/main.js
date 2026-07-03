@@ -6,7 +6,8 @@ const I18N = {
   nl: {
     brand_sub: "Agent Launcher", projects: "Agents",
     foot_projects: "✎ Agents", foot_settings: "⚙ Instellingen", foot_reload: "⟳ Herlaad",
-    empty_pick: "Kies links een project om een agent te starten.",
+    empty_pick: "Kies of maak links een agent om je werkproces te starten.",
+    empty_oneoff: "…of blader hieronder naar een eenmalige agent.",
     browse_folder: "📁 Blader naar een map…",
     no_claude_md: "ℹ Geen CLAUDE.md in deze map — agent start zonder projectinstructies.",
     workdir: "Werkmap", session_title: "Titel van de sessie",
@@ -60,7 +61,8 @@ const I18N = {
   en: {
     brand_sub: "Agent Launcher", projects: "Agents",
     foot_projects: "✎ Agents", foot_settings: "⚙ Settings", foot_reload: "⟳ Reload",
-    empty_pick: "Pick a project on the left to start an agent.",
+    empty_pick: "Pick or create an agent on the left to start your work process.",
+    empty_oneoff: "…or browse for a one-time agent below.",
     browse_folder: "📁 Browse for a folder…",
     no_claude_md: "ℹ No CLAUDE.md in this folder — the agent starts without project instructions.",
     workdir: "Working folder", session_title: "Session title",
