@@ -431,6 +431,13 @@ function copyToClipboard(text) {
 }
 function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
+// Compacte drive-aanduiding achter de agentnaam: "(C:)" / "(X:)" / "(UNC)".
+// Vervangt de bredere LOCAL/NETWORK-regel zodat er meer agents in de lijst passen.
+function driveTag(p) {
+  if (p.startsWith("\\\\")) return "(UNC)";
+  const d = (p.match(/^([a-z]):/i) || [])[1];
+  return d ? `(${d.toUpperCase()}:)` : "";
+}
 function locText(p) {
   if (p.startsWith("\\\\")) return t("loc_net") + " (UNC)";
   const d = (p.match(/^([a-z]):/i) || [])[1];
@@ -530,8 +537,7 @@ function renderProjects() {
     card.dataset.idx = String(index);
     card.style.borderLeftColor = p.accent || "#7c9cff";
     card.innerHTML =
-      `<div class="pc-label">${escapeHtml(p.label)}</div>` +
-      `<div class="pc-loc ${locClass(p.path)}">${locText(p.path)}</div>` +
+      `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${locClass(p.path)}">${driveTag(p.path)}</span></div>` +
       `<div class="pc-actions">` +
         `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
         `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
