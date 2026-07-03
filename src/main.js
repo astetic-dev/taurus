@@ -56,6 +56,11 @@ const I18N = {
     dropper_paste_failed: "✗ Plakken van object mislukt:",
     reload: "Herlaad", new_project: "Nieuw project", add_file: "Bestand toevoegen",
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
+    grp_brand: "White-label", b_name: "App-naam", b_sub: "Ondertitel", b_wintitle: "Venstertitel",
+    b_logo: "Logo", b_accent: "Accentkleur", b_termbg: "Terminal-achtergrond", b_termfg: "Terminal-tekst",
+    b_use: "gebruik",
+    b_hint: "Leeg = standaard Taurus. Wordt opgeslagen in branding.json; terminalkleuren gelden voor nieuwe sessies.",
+    b_save_failed: "✗ Branding opslaan mislukt:",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Projects",
@@ -110,6 +115,11 @@ const I18N = {
     dropper_paste_failed: "✗ Could not paste object:",
     reload: "Reload", new_project: "New project", add_file: "Add file",
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
+    grp_brand: "White-label", b_name: "App name", b_sub: "Subtitle", b_wintitle: "Window title",
+    b_logo: "Logo", b_accent: "Accent color", b_termbg: "Terminal background", b_termfg: "Terminal text",
+    b_use: "use",
+    b_hint: "Empty = stock Taurus. Saved to branding.json; terminal colors apply to new sessions.",
+    b_save_failed: "✗ Saving branding failed:",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -1036,7 +1046,51 @@ function doSearch(dir) {
 }
 
 /* ============ instellingen ============ */
+/* ============ white-label-editor (Instellingen) ============ */
+// Leest/schrijft de ruwe branding.json via read/save_branding_config. We
+// mergen in het bestaande object zodat velden die de editor niet kent
+// (skin, skinName, font, garble) behouden blijven. Leeg veld = weglaten,
+// zodat een leeggemaakte editor weer gewoon standaard Taurus oplevert.
+let brandingCfg = {};
+
+async function loadBrandingForm() {
+  brandingCfg = {};
+  try { brandingCfg = JSON.parse(await invoke("read_branding_config")) || {}; } catch (_) {}
+  els.bName.value = brandingCfg.appName || "";
+  els.bSub.value = brandingCfg.subtitle || "";
+  els.bWinTitle.value = brandingCfg.windowTitle || "";
+  els.bLogo.value = brandingCfg.logo || "";
+  const th = brandingCfg.theme || {};
+  const setColor = (input, chk, v) => { chk.checked = !!v; if (v && /^#[0-9a-f]{6}$/i.test(v)) input.value = v; };
+  setColor(els.bAccent, els.bAccentOn, th["--accent"]);
+  setColor(els.bTermBg, els.bTermBgOn, th["--term-bg"]);
+  setColor(els.bTermFg, els.bTermFgOn, th["--term-fg"]);
+}
+
+async function saveBrandingForm() {
+  const cfg = { ...brandingCfg };
+  const setOrDrop = (key, val) => { if (val) cfg[key] = val; else delete cfg[key]; };
+  setOrDrop("appName", els.bName.value.trim());
+  setOrDrop("subtitle", els.bSub.value.trim());
+  setOrDrop("windowTitle", els.bWinTitle.value.trim());
+  setOrDrop("logo", els.bLogo.value.trim());
+  const th = { ...(cfg.theme || {}) };
+  const setVar = (name, chk, input) => { if (chk.checked) th[name] = input.value; else delete th[name]; };
+  setVar("--accent", els.bAccentOn, els.bAccent);
+  setVar("--term-bg", els.bTermBgOn, els.bTermBg);
+  setVar("--term-fg", els.bTermFgOn, els.bTermFg);
+  if (Object.keys(th).length) cfg.theme = th; else delete cfg.theme;
+  try {
+    await invoke("save_branding_config", { text: JSON.stringify(cfg, null, 2) });
+    brandingCfg = cfg;
+    await applyBranding(); // meteen live (logo, titels, thema); terminalkleuren bij nieuwe sessies
+  } catch (e) {
+    toast(t("b_save_failed") + " " + e, "err");
+  }
+}
+
 function openSettings() {
+  loadBrandingForm();
   els.setLang.value = settings.lang;
   els.setFont.value = settings.fontSize;
   els.setScroll.value = settings.scrollback;
@@ -1078,6 +1132,7 @@ function saveSettingsFromForm() {
   settings.skin = els.setSkin.value;
   applySkin(settings.skin);
   saveSettings();
+  saveBrandingForm();
   persistSessionsToDisk();
   for (const s of sessions.values()) {
     s.term.options.fontSize = settings.fontSize;
@@ -1421,6 +1476,16 @@ window.addEventListener("DOMContentLoaded", () => {
     setFullPaths: document.querySelector("#set-fullpaths"),
     setPersist: document.querySelector("#set-persist"),
     setSkin: document.querySelector("#set-skin"),
+    bName: document.querySelector("#set-b-name"),
+    bSub: document.querySelector("#set-b-sub"),
+    bWinTitle: document.querySelector("#set-b-wintitle"),
+    bLogo: document.querySelector("#set-b-logo"),
+    bAccent: document.querySelector("#set-b-accent"),
+    bAccentOn: document.querySelector("#set-b-accent-on"),
+    bTermBg: document.querySelector("#set-b-termbg"),
+    bTermBgOn: document.querySelector("#set-b-termbg-on"),
+    bTermFg: document.querySelector("#set-b-termfg"),
+    bTermFgOn: document.querySelector("#set-b-termfg-on"),
     toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
     agentInput: document.querySelector("#agent-input"),
@@ -1450,6 +1515,13 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
   document.querySelector("#settings-cancel").addEventListener("click", () => els.settingsModal.classList.add("hidden"));
+  // Logo kiezen via de OS-bestandskiezer; checkbox vinkt vanzelf aan bij kleurkeuze.
+  document.querySelector("#set-b-logo-browse").addEventListener("click", async () => {
+    try { const f = await invoke("pick_file", { startDir: els.bLogo.value ? els.bLogo.value.replace(/[\\/][^\\/]*$/, "") : "" }); if (f) els.bLogo.value = f; } catch (_) {}
+  });
+  els.bAccent.addEventListener("input", () => (els.bAccentOn.checked = true));
+  els.bTermBg.addEventListener("input", () => (els.bTermBgOn.checked = true));
+  els.bTermFg.addEventListener("input", () => (els.bTermFgOn.checked = true));
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
   document.querySelector("#editor-save").addEventListener("click", saveEditor);

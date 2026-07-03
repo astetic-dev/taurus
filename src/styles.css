@@ -479,6 +479,14 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 .srow input[type="number"] { width: 100px; }
 .srow.check { justify-content: flex-start; gap: 10px; cursor: pointer; }
 .srow.check input { width: auto; }
+
+/* White-label-rijen in Instellingen. */
+.srow input[type="text"] { flex: 1; max-width: 260px; }
+.b-logo-row { display: flex; gap: 6px; flex: 1; max-width: 260px; }
+.b-logo-row input { flex: 1; min-width: 0; }
+.b-color-row { display: flex; align-items: center; gap: 10px; }
+.b-color-row input[type="color"] { width: 44px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-card); cursor: pointer; }
+.check-inline { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
 .opt { color: var(--text-dim); font-weight: 400; font-size: 11px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .btn-primary {

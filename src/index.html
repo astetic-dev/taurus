@@ -224,6 +224,32 @@
           <label class="srow check"><input id="set-persist" type="checkbox" /> <span data-i18n="set_persist">Sessies onthouden en bij opstarten hervatten</span></label>
         </div>
 
+        <div class="setting-group">
+          <h3 data-i18n="grp_brand">White-label</h3>
+          <label class="srow"><span data-i18n="b_name">App-naam</span>
+            <input id="set-b-name" type="text" placeholder="Taurus" />
+          </label>
+          <label class="srow"><span data-i18n="b_sub">Ondertitel</span>
+            <input id="set-b-sub" type="text" placeholder="Agent Launcher" />
+          </label>
+          <label class="srow"><span data-i18n="b_wintitle">Venstertitel</span>
+            <input id="set-b-wintitle" type="text" placeholder="Taurus — Agent Launcher" />
+          </label>
+          <label class="srow"><span data-i18n="b_logo">Logo</span>
+            <span class="b-logo-row"><input id="set-b-logo" type="text" placeholder="C:\…\logo.png" /><button id="set-b-logo-browse" class="icon-btn" type="button">📁</button></span>
+          </label>
+          <label class="srow"><span data-i18n="b_accent">Accentkleur</span>
+            <span class="b-color-row"><input id="set-b-accent" type="color" value="#7c9cff" /><label class="check-inline"><input id="set-b-accent-on" type="checkbox" /> <span data-i18n="b_use">gebruik</span></label></span>
+          </label>
+          <label class="srow"><span data-i18n="b_termbg">Terminal-achtergrond</span>
+            <span class="b-color-row"><input id="set-b-termbg" type="color" value="#14161c" /><label class="check-inline"><input id="set-b-termbg-on" type="checkbox" /> <span data-i18n="b_use">gebruik</span></label></span>
+          </label>
+          <label class="srow"><span data-i18n="b_termfg">Terminal-tekst</span>
+            <span class="b-color-row"><input id="set-b-termfg" type="color" value="#e6e8ee" /><label class="check-inline"><input id="set-b-termfg-on" type="checkbox" /> <span data-i18n="b_use">gebruik</span></label></span>
+          </label>
+          <div class="hint" data-i18n="b_hint">Leeg = standaard Taurus. Wordt opgeslagen in branding.json; terminalkleuren gelden voor nieuwe sessies.</div>
+        </div>
+
         <div class="modal-actions">
           <button id="settings-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
           <button id="settings-save" class="btn-primary" data-i18n="save">Opslaan</button>

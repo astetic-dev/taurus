@@ -1011,6 +1011,47 @@ fn branding() -> Branding {
     }
 }
 
+// Ruwe branding.json-tekst voor de Instellingen-editor ("{}" als het bestand
+// ontbreekt). De frontend parse't, merge't en schrijft terug via
+// save_branding_config; zo blijven onbekende velden (skin, font, garble)
+// behouden en blijft `branding` de enige plek die toepast.
+#[tauri::command]
+fn read_branding_config() -> String {
+    let (path, _) = branding_config_path();
+    match path {
+        Some(p) => std::fs::read_to_string(p).unwrap_or_else(|_| "{}".into()),
+        None => "{}".into(),
+    }
+}
+
+// Schrijf branding.json in de per-gebruiker config-map. Alleen geldige JSON
+// wordt geaccepteerd (typefout in de editor mag de branding niet slopen).
+#[tauri::command]
+fn save_branding_config(text: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&text)
+        .map_err(|e| format!("ongeldige JSON: {}", e))?;
+    let _ = std::fs::create_dir_all(config_dir());
+    std::fs::write(config_dir().join("branding.json"), text).map_err(|e| e.to_string())
+}
+
+// Vind de actieve branding.json (zelfde zoekvolgorde als load_branding):
+// per-gebruiker config-map eerst, dan naast de exe.
+fn branding_config_path() -> (Option<std::path::PathBuf>, std::path::PathBuf) {
+    let user = config_dir().join("branding.json");
+    if user.is_file() {
+        return (Some(user.clone()), user);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let side = dir.join("branding.json");
+            if side.is_file() {
+                return (Some(side), user);
+            }
+        }
+    }
+    (None, user)
+}
+
 // Zet op Windows de WebView2 browser-accelerator-keys uit (F5, Ctrl+R,
 // Ctrl+Shift+R, Ctrl+Shift+I/devtools enz.). Die toetsen herladen of
 // onderbreken de webview en wissen daarmee alle agent-tabs uit beeld terwijl de
@@ -1089,6 +1130,8 @@ pub fn run() {
             save_clipboard_to_input,
             copy_to_clipboard,
             branding,
+            read_branding_config,
+            save_branding_config,
             debug_log
         ])
         .run(tauri::generate_context!())

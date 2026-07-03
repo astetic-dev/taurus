@@ -123,7 +123,16 @@ Edit them with the in-app **Projects** editor, or by hand. Format:
 ## Branding (white-label)
 
 You can rebrand the launcher — app name, subtitle, logo, colours, skin, window
-title — **without forking or editing code**. Copy
+title — **without forking or editing code**.
+
+The quick way: **⚙ Settings → White-label** edits the common fields in-app —
+app name, subtitle, window title, logo (file picker), accent colour and the
+terminal background/text colours — and writes them to `branding.json` for you.
+Changes apply immediately (terminal colours to new sessions); clearing the
+fields returns you to stock Taurus.
+
+For everything else (skin default, font, garble, portable distribution), edit
+the file directly. Copy
 [`branding.example.json`](branding.example.json) to `%APPDATA%\Taurus\branding.json`
 (next to `projects.json`) and edit it. Without the file the build is plain
 Taurus; remove it to get Taurus back. Every field is optional:
