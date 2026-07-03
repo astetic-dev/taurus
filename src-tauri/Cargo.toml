@@ -32,6 +32,10 @@ png = "0.17"
 # STT; de transcriptie zelf draait out-of-process (sherpa-onnx sidecar).
 cpal = "0.15"
 hound = "3.5"
+# Engine/model-archieven (.tar.bz2) zelf uitpakken: de Windows-systeem-tar is
+# niet overal met bzip2 gebouwd (zlib-only bsdtar hangt/faalt er stil op).
+tar = "0.4"
+bzip2 = "0.4"
 # Globale sneltoets (F9) voor push-to-talk, ook als het venster geen focus heeft.
 tauri-plugin-global-shortcut = "2"
 
