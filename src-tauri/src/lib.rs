@@ -1036,10 +1036,13 @@ fn ps_encoded(script: &str) -> std::process::Command {
 // engine op basis van de tag.
 fn list_tts_voices() -> Vec<String> {
     let mut out = Vec::new();
-    // Natuurlijke stemmen via WinRT (Windows 11: de 'Natural'/OneCore-stemmen die
-    // ook Verteller gebruikt). Kan leeg zijn op oudere Windows.
+    // Alleen ECHTE natuurlijke/neurale stemmen (naam bevat "Natural") via WinRT.
+    // Zonder dit filter geeft AllVoices ook de klassieke stemmen (David/Zira/Mark)
+    // terug -- die klinken identiek aan SAPI, dus die horen niet in de Natuurlijk-
+    // groep. Leeg als er geen neurale stemmen geinstalleerd zijn (Windows -> Spraak).
     let winrt = "$null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media,ContentType=WindowsRuntime]; \
-        [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | ForEach-Object { $_.DisplayName }";
+        [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices \
+        | Where-Object { $_.DisplayName -like '*Natural*' } | ForEach-Object { $_.DisplayName }";
     if let Ok(o) = ps_encoded(winrt).output() {
         for l in String::from_utf8_lossy(&o.stdout).lines() {
             let n = l.trim();
