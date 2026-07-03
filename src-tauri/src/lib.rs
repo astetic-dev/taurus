@@ -1030,18 +1030,37 @@ fn ps_encoded(script: &str) -> std::process::Command {
 }
 
 #[tauri::command]
+// Geeft de stemmen getagd terug: "winrt|<naam>" (natuurlijke WinRT/OneCore-stemmen,
+// bovenaan) en "sapi|<naam>" (klassieke SAPI-stemmen, als backup onderaan). De
+// frontend splitst op '|' voor een nette label + groepering; speak_text kiest de
+// engine op basis van de tag.
 fn list_tts_voices() -> Vec<String> {
-    let script = "Add-Type -AssemblyName System.Speech; \
+    let mut out = Vec::new();
+    // Natuurlijke stemmen via WinRT (Windows 11: de 'Natural'/OneCore-stemmen die
+    // ook Verteller gebruikt). Kan leeg zijn op oudere Windows.
+    let winrt = "$null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media,ContentType=WindowsRuntime]; \
+        [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | ForEach-Object { $_.DisplayName }";
+    if let Ok(o) = ps_encoded(winrt).output() {
+        for l in String::from_utf8_lossy(&o.stdout).lines() {
+            let n = l.trim();
+            if !n.is_empty() {
+                out.push(format!("winrt|{}", n));
+            }
+        }
+    }
+    // Klassieke SAPI-stemmen als backup, onderaan.
+    let sapi = "Add-Type -AssemblyName System.Speech; \
         (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() \
         | ForEach-Object { $_.VoiceInfo.Name }";
-    match ps_encoded(script).output() {
-        Ok(o) => String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect(),
-        Err(_) => Vec::new(),
+    if let Ok(o) = ps_encoded(sapi).output() {
+        for l in String::from_utf8_lossy(&o.stdout).lines() {
+            let n = l.trim();
+            if !n.is_empty() {
+                out.push(format!("sapi|{}", n));
+            }
+        }
     }
+    out
 }
 
 // Spreek tekst uit (asynchroon kindproces; blokkeert de UI nooit). Tekst wordt
@@ -1053,18 +1072,61 @@ fn speak_text(text: String, voice: String, rate: i32) -> Result<(), String> {
     if t.trim().is_empty() {
         return Ok(());
     }
-    let sel = {
-        let v = voice.replace('\'', "''");
-        if v.trim().is_empty() { String::new() } else { format!("try {{ $s.SelectVoice('{}') }} catch {{}}; ", v) }
+    let r = rate.clamp(-10, 10);
+    // Tag "winrt|naam" / "sapi|naam"; ongetagd = klassieke SAPI (oude opgeslagen keuze).
+    let (engine, name) = match voice.split_once('|') {
+        Some((e, n)) => (e, n),
+        None => ("sapi", voice.as_str()),
     };
-    let script = format!(
-        "Add-Type -AssemblyName System.Speech; \
-         $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
-         {}$s.Rate = {}; $s.Speak('{}')",
-        sel,
-        rate.clamp(-10, 10),
-        t
-    );
+    let name_esc = name.replace('\'', "''");
+    let script = if engine == "winrt" {
+        // Natuurlijke stem via WinRT: synthese -> WAV-stream -> tijdelijke .wav ->
+        // synchroon afspelen. Bij ELKE fout terugval op de klassieke SAPI-default,
+        // zodat een selectie nooit stil blijft. WinRT SpeakingRate: 0.5..~2.0 (1.0 =
+        // normaal); we mappen -10..10 daarop.
+        let rate_w = (1.0 + (r as f64) * 0.08).max(0.5);
+        let tmpl = r#"
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media,ContentType=WindowsRuntime]
+  $null=[Windows.Storage.Streams.DataReader,Windows.Storage.Streams,ContentType=WindowsRuntime]
+  function Await($t,$ty){ $m=([System.WindowsRuntimeSystemExtensions].GetMethods()|?{$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'})[0].MakeGenericMethod($ty); $nt=$m.Invoke($null,@($t)); [void]$nt.Wait(-1); $nt.Result }
+  $s=New-Object Windows.Media.SpeechSynthesis.SpeechSynthesizer
+  $v=[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices|?{$_.DisplayName -eq '__NAME__'}|Select-Object -First 1
+  if($v){$s.Voice=$v}
+  $s.Options.SpeakingRate=[double]__RATEW__
+  $st=Await ($s.SynthesizeTextToStreamAsync('__TEXT__')) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
+  $rd=New-Object Windows.Storage.Streams.DataReader($st)
+  [void](Await ($rd.LoadAsync([uint32]$st.Size)) ([uint32]))
+  $b=New-Object byte[] ([int]$st.Size)
+  $rd.ReadBytes($b)
+  $p=Join-Path $env:TEMP 'taurus-tts.wav'
+  [System.IO.File]::WriteAllBytes($p,$b)
+  (New-Object System.Media.SoundPlayer($p)).PlaySync()
+} catch {
+  Add-Type -AssemblyName System.Speech
+  $f=New-Object System.Speech.Synthesis.SpeechSynthesizer
+  $f.Rate=__RATES__
+  $f.Speak('__TEXT__')
+}
+"#;
+        tmpl.replace("__NAME__", &name_esc)
+            .replace("__TEXT__", &t)
+            .replace("__RATEW__", &format!("{:.2}", rate_w))
+            .replace("__RATES__", &r.to_string())
+    } else {
+        let sel = if name_esc.trim().is_empty() {
+            String::new()
+        } else {
+            format!("try {{ $s.SelectVoice('{}') }} catch {{}}; ", name_esc)
+        };
+        format!(
+            "Add-Type -AssemblyName System.Speech; \
+             $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
+             {}$s.Rate = {}; $s.Speak('{}')",
+            sel, r, t
+        )
+    };
     ps_encoded(&script).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 

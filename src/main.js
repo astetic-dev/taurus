@@ -78,6 +78,7 @@ const I18N = {
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
     grp_voice: "Spraak", tts_enable: "Spreek uit wanneer een agent klaar is",
     tts_voice: "Stem", tts_rate: "Spreeksnelheid", tts_test: "Test", rate_slow: "langzaam", rate_fast: "snel",
+    voice_natural: "Natuurlijk (Windows)", voice_classic: "Klassiek (SAPI)",
     tts_ready: "{title} is klaar",
     ctx_speak: "🔊 Selectie uitspreken",
     stt_head: "Spraak naar tekst — F9 inhouden (of klik 🎙)",
@@ -164,6 +165,7 @@ const I18N = {
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
     grp_voice: "Voice", tts_enable: "Speak when an agent is ready",
     tts_voice: "Voice", tts_rate: "Speaking rate", tts_test: "Test", rate_slow: "slow", rate_fast: "fast",
+    voice_natural: "Natural (Windows)", voice_classic: "Classic (SAPI)",
     tts_ready: "{title} is ready",
     ctx_speak: "🔊 Speak selection",
     stt_head: "Speech to text — hold F9 (or click 🎙)",
@@ -414,7 +416,9 @@ const sessions = new Map();
 const els = {};
 
 const DEFAULT_SETTINGS = {
-  lang: "nl",
+  // Standaardtaal volgt het OS: alleen een Nederlandstalig systeem start in het
+  // Nederlands; al het andere in het Engels. Een opgeslagen keuze wint altijd (#46).
+  lang: (navigator.language || "en").toLowerCase().startsWith("nl") ? "nl" : "en",
   fontSize: 13, scrollback: 8000, cursorBlink: true,
   htmlView: "split",
   copyOnSelect: true, pasteOnRightClick: true, ctrlShiftCV: true,
@@ -1279,8 +1283,15 @@ function openSettings() {
   els.ttsRate.value = settings.ttsRate | 0;
   if (!els.ttsVoiceSel.options.length) {
     invoke("list_tts_voices").then((vs) => {
-      els.ttsVoiceSel.innerHTML = `<option value=""></option>` +
-        vs.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+      // Elke stem is "engine|naam"; toon de nette naam, groepeer natuurlijk boven
+      // klassiek. De volledige getagde waarde blijft de option-value (voor speak_text).
+      const opt = (v) => `<option value="${escapeHtml(v)}">${escapeHtml(v.split("|").slice(1).join("|") || v)}</option>`;
+      const nat = vs.filter((v) => v.startsWith("winrt|"));
+      const cls = vs.filter((v) => !v.startsWith("winrt|"));
+      let html = `<option value=""></option>`;
+      if (nat.length) html += `<optgroup label="${escapeHtml(t("voice_natural"))}">${nat.map(opt).join("")}</optgroup>`;
+      if (cls.length) html += `<optgroup label="${escapeHtml(t("voice_classic"))}">${cls.map(opt).join("")}</optgroup>`;
+      els.ttsVoiceSel.innerHTML = html;
       els.ttsVoiceSel.value = settings.ttsVoice || "";
     }).catch(() => {});
   } else {
