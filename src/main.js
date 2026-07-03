@@ -87,6 +87,7 @@ const I18N = {
     stt_autosend: "Transcript direct versturen (Enter)",
     stt_registry: "Modellenbibliotheek-URL", stt_refresh: "Vernieuw lijst",
     stt_failed: "✗ Transcriptie mislukt:", stt_rec: "● Opname… (laat F9 los = stop)",
+    rec_idle: "Klik of F9 = dicteren", rec_listening: "● Luisteren…", rec_transcribing: "Transcriberen…",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Agents",
@@ -172,6 +173,7 @@ const I18N = {
     stt_autosend: "Send transcript immediately (Enter)",
     stt_registry: "Model library URL", stt_refresh: "Refresh list",
     stt_failed: "✗ Transcription failed:", stt_rec: "● Recording… (release F9 to stop)",
+    rec_idle: "Click or F9 to dictate", rec_listening: "● Listening…", rec_transcribing: "Transcribing…",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -1670,12 +1672,38 @@ function setMicUi() {
   els.micBtn.title = sttRecording ? t("stt_rec") : t("stt_head");
 }
 
+// Record-widget boven de DROPZONE: live equalizer-niveau + status.
+let sttLevelTimer = null;
+function setRecordLevel(v) {
+  // *2 tilt een stille microfoon wat op; geklemd op 1.
+  if (els.recordWidget) els.recordWidget.style.setProperty("--lvl", String(Math.min(1, v * 2)));
+}
+function startLevelPoll() {
+  stopLevelPoll();
+  sttLevelTimer = setInterval(async () => {
+    try { setRecordLevel(await invoke("stt_level")); } catch (_) {}
+  }, 90);
+}
+function stopLevelPoll() {
+  if (sttLevelTimer) { clearInterval(sttLevelTimer); sttLevelTimer = null; }
+  setRecordLevel(0);
+}
+function setRecordState(s) { // "idle" | "listening" | "transcribing"
+  if (els.recordWidget) {
+    els.recordWidget.classList.toggle("listening", s === "listening");
+    els.recordWidget.classList.toggle("transcribing", s === "transcribing");
+  }
+  if (els.recordStatus) {
+    els.recordStatus.textContent = t(s === "listening" ? "rec_listening" : s === "transcribing" ? "rec_transcribing" : "rec_idle");
+  }
+}
+
 // Opname sturen via een gewenste-staat + reconciler. F9 INHOUDEN zet de wens
-// (down = opnemen, up = stoppen); de 🎙-knop schakelt de wens om (klik = aan/uit).
-// De reconciler roept stt_toggle alleen aan als werkelijke != gewenste staat, en
-// draait na afloop opnieuw als de wens intussen veranderde -- zo laat een korte
-// F9-tik (up tijdens de start-invoke) geen opname hangen. Bij stop: transcriberen
-// en het resultaat in de actieve terminal plaatsen (optioneel meteen versturen).
+// (down = opnemen, up = stoppen); de 🎙-knop en de opnameknop boven de DROPZONE
+// schakelen de wens om (klik = aan/uit). De reconciler roept stt_toggle alleen aan
+// als werkelijke != gewenste staat, en draait na afloop opnieuw als de wens intussen
+// veranderde -- zo laat een korte F9-tik geen opname hangen. Widget-status:
+// listening tijdens opname, transcribing tijdens de (paar seconden durende) stop.
 function sttPttDown() { sttWantRecording = true; sttReconcile(); }
 function sttPttUp() { sttWantRecording = false; sttReconcile(); }
 function sttToggle() { sttWantRecording = !sttRecording; sttReconcile(); }
@@ -1683,6 +1711,9 @@ function sttToggle() { sttWantRecording = !sttRecording; sttReconcile(); }
 async function sttReconcile() {
   if (sttBusy || sttWantRecording === sttRecording) return;
   sttBusy = true;
+  const starting = !sttRecording;
+  if (starting) { setRecordState("listening"); startLevelPoll(); }
+  else { setRecordState("transcribing"); stopLevelPoll(); }
   try {
     const r = await invoke("stt_toggle");
     sttRecording = !!r.recording;
@@ -1702,6 +1733,7 @@ async function sttReconcile() {
     toast(t("stt_failed") + " " + e, "err");
   } finally {
     sttBusy = false;
+    if (!sttRecording) { stopLevelPoll(); setRecordState("idle"); }
     if (sttWantRecording !== sttRecording) sttReconcile(); // wens veranderde tijdens de invoke
   }
 }
@@ -1758,6 +1790,9 @@ window.addEventListener("DOMContentLoaded", () => {
     setPersist: document.querySelector("#set-persist"),
     setSkin: document.querySelector("#set-skin"),
     micBtn: document.querySelector("#mic-btn"),
+    recordWidget: document.querySelector("#record-widget"),
+    recordBtn: document.querySelector("#record-btn"),
+    recordStatus: document.querySelector("#record-status"),
     ttsOn: document.querySelector("#set-tts-on"),
     ttsVoiceSel: document.querySelector("#set-tts-voice"),
     ttsRate: document.querySelector("#set-tts-rate"),
@@ -1799,6 +1834,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#settings-cancel").addEventListener("click", () => { hideHelpTip(); els.settingsModal.classList.add("hidden"); });
   // Spraak: mic-knop + F9-event uit de backend + instellingen-acties.
   els.micBtn.addEventListener("click", sttToggle);
+  els.recordBtn.addEventListener("click", sttToggle); // grote opnameknop boven de DROPZONE
   listen("stt-ptt-down", sttPttDown); // F9 ingedrukt -> opnemen
   listen("stt-ptt-up", sttPttUp);     // F9 losgelaten -> stoppen + transcriberen
   document.querySelector("#set-tts-test").addEventListener("click", () => {

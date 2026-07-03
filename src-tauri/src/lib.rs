@@ -1078,6 +1078,9 @@ enum RecCmd {
 struct SttState {
     tx: std::sync::mpsc::Sender<RecCmd>,
     recording: std::sync::atomic::AtomicBool,
+    // Live piekniveau van de microfoon (0..1) tijdens opname; de cpal-callback
+    // werkt het bij, de frontend pollt het via stt_level voor de equalizer.
+    level: std::sync::Arc<Mutex<f32>>,
 }
 
 fn stt_dir() -> std::path::PathBuf {
@@ -1088,7 +1091,16 @@ fn stt_wav_path() -> std::path::PathBuf {
     std::env::temp_dir().join("taurus-stt.wav")
 }
 
-fn start_capture() -> Result<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32, u16), String> {
+// Zet het gedeelde piekniveau (0..1) op de grootste absolute sample in dit blok.
+fn set_peak(lvl: &Mutex<f32>, peak: f32) {
+    if let Ok(mut l) = lvl.lock() {
+        *l = peak;
+    }
+}
+
+fn start_capture(
+    level: std::sync::Arc<Mutex<f32>>,
+) -> Result<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32, u16), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let device = cpal::default_host()
         .default_input_device()
@@ -1098,18 +1110,29 @@ fn start_capture() -> Result<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32
     let channels = cfg.channels();
     let buf = std::sync::Arc::new(Mutex::new(Vec::<f32>::new()));
     let b2 = buf.clone();
+    let lvl = level;
     let err_fn = |_e| {};
     let stream = match cfg.sample_format() {
         cpal::SampleFormat::F32 => device.build_input_stream(
             &cfg.into(),
-            move |data: &[f32], _| b2.lock().unwrap().extend_from_slice(data),
+            move |data: &[f32], _| {
+                b2.lock().unwrap().extend_from_slice(data);
+                set_peak(&lvl, data.iter().fold(0f32, |m, &s| m.max(s.abs())));
+            },
             err_fn,
             None,
         ),
         cpal::SampleFormat::I16 => device.build_input_stream(
             &cfg.into(),
             move |data: &[i16], _| {
-                b2.lock().unwrap().extend(data.iter().map(|s| *s as f32 / 32768.0))
+                let mut g = b2.lock().unwrap();
+                let mut peak = 0f32;
+                for s in data {
+                    let v = *s as f32 / 32768.0;
+                    g.push(v);
+                    peak = peak.max(v.abs());
+                }
+                set_peak(&lvl, peak);
             },
             err_fn,
             None,
@@ -1117,7 +1140,14 @@ fn start_capture() -> Result<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32
         cpal::SampleFormat::U16 => device.build_input_stream(
             &cfg.into(),
             move |data: &[u16], _| {
-                b2.lock().unwrap().extend(data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0))
+                let mut g = b2.lock().unwrap();
+                let mut peak = 0f32;
+                for s in data {
+                    let v = (*s as f32 - 32768.0) / 32768.0;
+                    g.push(v);
+                    peak = peak.max(v.abs());
+                }
+                set_peak(&lvl, peak);
             },
             err_fn,
             None,
@@ -1150,19 +1180,20 @@ fn write_wav(buf: &[f32], rate: u32, channels: u16) -> Result<std::path::PathBuf
     Ok(path)
 }
 
-fn audio_thread(rx: std::sync::mpsc::Receiver<RecCmd>) {
+fn audio_thread(rx: std::sync::mpsc::Receiver<RecCmd>, level: std::sync::Arc<Mutex<f32>>) {
     let mut current: Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32, u16)> = None;
     for cmd in rx {
         match cmd {
             RecCmd::Start => {
                 if current.is_none() {
-                    current = start_capture().ok();
+                    current = start_capture(level.clone()).ok();
                 }
             }
             RecCmd::Stop(reply) => {
                 let res = match current.take() {
                     Some((stream, buf, rate, ch)) => {
                         drop(stream); // stopt de opname
+                        set_peak(&level, 0.0); // meter terug naar nul
                         let samples = buf.lock().unwrap();
                         if samples.len() < 1600 {
                             Err("recording too short".to_string())
@@ -1374,6 +1405,13 @@ fn stt_toggle(state: State<AppState>) -> Result<SttToggle, String> {
     transcribe(&wav).map(|text| SttToggle { recording: false, text: Some(text) })
 }
 
+// Live microfoon-piekniveau (0..1) tijdens opname; de frontend pollt dit voor de
+// equalizer rond de opnameknop. 0 als er niet wordt opgenomen.
+#[tauri::command]
+fn stt_level(state: State<AppState>) -> f32 {
+    state.stt.level.lock().map(|l| *l).unwrap_or(0.0)
+}
+
 fn transcribe(wav: &Path) -> Result<String, String> {
     let (exe, tokens) = stt_paths();
     let (exe, tokens) = (exe.ok_or("engine missing")?, tokens.ok_or("model missing")?);
@@ -1460,7 +1498,9 @@ pub fn run() {
     // Audio-thread voor STT: cpal-streams zijn !Send, dus één eigen thread
     // bezit de stream; commands praten er via een kanaal mee.
     let (stt_tx, stt_rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || audio_thread(stt_rx));
+    let stt_level = std::sync::Arc::new(Mutex::new(0.0f32));
+    let stt_level_thread = stt_level.clone();
+    std::thread::spawn(move || audio_thread(stt_rx, stt_level_thread));
 
     tauri::Builder::default()
         .manage(AppState {
@@ -1468,6 +1508,7 @@ pub fn run() {
             stt: SttState {
                 tx: stt_tx,
                 recording: std::sync::atomic::AtomicBool::new(false),
+                level: stt_level,
             },
         })
         .plugin(tauri_plugin_opener::init())
@@ -1538,6 +1579,7 @@ pub fn run() {
             stt_status,
             stt_download,
             stt_toggle,
+            stt_level,
             debug_log
         ])
         .run(tauri::generate_context!())

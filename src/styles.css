@@ -117,6 +117,40 @@ button, input, select, textarea { font-family: var(--ui-font); }
 }
 .reload-btn:hover { color: var(--text); border-color: var(--accent); }
 
+/* ---- Opnameknop (spraak) boven de DROPZONE ----
+   Ronde knop met mic; een ring + equalizerbalkjes reageren live op --lvl (0..1),
+   gezet door de frontend via stt_level. States: listening / transcribing. */
+.record-widget { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 0 12px; }
+.record-btn {
+  position: relative; width: 54px; height: 54px; border-radius: 50%;
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--text-dim);
+  cursor: pointer; display: grid; place-items: center; font-size: 20px; line-height: 1;
+  transition: color .12s, border-color .12s;
+}
+.record-btn:hover { border-color: var(--accent); color: var(--text); }
+.rec-mic { pointer-events: none; }
+.rec-ring { position: absolute; inset: -2px; border-radius: 50%; pointer-events: none; opacity: 0; }
+.record-widget.listening .record-btn { color: var(--accent); border-color: var(--accent); }
+.record-widget.listening .rec-ring {
+  opacity: 1;
+  transform: scale(calc(1 + var(--lvl, 0) * 0.45));
+  box-shadow: 0 0 calc(6px + var(--lvl, 0) * 22px) calc(var(--lvl, 0) * 4px) var(--accent);
+  transition: transform .07s linear, box-shadow .07s linear;
+}
+.rec-eq { display: none; align-items: flex-end; gap: 3px; height: 16px; }
+.record-widget.listening .rec-eq { display: flex; }
+.rec-eq i {
+  width: 3px; border-radius: 2px; background: var(--accent);
+  height: calc(3px + var(--lvl, 0) * 15px * var(--m, 1));
+  transition: height .07s linear;
+}
+.record-widget.transcribing .record-btn {
+  color: var(--orange); border-color: var(--orange);
+  animation: recpulse 1s ease-in-out infinite;
+}
+.record-status { font-size: 10.5px; color: var(--text-dim); text-align: center; min-height: 13px; }
+@keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
 /* ---- Panel ---- */
 .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .hidden { display: none !important; }
