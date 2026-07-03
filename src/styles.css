@@ -159,6 +159,11 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .tab.newtab { color: var(--accent); border-top-color: transparent; background: transparent; font-weight: 600; }
 .tab.newtab.active { background: var(--bg); }
 
+/* Herordenen (slepen): geen tekstselectie bij klikken-en-vasthouden + sleep-feedback. */
+.project-card, .tab { user-select: none; }
+.project-card.dragging, .tab.dragging { opacity: .5; }
+body.reordering, body.reordering * { cursor: grabbing !important; }
+
 /* ---- Topbar met de tabs links en (rechtsboven) instellingen + herlaad ---- */
 .topbar { display: flex; align-items: stretch; }
 .topbar .tabbar { flex: 1; }

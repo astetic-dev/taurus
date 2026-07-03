@@ -404,12 +404,92 @@ function escapeHtml(s) {
 }
 function modalOpen() { return !!document.querySelector(".modal:not(.hidden)"); }
 
+/* ============ herordenen (slepen) ============ */
+// Slepen met de MUIS (pointer-events), niet HTML5-DnD: de file-dropper gebruikt
+// Tauri's eigen OS-drag-events (tauri://drag-*), en element-DnD is onder WebView2
+// onbetrouwbaar. Deze aanpak werkt zelfstandig en botst daar niet mee. Tijdens het
+// slepen verplaatsen we het element live tussen zijn buren; bij loslaten lezen we
+// de nieuwe DOM-volgorde terug. CSS user-select:none voorkomt dat klikken-en-
+// vasthouden tekst selecteert -- zie #55.
+let suppressNextClick = false; // onderdruk de click die na een sleep-loslaten volgt
+
+function makeReorderable(el, opts) {
+  el.addEventListener("mousedown", (e) => {
+    // Alleen linkermuisknop; niet starten op knoppen of de tab-sluitknop.
+    if (e.button !== 0 || e.target.closest("button, .tab-close")) return;
+    const container = el.parentElement;
+    if (!container) return;
+    const sx = e.clientX, sy = e.clientY;
+    let started = false;
+    const move = (me) => {
+      if (!started) {
+        if (Math.abs(me.clientX - sx) < 5 && Math.abs(me.clientY - sy) < 5) return;
+        started = true;
+        el.classList.add("dragging");
+        document.body.classList.add("reordering");
+      }
+      me.preventDefault();
+      const end = opts.endSelector ? container.querySelector(opts.endSelector) : null;
+      const sibs = [...container.children].filter((c) => c !== el && c !== end && c.classList.contains(opts.itemClass));
+      let placed = false;
+      for (const sib of sibs) {
+        const r = sib.getBoundingClientRect();
+        const before = opts.axis === "x" ? me.clientX < r.left + r.width / 2 : me.clientY < r.top + r.height / 2;
+        if (before) { container.insertBefore(el, sib); placed = true; break; }
+      }
+      if (!placed) { if (end) container.insertBefore(el, end); else container.appendChild(el); }
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      document.body.classList.remove("reordering");
+      if (started) {
+        el.classList.remove("dragging");
+        // De click die na mouseup zou volgen (project kiezen / tab wisselen) even
+        // negeren; setTimeout(0) is de vangnet als er geen click meer komt.
+        suppressNextClick = true;
+        setTimeout(() => { suppressNextClick = false; }, 0);
+        opts.onDrop();
+      }
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+
+// Lees de nieuwe kaartvolgorde uit de DOM (data-idx = originele render-index),
+// herschik het projects-array, persist en herteken.
+function commitProjectOrder() {
+  const snap = projects;
+  const order = [...els.list.children].map((c) => Number(c.dataset.idx));
+  const next = order.map((i) => snap[i]).filter(Boolean);
+  if (next.length === snap.length) {
+    projects = next;
+    invoke("save_projects", { projects }).catch((e) => toast("✗ " + e, "err"));
+  }
+  renderProjects();
+}
+
+// Idem voor de tabs: herbouw de sessions-Map in de nieuwe volgorde (Map bewaart de
+// invoegvolgorde en renderTabs itereert sessions.values()), persist die volgorde.
+function commitTabOrder() {
+  const ids = [...els.tabbar.children].map((c) => c.dataset.tabId).filter(Boolean);
+  const pairs = ids.map((id) => [id, sessions.get(id)]).filter(([, s]) => s);
+  if (pairs.length === sessions.size) {
+    sessions.clear();
+    for (const [id, s] of pairs) sessions.set(id, s);
+    persistSessionsToDisk();
+  }
+  renderTabs();
+}
+
 /* ============ projecten ============ */
 function renderProjects() {
   els.list.innerHTML = "";
-  for (const p of projects) {
+  projects.forEach((p, index) => {
     const card = document.createElement("div");
     card.className = "project-card";
+    card.dataset.idx = String(index);
     card.style.borderLeftColor = p.accent || "#7c9cff";
     card.innerHTML =
       `<div class="pc-label">${escapeHtml(p.label)}</div>` +
@@ -423,15 +503,16 @@ function renderProjects() {
         `<button class="pc-yes">${escapeHtml(t("yes"))}</button>` +
         `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
       `</div>`;
-    card.addEventListener("click", () => { selectProject(p, card); showView("new"); });
+    card.addEventListener("click", () => { if (suppressNextClick) return; selectProject(p, card); showView("new"); });
     // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
     card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
     card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
     card.querySelector(".pc-confirm").addEventListener("click", (e) => e.stopPropagation());
     card.querySelector(".pc-no").addEventListener("click", (e) => { e.stopPropagation(); card.classList.remove("confirming"); });
     card.querySelector(".pc-yes").addEventListener("click", (e) => { e.stopPropagation(); deleteProject(p); });
+    makeReorderable(card, { axis: "y", itemClass: "project-card", endSelector: null, onDrop: commitProjectOrder });
     els.list.appendChild(card);
-  }
+  });
 }
 
 // Verwijder een project (na bevestiging in de kaart). Persist, herteken; als het
@@ -492,15 +573,17 @@ function renderTabs() {
     if (current === s.id) cls += " active";
     if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
     tab.className = cls;
+    tab.dataset.tabId = s.id;
     tab.style.borderTopColor = s.accent || "#7c9cff";
     tab.style.setProperty("--tab-accent", s.accent || "#7c9cff");
     const live = settings.tabStatus && s.status && !s.exited;
     const shown = live ? `✶ ${s.status}…` : s.title;
     tab.innerHTML = `<span class="tab-dot"></span><span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
     tab.title = s.title;
-    tab.addEventListener("click", () => showView(s.id));
+    tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
     tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
+    makeReorderable(tab, { axis: "x", itemClass: "tab", endSelector: ".newtab", onDrop: commitTabOrder });
     els.tabbar.appendChild(tab);
   }
   const plus = document.createElement("div");
