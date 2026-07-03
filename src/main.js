@@ -767,6 +767,40 @@ async function startSession() {
   }
 }
 
+// "＋ Agent toevoegen" op het startformulier: bewaar de nu ingevulde agent in het
+// linkermenu (save_projects) EN start 'm meteen. Zo bouwt een nieuwe gebruiker het
+// menu op i.p.v. steeds een eenmalige (niet-bewaarde) agent te openen -- zie #54.
+// Bestaat er al een agent met hetzelfde id (slug van het label), dan wordt die
+// bijgewerkt i.p.v. verdubbeld.
+async function addAgentFromForm() {
+  if (!selected || !selected.path) return;
+  const label = (selected.label || els.titleInput.value.trim() || "agent").trim();
+  const entry = {
+    id: slugify(label),
+    label,
+    path: selected.path,
+    title: els.titleInput.value.trim() || label,
+    task: els.taskInput.value.trim(),
+    accent: selected.accent || "#7c9cff",
+    mode: els.modeInput.value || "default",
+    agent: els.agentInput.value || "claude",
+    model: els.modelInput.value.trim(),
+    command: selected.command || "",
+  };
+  const next = projects.filter((p) => p.id !== entry.id);
+  next.push(entry);
+  try {
+    await invoke("save_projects", { projects: next });
+    projects = next;
+    selected = entry;
+    renderProjects();
+  } catch (e) {
+    els.status.textContent = "✗ " + e; els.status.className = "status-msg err";
+    return;
+  }
+  await startSession(); // toevoegen + starten
+}
+
 /* ============ persistente sessies ============ */
 // Schrijf de huidige (herstartbare) sessies naar schijf. Command-override-sessies
 // (demo nep-Claude) hebben geen --resume-transcript en slaan we niet op.
@@ -1438,6 +1472,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
+  document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
   // Andere agent op het startformulier -> model-keuze EN modus-opties mee.
   // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
