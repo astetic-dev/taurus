@@ -80,13 +80,13 @@ const I18N = {
     tts_voice: "Stem", tts_rate: "Spreeksnelheid", tts_test: "Test",
     tts_ready: "{title} is klaar",
     ctx_speak: "🔊 Selectie uitspreken",
-    stt_head: "Spraak naar tekst (F9 of 🎙 = opname aan/uit)",
+    stt_head: "Spraak naar tekst — F9 inhouden (of klik 🎙)",
     stt_model: "Model", stt_download: "Download",
     stt_downloading: "Bezig met downloaden… (zie stt\\download.log)",
     stt_ready_lbl: "geïnstalleerd", stt_missing_lbl: "niet geïnstalleerd",
     stt_autosend: "Transcript direct versturen (Enter)",
     stt_registry: "Modellenbibliotheek-URL", stt_refresh: "Vernieuw lijst",
-    stt_failed: "✗ Transcriptie mislukt:", stt_rec: "● Opname… (F9 = stop)",
+    stt_failed: "✗ Transcriptie mislukt:", stt_rec: "● Opname… (laat F9 los = stop)",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Agents",
@@ -165,13 +165,13 @@ const I18N = {
     tts_voice: "Voice", tts_rate: "Speaking rate", tts_test: "Test",
     tts_ready: "{title} is ready",
     ctx_speak: "🔊 Speak selection",
-    stt_head: "Speech to text (F9 or 🎙 toggles recording)",
+    stt_head: "Speech to text — hold F9 (or click 🎙)",
     stt_model: "Model", stt_download: "Download",
     stt_downloading: "Downloading… (see stt\\download.log)",
     stt_ready_lbl: "installed", stt_missing_lbl: "not installed",
     stt_autosend: "Send transcript immediately (Enter)",
     stt_registry: "Model library URL", stt_refresh: "Refresh list",
-    stt_failed: "✗ Transcription failed:", stt_rec: "● Recording… (F9 = stop)",
+    stt_failed: "✗ Transcription failed:", stt_rec: "● Recording… (release F9 to stop)",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -1645,6 +1645,7 @@ const DEFAULT_STT_MODELS = [
 let sttModels = [...DEFAULT_STT_MODELS];
 let sttRecording = false;
 let sttBusy = false;
+let sttWantRecording = false; // gewenste staat (F9 ingedrukt = true); reconciler stemt af
 
 function speak(text, force) {
   if (!force && !settings.ttsEnabled) return;
@@ -1669,10 +1670,18 @@ function setMicUi() {
   els.micBtn.title = sttRecording ? t("stt_rec") : t("stt_head");
 }
 
-// Opname aan/uit (F9 of de 🎙-knop). Bij stop: transcriberen en het resultaat
-// in de actieve terminal plaatsen (optioneel meteen versturen).
-async function sttToggle() {
-  if (sttBusy) return;
+// Opname sturen via een gewenste-staat + reconciler. F9 INHOUDEN zet de wens
+// (down = opnemen, up = stoppen); de 🎙-knop schakelt de wens om (klik = aan/uit).
+// De reconciler roept stt_toggle alleen aan als werkelijke != gewenste staat, en
+// draait na afloop opnieuw als de wens intussen veranderde -- zo laat een korte
+// F9-tik (up tijdens de start-invoke) geen opname hangen. Bij stop: transcriberen
+// en het resultaat in de actieve terminal plaatsen (optioneel meteen versturen).
+function sttPttDown() { sttWantRecording = true; sttReconcile(); }
+function sttPttUp() { sttWantRecording = false; sttReconcile(); }
+function sttToggle() { sttWantRecording = !sttRecording; sttReconcile(); }
+
+async function sttReconcile() {
+  if (sttBusy || sttWantRecording === sttRecording) return;
   sttBusy = true;
   try {
     const r = await invoke("stt_toggle");
@@ -1693,6 +1702,7 @@ async function sttToggle() {
     toast(t("stt_failed") + " " + e, "err");
   } finally {
     sttBusy = false;
+    if (sttWantRecording !== sttRecording) sttReconcile(); // wens veranderde tijdens de invoke
   }
 }
 
@@ -1789,7 +1799,8 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#settings-cancel").addEventListener("click", () => { hideHelpTip(); els.settingsModal.classList.add("hidden"); });
   // Spraak: mic-knop + F9-event uit de backend + instellingen-acties.
   els.micBtn.addEventListener("click", sttToggle);
-  listen("stt-hotkey", sttToggle);
+  listen("stt-ptt-down", sttPttDown); // F9 ingedrukt -> opnemen
+  listen("stt-ptt-up", sttPttUp);     // F9 losgelaten -> stoppen + transcriberen
   document.querySelector("#set-tts-test").addEventListener("click", () => {
     // Test met de NU gekozen (nog niet opgeslagen) stem/snelheid.
     invoke("speak_text", { text: t("tts_ready").replace("{title}", "Taurus"), voice: els.ttsVoiceSel.value, rate: parseInt(els.ttsRate.value) || 0 }).catch(() => {});

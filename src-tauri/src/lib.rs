@@ -1479,10 +1479,16 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     use tauri_plugin_global_shortcut::ShortcutState;
-                    if event.state() == ShortcutState::Pressed
-                        && shortcut.matches(tauri_plugin_global_shortcut::Modifiers::empty(), tauri_plugin_global_shortcut::Code::F9)
-                    {
-                        let _ = app.emit("stt-hotkey", ());
+                    // F9 = push-to-talk-INHOUDEN: indrukken start de opname, loslaten
+                    // stopt + transcribeert. De frontend doet de reconciliatie zodat
+                    // een korte tik geen halve opname achterlaat.
+                    if shortcut.matches(tauri_plugin_global_shortcut::Modifiers::empty(), tauri_plugin_global_shortcut::Code::F9) {
+                        match event.state() {
+                            ShortcutState::Pressed => { let _ = app.emit("stt-ptt-down", ()); }
+                            ShortcutState::Released => { let _ = app.emit("stt-ptt-up", ()); }
+                            #[allow(unreachable_patterns)]
+                            _ => {}
+                        }
                     }
                 })
                 .build(),
