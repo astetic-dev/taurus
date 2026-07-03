@@ -1034,38 +1034,41 @@ fn ps_encoded(script: &str) -> std::process::Command {
 }
 
 #[tauri::command]
-// Geeft de stemmen getagd terug: "winrt|<naam>" (natuurlijke WinRT/OneCore-stemmen,
-// bovenaan) en "sapi|<naam>" (klassieke SAPI-stemmen, als backup onderaan). De
-// frontend splitst op '|' voor een nette label + groepering; speak_text kiest de
-// engine op basis van de tag.
+// Draai een PS-script dat per stem "<taal>\t<naam>" print en voeg elke stem toe als
+// "<engine>|<taal>|<naam>" (taal = BCP-47, bijv. nl-NL). De frontend toont de taal
+// leesbaar en groepeert; speak_text kiest de engine op de tag (taal wordt genegeerd).
+fn push_voices(out: &mut Vec<String>, engine: &str, script: &str) {
+    if let Ok(o) = ps_encoded(script).output() {
+        for l in String::from_utf8_lossy(&o.stdout).lines() {
+            let mut it = l.trim_end().splitn(2, '\t');
+            let lang = it.next().unwrap_or("").trim();
+            let name = it.next().unwrap_or("").trim();
+            if !name.is_empty() {
+                out.push(format!("{}|{}|{}", engine, lang, name));
+            }
+        }
+    }
+}
+
+// Stemmen getagd als "engine|taal|naam". WinRT/OneCore eerst (de rijkere set: bevat
+// natuurlijke stemmen en andere talen zoals het Nederlandse 'Microsoft Frank', dat
+// alleen in OneCore staat), SAPI als backup. Niet filteren op "Natural" -- dan
+// zouden juist die stemmen wegvallen.
 fn list_tts_voices() -> Vec<String> {
     let mut out = Vec::new();
-    // ALLE WinRT/OneCore-stemmen. Dit is de rijkere set: hij bevat de natuurlijke
-    // (neurale) stemmen wanneer geinstalleerd EN andere talen die niet in SAPI staan
-    // (bijv. het Nederlandse 'Microsoft Frank', dat alleen in OneCore geregistreerd
-    // is). Niet filteren op "Natural" -- dan zouden juist die stemmen wegvallen.
-    let winrt = "$null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media,ContentType=WindowsRuntime]; \
-        [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | ForEach-Object { $_.DisplayName }";
-    if let Ok(o) = ps_encoded(winrt).output() {
-        for l in String::from_utf8_lossy(&o.stdout).lines() {
-            let n = l.trim();
-            if !n.is_empty() {
-                out.push(format!("winrt|{}", n));
-            }
-        }
-    }
-    // Klassieke SAPI-stemmen als backup, onderaan.
-    let sapi = "Add-Type -AssemblyName System.Speech; \
-        (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() \
-        | ForEach-Object { $_.VoiceInfo.Name }";
-    if let Ok(o) = ps_encoded(sapi).output() {
-        for l in String::from_utf8_lossy(&o.stdout).lines() {
-            let n = l.trim();
-            if !n.is_empty() {
-                out.push(format!("sapi|{}", n));
-            }
-        }
-    }
+    push_voices(
+        &mut out,
+        "winrt",
+        "$null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media,ContentType=WindowsRuntime]; \
+         [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | ForEach-Object { \"{0}`t{1}\" -f $_.Language, $_.DisplayName }",
+    );
+    push_voices(
+        &mut out,
+        "sapi",
+        "Add-Type -AssemblyName System.Speech; \
+         (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() \
+         | ForEach-Object { \"{0}`t{1}\" -f $_.VoiceInfo.Culture.Name, $_.VoiceInfo.Name }",
+    );
     out
 }
 
@@ -1079,10 +1082,13 @@ fn speak_text(text: String, voice: String, rate: i32) -> Result<(), String> {
         return Ok(());
     }
     let r = rate.clamp(-10, 10);
-    // Tag "winrt|naam" / "sapi|naam"; ongetagd = klassieke SAPI (oude opgeslagen keuze).
-    let (engine, name) = match voice.split_once('|') {
-        Some((e, n)) => (e, n),
-        None => ("sapi", voice.as_str()),
+    // Tag "engine|taal|naam" (taal genegeerd bij spreken). Terugval: oud "engine|naam"
+    // (2 velden) en ongetagd = klassieke SAPI.
+    let parts: Vec<&str> = voice.splitn(3, '|').collect();
+    let (engine, name) = match parts.as_slice() {
+        [e, _lang, n] => (*e, *n),
+        [e, n] => (*e, *n),
+        _ => ("sapi", voice.as_str()),
     };
     let name_esc = name.replace('\'', "''");
     let script = if engine == "winrt" {

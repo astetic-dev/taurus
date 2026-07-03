@@ -1373,7 +1373,18 @@ function openSettings() {
     invoke("list_tts_voices").then((vs) => {
       // Elke stem is "engine|naam"; toon de nette naam, groepeer natuurlijk boven
       // klassiek. De volledige getagde waarde blijft de option-value (voor speak_text).
-      const opt = (v) => `<option value="${escapeHtml(v)}">${escapeHtml(v.split("|").slice(1).join("|") || v)}</option>`;
+      // v = "engine|taal|naam". Toon "Naam — Taal" (taal leesbaar via Intl.DisplayNames).
+      const langName = (code) => {
+        if (!code) return "";
+        try { return new Intl.DisplayNames([settings.lang || "en"], { type: "language" }).of(code) || code; }
+        catch (_) { return code; }
+      };
+      const opt = (v) => {
+        const p = v.split("|");
+        const name = p.slice(2).join("|") || p.slice(1).join("|") || v; // 3-veld, val terug op oud 2-veld
+        const ln = p.length >= 3 ? langName(p[1]) : "";
+        return `<option value="${escapeHtml(v)}">${escapeHtml(ln ? `${name} — ${ln}` : name)}</option>`;
+      };
       const nat = vs.filter((v) => v.startsWith("winrt|"));
       const cls = vs.filter((v) => !v.startsWith("winrt|"));
       let html = `<option value=""></option>`;
