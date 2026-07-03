@@ -159,6 +159,11 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .tab.newtab { color: var(--accent); border-top-color: transparent; background: transparent; font-weight: 600; }
 .tab.newtab.active { background: var(--bg); }
 
+/* Herordenen (slepen): geen tekstselectie bij klikken-en-vasthouden + sleep-feedback. */
+.project-card, .tab { user-select: none; }
+.project-card.dragging, .tab.dragging { opacity: .5; }
+body.reordering, body.reordering * { cursor: grabbing !important; }
+
 /* ---- Topbar met de tabs links en (rechtsboven) instellingen + herlaad ---- */
 .topbar { display: flex; align-items: stretch; }
 .topbar .tabbar { flex: 1; }
@@ -189,14 +194,18 @@ button, input, select, textarea { font-family: var(--ui-font); }
   color: var(--text-dim);
 }
 .empty-glyph { font-size: 56px; opacity: .35; margin-bottom: 12px; }
+/* Primary line: draw the eye to the left menu. */
+.empty-lead { font-size: 15px; color: var(--text); max-width: 340px; text-align: center; line-height: 1.5; }
+/* Secondary line + browse button: clearly the lesser, one-off path. */
+.empty-oneoff { margin-top: 26px; font-size: 12px; color: var(--text-dim); }
 .browse-btn {
-  margin-top: 18px;
+  margin-top: 8px;
   background: transparent;
-  color: var(--text);
+  color: var(--text-dim);
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 9px 16px;
-  font-size: 13px;
+  padding: 7px 13px;
+  font-size: 12px;
   cursor: pointer;
 }
 .browse-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -253,6 +262,20 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 }
 .launch-btn:hover { filter: brightness(1.08); }
 .launch-btn:active { filter: brightness(.95); }
+/* Start agent + Add agent sit side by side; Add agent is the secondary action. */
+.launch-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.add-agent-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.add-agent-btn:hover { border-color: var(--accent); color: var(--accent); }
 .status-msg { margin-top: 16px; font-size: 13px; min-height: 18px; }
 .status-msg.ok { color: var(--green); }
 .status-msg.err { color: var(--red); white-space: pre-line; }

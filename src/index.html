@@ -24,7 +24,7 @@
         </div>
 
         <div class="section-head">
-          <div class="sidebar-label dropzone-label" data-i18n="projects">Projecten</div>
+          <div class="sidebar-label dropzone-label" data-i18n="projects">Agents</div>
           <button id="add-project-btn" class="icon-btn sec-add" data-i18n-title="new_project">＋</button>
         </div>
         <div id="project-list" class="project-list"></div>
@@ -92,7 +92,8 @@
           <section id="launch-view" class="launch-view">
             <div id="form-empty" class="empty-state">
               <div class="empty-glyph">⌖</div>
-              <p data-i18n="empty_pick">Kies links een project om een agent te starten.</p>
+              <p class="empty-lead" data-i18n="empty_pick">Kies of maak links een agent om je werkproces te starten.</p>
+              <p class="empty-oneoff" data-i18n="empty_oneoff">…of blader hieronder naar een eenmalige agent.</p>
               <button id="browse-btn" class="browse-btn" data-i18n="browse_folder">📁 Blader naar een map…</button>
             </div>
 
@@ -138,7 +139,10 @@
                   <option value="auto" data-i18n="mode_auto">Auto (accepteert acties)</option>
                 </select>
               </div>
-              <button id="launch-btn" class="launch-btn" data-i18n="start_agent">▶ Start agent</button>
+              <div class="launch-actions">
+                <button id="launch-btn" class="launch-btn" data-i18n="start_agent">▶ Start agent</button>
+                <button id="add-agent-btn" class="add-agent-btn" data-i18n="add_agent">＋ Agent toevoegen</button>
+              </div>
               <div id="status-msg" class="status-msg"></div>
             </div>
           </section>
@@ -234,9 +238,9 @@
     <!-- ===== Project-editor-modal ===== -->
     <div id="editor-modal" class="modal hidden">
       <div class="modal-box wide">
-        <h2 data-i18n="manage_projects">Projecten beheren</h2>
+        <h2 data-i18n="manage_projects">Agents beheren</h2>
         <div id="editor-rows" class="editor-rows"></div>
-        <button id="editor-add" class="btn-ghost add" data-i18n="add_project">＋ Project toevoegen</button>
+        <button id="editor-add" class="btn-ghost add" data-i18n="add_agent">＋ Agent toevoegen</button>
         <div class="modal-actions">
           <button id="editor-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
           <button id="editor-save" class="btn-primary" data-i18n="save">Opslaan</button>

@@ -4,9 +4,10 @@ const { listen } = window.__TAURI__.event;
 /* ============ i18n ============ */
 const I18N = {
   nl: {
-    brand_sub: "Agent Launcher", projects: "Projecten",
-    foot_projects: "✎ Projecten", foot_settings: "⚙ Instellingen", foot_reload: "⟳ Herlaad",
-    empty_pick: "Kies links een project om een agent te starten.",
+    brand_sub: "Agent Launcher", projects: "Agents",
+    foot_projects: "✎ Agents", foot_settings: "⚙ Instellingen", foot_reload: "⟳ Herlaad",
+    empty_pick: "Kies of maak links een agent om je werkproces te starten.",
+    empty_oneoff: "…of blader hieronder naar een eenmalige agent.",
     browse_folder: "📁 Blader naar een map…",
     no_claude_md: "ℹ Geen CLAUDE.md in deze map — agent start zonder projectinstructies.",
     workdir: "Werkmap", session_title: "Titel van de sessie",
@@ -30,7 +31,7 @@ const I18N = {
     c_tabs: "Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude-status op de tab (✶ Orbiting…)",
     c_mouse: "Agent mag de muis gebruiken (anders selecteert/scrolt de muis lokaal)",
     cancel: "Annuleer", save: "Opslaan",
-    manage_projects: "Projecten beheren", add_project: "＋ Project toevoegen",
+    manage_projects: "Agents beheren", add_agent: "＋ Agent toevoegen",
     cap_button: "▸ Knop in het linkermenu", cap_workdir: "Werkmap (lokaal C: of netwerk X:)",
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
@@ -47,20 +48,21 @@ const I18N = {
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
     restore_failed: "Hervatten mislukt voor:",
     copy_failed: "✗ Kopiëren naar klembord mislukt:",
-    err_need_project: "✗ Minstens één project met naam én pad nodig.",
+    err_need_project: "✗ Minstens één agent met naam én pad nodig.",
     dropper: "DROPZONE", dropper_hint: "Sleep bestand of map hierheen",
     dz_move: "Verplaats", dz_copy: "Kopieer", dz_prompt: "Alleen pad", dz_paste: "Plak object",
     dropper_need_project: "Kies eerst een project of open een sessie",
     dropper_no_session: "Geen actieve terminal om het pad in te plaatsen",
     dropper_save_failed: "✗ Opslaan in input-map mislukt:",
     dropper_paste_failed: "✗ Plakken van object mislukt:",
-    reload: "Herlaad", new_project: "Nieuw project", add_file: "Bestand toevoegen",
+    reload: "Herlaad", new_project: "Nieuwe agent", add_file: "Bestand toevoegen",
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
   },
   en: {
-    brand_sub: "Agent Launcher", projects: "Projects",
-    foot_projects: "✎ Projects", foot_settings: "⚙ Settings", foot_reload: "⟳ Reload",
-    empty_pick: "Pick a project on the left to start an agent.",
+    brand_sub: "Agent Launcher", projects: "Agents",
+    foot_projects: "✎ Agents", foot_settings: "⚙ Settings", foot_reload: "⟳ Reload",
+    empty_pick: "Pick or create an agent on the left to start your work process.",
+    empty_oneoff: "…or browse for a one-time agent below.",
     browse_folder: "📁 Browse for a folder…",
     no_claude_md: "ℹ No CLAUDE.md in this folder — the agent starts without project instructions.",
     workdir: "Working folder", session_title: "Session title",
@@ -84,7 +86,7 @@ const I18N = {
     c_tabs: "Tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude status on the tab (✶ Orbiting…)",
     c_mouse: "Let the agent use the mouse (otherwise the mouse selects/scrolls locally)",
     cancel: "Cancel", save: "Save",
-    manage_projects: "Manage projects", add_project: "＋ Add project",
+    manage_projects: "Manage agents", add_agent: "＋ Add agent",
     cap_button: "▸ Button in the left menu", cap_workdir: "Working folder (local C: or network X:)",
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
@@ -101,14 +103,14 @@ const I18N = {
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
     restore_failed: "Could not resume:",
     copy_failed: "✗ Copy to clipboard failed:",
-    err_need_project: "✗ Need at least one project with a name and a path.",
+    err_need_project: "✗ Need at least one agent with a name and a path.",
     dropper: "DROPZONE", dropper_hint: "Drag a file or folder here",
     dz_move: "Move", dz_copy: "Copy", dz_prompt: "Path only", dz_paste: "Paste object",
     dropper_need_project: "Pick a project or open a session first",
     dropper_no_session: "No active terminal to insert the path into",
     dropper_save_failed: "✗ Could not save into the input folder:",
     dropper_paste_failed: "✗ Could not paste object:",
-    reload: "Reload", new_project: "New project", add_file: "Add file",
+    reload: "Reload", new_project: "New agent", add_file: "Add file",
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
   },
 };
@@ -402,12 +404,92 @@ function escapeHtml(s) {
 }
 function modalOpen() { return !!document.querySelector(".modal:not(.hidden)"); }
 
+/* ============ herordenen (slepen) ============ */
+// Slepen met de MUIS (pointer-events), niet HTML5-DnD: de file-dropper gebruikt
+// Tauri's eigen OS-drag-events (tauri://drag-*), en element-DnD is onder WebView2
+// onbetrouwbaar. Deze aanpak werkt zelfstandig en botst daar niet mee. Tijdens het
+// slepen verplaatsen we het element live tussen zijn buren; bij loslaten lezen we
+// de nieuwe DOM-volgorde terug. CSS user-select:none voorkomt dat klikken-en-
+// vasthouden tekst selecteert -- zie #55.
+let suppressNextClick = false; // onderdruk de click die na een sleep-loslaten volgt
+
+function makeReorderable(el, opts) {
+  el.addEventListener("mousedown", (e) => {
+    // Alleen linkermuisknop; niet starten op knoppen of de tab-sluitknop.
+    if (e.button !== 0 || e.target.closest("button, .tab-close")) return;
+    const container = el.parentElement;
+    if (!container) return;
+    const sx = e.clientX, sy = e.clientY;
+    let started = false;
+    const move = (me) => {
+      if (!started) {
+        if (Math.abs(me.clientX - sx) < 5 && Math.abs(me.clientY - sy) < 5) return;
+        started = true;
+        el.classList.add("dragging");
+        document.body.classList.add("reordering");
+      }
+      me.preventDefault();
+      const end = opts.endSelector ? container.querySelector(opts.endSelector) : null;
+      const sibs = [...container.children].filter((c) => c !== el && c !== end && c.classList.contains(opts.itemClass));
+      let placed = false;
+      for (const sib of sibs) {
+        const r = sib.getBoundingClientRect();
+        const before = opts.axis === "x" ? me.clientX < r.left + r.width / 2 : me.clientY < r.top + r.height / 2;
+        if (before) { container.insertBefore(el, sib); placed = true; break; }
+      }
+      if (!placed) { if (end) container.insertBefore(el, end); else container.appendChild(el); }
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      document.body.classList.remove("reordering");
+      if (started) {
+        el.classList.remove("dragging");
+        // De click die na mouseup zou volgen (project kiezen / tab wisselen) even
+        // negeren; setTimeout(0) is de vangnet als er geen click meer komt.
+        suppressNextClick = true;
+        setTimeout(() => { suppressNextClick = false; }, 0);
+        opts.onDrop();
+      }
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+
+// Lees de nieuwe kaartvolgorde uit de DOM (data-idx = originele render-index),
+// herschik het projects-array, persist en herteken.
+function commitProjectOrder() {
+  const snap = projects;
+  const order = [...els.list.children].map((c) => Number(c.dataset.idx));
+  const next = order.map((i) => snap[i]).filter(Boolean);
+  if (next.length === snap.length) {
+    projects = next;
+    invoke("save_projects", { projects }).catch((e) => toast("✗ " + e, "err"));
+  }
+  renderProjects();
+}
+
+// Idem voor de tabs: herbouw de sessions-Map in de nieuwe volgorde (Map bewaart de
+// invoegvolgorde en renderTabs itereert sessions.values()), persist die volgorde.
+function commitTabOrder() {
+  const ids = [...els.tabbar.children].map((c) => c.dataset.tabId).filter(Boolean);
+  const pairs = ids.map((id) => [id, sessions.get(id)]).filter(([, s]) => s);
+  if (pairs.length === sessions.size) {
+    sessions.clear();
+    for (const [id, s] of pairs) sessions.set(id, s);
+    persistSessionsToDisk();
+  }
+  renderTabs();
+}
+
 /* ============ projecten ============ */
 function renderProjects() {
   els.list.innerHTML = "";
-  for (const p of projects) {
+  projects.forEach((p, index) => {
     const card = document.createElement("div");
     card.className = "project-card";
+    card.dataset.idx = String(index);
     card.style.borderLeftColor = p.accent || "#7c9cff";
     card.innerHTML =
       `<div class="pc-label">${escapeHtml(p.label)}</div>` +
@@ -421,15 +503,16 @@ function renderProjects() {
         `<button class="pc-yes">${escapeHtml(t("yes"))}</button>` +
         `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
       `</div>`;
-    card.addEventListener("click", () => { selectProject(p, card); showView("new"); });
+    card.addEventListener("click", () => { if (suppressNextClick) return; selectProject(p, card); showView("new"); });
     // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
     card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
     card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
     card.querySelector(".pc-confirm").addEventListener("click", (e) => e.stopPropagation());
     card.querySelector(".pc-no").addEventListener("click", (e) => { e.stopPropagation(); card.classList.remove("confirming"); });
     card.querySelector(".pc-yes").addEventListener("click", (e) => { e.stopPropagation(); deleteProject(p); });
+    makeReorderable(card, { axis: "y", itemClass: "project-card", endSelector: null, onDrop: commitProjectOrder });
     els.list.appendChild(card);
-  }
+  });
 }
 
 // Verwijder een project (na bevestiging in de kaart). Persist, herteken; als het
@@ -490,15 +573,17 @@ function renderTabs() {
     if (current === s.id) cls += " active";
     if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
     tab.className = cls;
+    tab.dataset.tabId = s.id;
     tab.style.borderTopColor = s.accent || "#7c9cff";
     tab.style.setProperty("--tab-accent", s.accent || "#7c9cff");
     const live = settings.tabStatus && s.status && !s.exited;
     const shown = live ? `✶ ${s.status}…` : s.title;
     tab.innerHTML = `<span class="tab-dot"></span><span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
     tab.title = s.title;
-    tab.addEventListener("click", () => showView(s.id));
+    tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
     tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
+    makeReorderable(tab, { axis: "x", itemClass: "tab", endSelector: ".newtab", onDrop: commitTabOrder });
     els.tabbar.appendChild(tab);
   }
   const plus = document.createElement("div");
@@ -763,6 +848,40 @@ async function startSession() {
     els.status.textContent = "✗ " + e; els.status.className = "status-msg err";
     renderTabs();
   }
+}
+
+// "＋ Agent toevoegen" op het startformulier: bewaar de nu ingevulde agent in het
+// linkermenu (save_projects) EN start 'm meteen. Zo bouwt een nieuwe gebruiker het
+// menu op i.p.v. steeds een eenmalige (niet-bewaarde) agent te openen -- zie #54.
+// Bestaat er al een agent met hetzelfde id (slug van het label), dan wordt die
+// bijgewerkt i.p.v. verdubbeld.
+async function addAgentFromForm() {
+  if (!selected || !selected.path) return;
+  const label = (selected.label || els.titleInput.value.trim() || "agent").trim();
+  const entry = {
+    id: slugify(label),
+    label,
+    path: selected.path,
+    title: els.titleInput.value.trim() || label,
+    task: els.taskInput.value.trim(),
+    accent: selected.accent || "#7c9cff",
+    mode: els.modeInput.value || "default",
+    agent: els.agentInput.value || "claude",
+    model: els.modelInput.value.trim(),
+    command: selected.command || "",
+  };
+  const next = projects.filter((p) => p.id !== entry.id);
+  next.push(entry);
+  try {
+    await invoke("save_projects", { projects: next });
+    projects = next;
+    selected = entry;
+    renderProjects();
+  } catch (e) {
+    els.status.textContent = "✗ " + e; els.status.className = "status-msg err";
+    return;
+  }
+  await startSession(); // toevoegen + starten
 }
 
 /* ============ persistente sessies ============ */
@@ -1436,6 +1555,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
+  document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
   // Andere agent op het startformulier -> model-keuze EN modus-opties mee.
   // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
