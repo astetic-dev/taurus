@@ -601,7 +601,11 @@ fn scan_html(dir: &Path, depth: i32, out: &mut Vec<HtmlFile>) {
             scan_html(&p, depth - 1, out);
         } else if p
             .extension()
-            .map(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"))
+            .map(|e| {
+                e.eq_ignore_ascii_case("html")
+                    || e.eq_ignore_ascii_case("htm")
+                    || e.eq_ignore_ascii_case("md")
+            })
             .unwrap_or(false)
         {
             let mtime = entry

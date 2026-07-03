@@ -37,7 +37,7 @@ const I18N = {
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
     ctx_restart: "↻ Herstart (resume gesprek)", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
-    preview_none: "(geen .html in de werkmap)", preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten",
+    preview_none: "(geen .html/.md in de werkmap)", preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten", preview_toobig: "Bestand te groot om te previewen.",
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
@@ -125,7 +125,7 @@ const I18N = {
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
     ctx_restart: "↻ Restart (resume conversation)", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
-    preview_none: "(no .html in the working folder)", preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview",
+    preview_none: "(no .html/.md in the working folder)", preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview", preview_toobig: "File too large to preview.",
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
@@ -707,6 +707,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     <div class="preview-pane">
       <div class="preview-bar">
         <select class="preview-file"></select>
+        <button class="preview-raw" title="Raw / rendered (markdown)">&lt;/&gt;</button>
         <button class="preview-refresh">↻</button>
         <button class="preview-mode">⇆</button>
         <button class="preview-close">✕</button>
@@ -842,6 +843,8 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   });
 
   el.querySelector(".preview-file").addEventListener("change", (e) => renderPreview(session, e.target.value));
+  // Raw/rendered wisselen (alleen zinvol voor .md); hertekent het huidige bestand.
+  el.querySelector(".preview-raw").addEventListener("click", () => { session.previewRaw = !session.previewRaw; if (session.previewPath) renderPreview(session, session.previewPath); });
   el.querySelector(".preview-refresh").addEventListener("click", () => loadHtmlList(session));
   el.querySelector(".preview-mode").addEventListener("click", () => { session.previewMode = session.previewMode === "split" ? "full" : "split"; applyLayout(session); refitTerm(session); });
   el.querySelector(".preview-close").addEventListener("click", () => closePreview(session));
@@ -880,7 +883,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
         // Drive-letter paths may use either separator (C:\dir\f.html or C:/dir/f.html);
         // accept both so forward-slash absolute paths stay clickable too.
-        const re = /([A-Za-z]:[\\/][^\s"'<>|]+?\.html?|[\w.\-\\/]+\.html?)/gi;
+        const re = /([A-Za-z]:[\\/][^\s"'<>|]+?\.(?:html?|md)|[\w.\-\\/]+\.(?:html?|md))/gi;
         const links = [];
         let m;
         while ((m = re.exec(full)) !== null) {
@@ -1089,11 +1092,94 @@ const PREVIEW_BRIDGE = `<script>
     }
   }, true);
 <\/script>`;
+
+// Thema-CSS voor de markdown-render (de srcdoc-iframe erft de app-CSS niet).
+const MD_STYLE = `<style>
+  :root { color-scheme: dark; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; color: #e6e8ee; background: #14161c; padding: 20px 26px; line-height: 1.6; max-width: 820px; }
+  a { color: #7c9cff; }
+  code { background: #21252f; padding: 1px 5px; border-radius: 4px; font-family: "Cascadia Code", Consolas, monospace; font-size: .92em; }
+  pre.md-code { background: #1b1e26; border: 1px solid #2e3340; border-radius: 8px; padding: 12px 14px; overflow: auto; }
+  pre.md-code code { background: none; padding: 0; }
+  h1, h2, h3 { line-height: 1.25; } h1 { border-bottom: 1px solid #2e3340; padding-bottom: .3em; }
+  blockquote { border-left: 3px solid #2e3340; margin: 0 0 12px; padding: 2px 14px; color: #9aa1b1; }
+  img { max-width: 100%; }
+</style>`;
+
+// Veilige, compacte markdown-renderer. Kernprincipe: escape EERST alles (zo kan
+// ruwe HTML/<script> in de bron niets injecteren -- gelijk aan 'html:false');
+// pas daarna markdown-regels toe. Links/afbeeldingen krijgen alleen http(s)/mailto/
+// relatieve URL's; javascript:/data: worden geweigerd. Zie #61.
+function mdSafeUrl(u) {
+  const s = String(u).trim();
+  if (/^javascript:/i.test(s) || /^data:/i.test(s) || /^vbscript:/i.test(s)) return "#";
+  if (/^(https?:|mailto:)/i.test(s) || !/^[a-z0-9.+-]+:/i.test(s)) return s; // http(s)/mailto of geen schema (relatief/anker)
+  return "#";
+}
+function mdInline(s) {
+  s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, url) => `<img alt="${alt}" src="${mdSafeUrl(url)}" />`);
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, txt, url) => `<a href="${mdSafeUrl(url)}">${txt}</a>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  return s;
+}
+function mdToHtml(src) {
+  const lines = escapeHtml(String(src).replace(/\r\n/g, "\n")).split("\n");
+  const special = /^(#{1,6}\s|```|\s*[-*+]\s|\s*\d+\.\s|&gt;\s?|(?:---|\*\*\*|___)\s*$)/;
+  let html = "", i = 0, inUl = false, inOl = false;
+  const closeLists = () => { if (inUl) { html += "</ul>"; inUl = false; } if (inOl) { html += "</ol>"; inOl = false; } };
+  while (i < lines.length) {
+    const line = lines[i];
+    const fence = line.match(/^```/);
+    if (fence) {
+      closeLists(); i++;
+      let code = "";
+      while (i < lines.length && !/^```/.test(lines[i])) { code += lines[i] + "\n"; i++; }
+      i++;
+      html += `<pre class="md-code"><code>${code}</code></pre>`;
+      continue;
+    }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { closeLists(); const n = h[1].length; html += `<h${n}>${mdInline(h[2])}</h${n}>`; i++; continue; }
+    if (/^(?:---|\*\*\*|___)\s*$/.test(line)) { closeLists(); html += "<hr />"; i++; continue; }
+    if (/^&gt;\s?/.test(line)) { closeLists(); html += `<blockquote>${mdInline(line.replace(/^&gt;\s?/, ""))}</blockquote>`; i++; continue; }
+    const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+    if (ul) { if (inOl) closeLists(); if (!inUl) { html += "<ul>"; inUl = true; } html += `<li>${mdInline(ul[1])}</li>`; i++; continue; }
+    const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (ol) { if (inUl) closeLists(); if (!inOl) { html += "<ol>"; inOl = true; } html += `<li>${mdInline(ol[1])}</li>`; i++; continue; }
+    if (/^\s*$/.test(line)) { closeLists(); i++; continue; }
+    closeLists();
+    let para = line; i++;
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !special.test(lines[i])) { para += " " + lines[i]; i++; }
+    html += `<p>${mdInline(para)}</p>`;
+  }
+  closeLists();
+  return html;
+}
+
+// Toon een .html-preview (ruw) of een .md-bestand (gerenderd of raw). .md wordt
+// altijd escape-eerst gerenderd; ruwe HTML in de .md draait dus nooit als script.
 async function renderPreview(s, path) {
   if (!path) return;
+  s.previewPath = path;
   const frame = s.el.querySelector(".preview-frame");
-  try { frame.srcdoc = PREVIEW_BRIDGE + await invoke("read_file", { path }); }
-  catch (e) { frame.srcdoc = `<body style="font-family:sans-serif;color:#c66;padding:24px">${escapeHtml(String(e))}</body>`; }
+  const isMd = /\.md$/i.test(path);
+  try {
+    const raw = await invoke("read_file", { path });
+    if (raw.length > 2000000) {
+      frame.srcdoc = MD_STYLE + `<body>${escapeHtml(t("preview_toobig"))}</body>`;
+    } else if (isMd && !s.previewRaw) {
+      frame.srcdoc = PREVIEW_BRIDGE + MD_STYLE + `<body>${mdToHtml(raw)}</body>`;
+    } else if (isMd) {
+      frame.srcdoc = MD_STYLE + `<body><pre class="md-code"><code>${escapeHtml(raw)}</code></pre></body>`;
+    } else {
+      frame.srcdoc = PREVIEW_BRIDGE + raw;
+    }
+  } catch (e) {
+    frame.srcdoc = `<body style="font-family:sans-serif;color:#c66;padding:24px">${escapeHtml(String(e))}</body>`;
+  }
 }
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
 async function openPreviewFile(s, rawPath) {
