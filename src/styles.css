@@ -518,7 +518,9 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 .spane.active { display: block; }
 .srow:not(.check)[data-help-key] { cursor: help; }
 .help-panel {
-  margin: 4px 0 14px; min-height: 3.2em;
+  /* Vaste hoogte zodat het modal NIET verspringt als de hover-uitleg van lengte
+     wisselt (1 vs 3 regels). Zeldzame langere tekst scrollt binnen het kader. */
+  margin: 4px 0 14px; height: 6em; overflow-y: auto; box-sizing: border-box;
   background: var(--bg-card); color: var(--text-dim);
   border: 1px solid var(--border); border-radius: 8px;
   padding: 10px 12px; font-size: 12.5px; line-height: 1.5;
