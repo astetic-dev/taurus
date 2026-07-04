@@ -289,12 +289,79 @@ fn resolve_program(agent: &str) -> String {
     exe.to_string()
 }
 
+// Windows Job Object met kill-on-close rond het agent-proces. child.kill() is
+// TerminateProcess op alleen het directe kind; door de agent aan een job te
+// hangen ruimt Windows de HELE boom (claude + gespawnde MCP-servers) op zodra
+// de laatste job-handle sluit — ook bij een crash van Taurus zelf (#77).
+#[cfg(windows)]
+mod job {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+
+    pub struct Job(HANDLE);
+    // HANDLEs zijn gewoon over threads te dragen; alleen de wrapper mist de markers.
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+    impl Drop for Job {
+        fn drop(&mut self) {
+            // Laatste handle dicht -> kill-on-close ruimt de procesboom op.
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    // Best effort: faalt de toewijzing (bv. proces al weg), dan gedraagt de
+    // sessie zich als voorheen (alleen child.kill op het directe kind).
+    pub fn assign(pid: u32) -> Option<Job> {
+        unsafe {
+            let hjob = CreateJobObjectW(None, None).ok()?;
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(
+                hjob,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .is_err()
+            {
+                let _ = CloseHandle(hjob);
+                return None;
+            }
+            let hproc = match OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid) {
+                Ok(h) => h,
+                Err(_) => {
+                    let _ = CloseHandle(hjob);
+                    return None;
+                }
+            };
+            let ok = AssignProcessToJobObject(hjob, hproc).is_ok();
+            let _ = CloseHandle(hproc);
+            if ok {
+                Some(Job(hjob))
+            } else {
+                let _ = CloseHandle(hjob);
+                None
+            }
+        }
+    }
+}
+
 // Een actieve terminal-sessie: de PTY-master (voor resize), de writer (stdin)
-// en het kindproces (om te kunnen afsluiten).
+// en het kindproces (om te kunnen afsluiten). De job-handle (kill-on-close)
+// neemt bij drop de hele procesboom mee.
 struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    #[cfg(windows)]
+    _job: Option<job::Job>,
 }
 
 struct AppState {
@@ -378,12 +445,20 @@ fn start_pty(
         let _ = app2.emit("pty-exit", (id2.clone(), gen));
     });
 
+    // Agent aan een Job Object hangen zodat de hele procesboom opgeruimd
+    // wordt bij close/restart/crash (#77). Best effort: zonder PID of bij een
+    // mislukte toewijzing draait de sessie gewoon zonder job.
+    #[cfg(windows)]
+    let job_handle = child.process_id().and_then(job::assign);
+
     sessions.lock().unwrap().insert(
         id,
         Session {
             writer,
             master: pair.master,
             child,
+            #[cfg(windows)]
+            _job: job_handle,
         },
     );
     Ok(())
