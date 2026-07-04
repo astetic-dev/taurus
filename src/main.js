@@ -1173,9 +1173,7 @@ async function renderPreview(s, path) {
   const isMd = /\.md$/i.test(path);
   try {
     const raw = await invoke("read_file", { path });
-    if (raw.length > 2000000) {
-      frame.srcdoc = MD_STYLE + `<body>${escapeHtml(t("preview_toobig"))}</body>`;
-    } else if (isMd && !s.previewRaw) {
+    if (isMd && !s.previewRaw) {
       frame.srcdoc = PREVIEW_BRIDGE + MD_STYLE + `<body>${mdToHtml(raw)}</body>`;
     } else if (isMd) {
       frame.srcdoc = MD_STYLE + `<body><pre class="md-code"><code>${escapeHtml(raw)}</code></pre></body>`;
@@ -1183,7 +1181,13 @@ async function renderPreview(s, path) {
       frame.srcdoc = PREVIEW_BRIDGE + raw;
     }
   } catch (e) {
-    frame.srcdoc = `<body style="font-family:sans-serif;color:#c66;padding:24px">${escapeHtml(String(e))}</body>`;
+    // De 2 MB-grens wordt in Rust bewaakt (vóór lezen/IPC, #72); vertaal die
+    // fout naar de nette i18n-melding.
+    if (/file too large/i.test(String(e))) {
+      frame.srcdoc = MD_STYLE + `<body>${escapeHtml(t("preview_toobig"))}</body>`;
+    } else {
+      frame.srcdoc = `<body style="font-family:sans-serif;color:#c66;padding:24px">${escapeHtml(String(e))}</body>`;
+    }
   }
 }
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).

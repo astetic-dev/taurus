@@ -643,8 +643,17 @@ fn list_html(dir: String) -> Vec<HtmlFile> {
     out
 }
 
+// Preview-plafond aan de Rust-kant: voorheen werd het hele bestand gelezen en
+// over de IPC gestuurd en pas in JS op 2 MB gecontroleerd (#72). De frontend
+// herkent "file too large" en toont de preview_toobig-melding.
+const MAX_PREVIEW_BYTES: u64 = 2_000_000;
+
 #[tauri::command]
 fn read_file(path: String) -> Result<String, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.len() > MAX_PREVIEW_BYTES {
+        return Err(format!("file too large for preview ({} bytes)", meta.len()));
+    }
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
