@@ -1393,6 +1393,38 @@ fn ps_fetch(url: &str, dest: &Path) -> Result<(), String> {
     std::fs::rename(&part, dest).map_err(|e| e.to_string())
 }
 
+// SHA-256 van een bestand (streaming, dus ook het ~460 MB-model kan zonder
+// alles in het geheugen te laden).
+fn file_sha256(path: &Path) -> Result<String, String> {
+    use sha2::Digest;
+    let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = sha2::Sha256::new();
+    std::io::copy(&mut f, &mut hasher).map_err(|e| e.to_string())?;
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+// Verifieer een gedownload archief tegen zijn gepinde SHA-256. Mismatch ->
+// bestand weg (het is niet te vertrouwen) en een duidelijke fout. De engine
+// is een exe die we UITVOEREN; zonder deze check zou een kwaadaardige
+// registry-URL of een MITM directe code-executie opleveren (#69).
+fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
+    let want = expected.trim().to_lowercase();
+    if want.len() != 64 || !want.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("invalid sha256 for {}: {:?}", path.display(), expected));
+    }
+    let got = file_sha256(path)?;
+    if got != want {
+        let _ = std::fs::remove_file(path);
+        return Err(format!(
+            "sha256 mismatch for {} (expected {}, got {}) — file removed",
+            path.display(),
+            want,
+            got
+        ));
+    }
+    Ok(())
+}
+
 // .tar.bz2 in-process uitpakken. NIET de systeem-tar: die is niet overal met
 // bzip2 gebouwd (een zlib-only bsdtar hangt er stil op, gezien in het wild).
 fn extract_tar_bz2(archive: &Path, dest: &Path) -> Result<(), String> {
@@ -1406,10 +1438,23 @@ fn extract_tar_bz2(archive: &Path, dest: &Path) -> Result<(), String> {
 // een wees-marker (app gecrasht/afgesloten) zelfherstellend bij de volgende
 // download-klik. Alles komt in download.log terecht.
 #[tauri::command]
-fn stt_download(engine_url: String, model_url: String) -> Result<(), String> {
+fn stt_download(
+    engine_url: String,
+    engine_sha256: String,
+    model_url: String,
+    model_sha256: String,
+) -> Result<(), String> {
     for u in [&engine_url, &model_url] {
         if !u.starts_with("https://") {
             return Err(format!("https URLs only: {}", u));
+        }
+    }
+    // Checksums zijn verplicht (ook voor registry-modellen): de engine wordt
+    // uitgevoerd, dus zonder pin is elke download blind vertrouwen.
+    for s in [&engine_sha256, &model_sha256] {
+        let t = s.trim();
+        if t.len() != 64 || !t.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("model entry is missing a valid sha256 checksum".into());
         }
     }
     let d = stt_dir();
@@ -1425,13 +1470,17 @@ fn stt_download(engine_url: String, model_url: String) -> Result<(), String> {
     std::fs::write(&marker, std::process::id().to_string()).map_err(|e| e.to_string())?;
     std::thread::spawn(move || {
         let res = (|| -> Result<(), String> {
-            for url in [engine_url, model_url] {
+            for (url, sha) in [(engine_url, engine_sha256), (model_url, model_sha256)] {
                 let name = url.rsplit('/').next().unwrap_or("archive.tar.bz2");
                 let file = d.join(name);
                 if !file.is_file() {
                     dl_log(&d, &format!("downloading {}", url));
                     ps_fetch(&url, &file)?;
                 }
+                // Ook een eerder gedownload (gecached) archief verifieren:
+                // pas na een geldige checksum wordt er uitgepakt.
+                dl_log(&d, &format!("verifying sha256 of {}", name));
+                verify_sha256(&file, &sha)?;
                 dl_log(&d, &format!("extracting {}", name));
                 extract_tar_bz2(&file, &d)?;
             }

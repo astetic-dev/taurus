@@ -1760,11 +1760,16 @@ function showFileChooser(file, cwd) {
 // TTS via Windows-native stemmen (SAPI); STT via lokale sherpa-onnx sidecar
 // (Parakeet v3). Modellenbibliotheek: ingebouwde lijst, optioneel vervangen
 // door een registry-JSON zodat nieuwe modellen zonder app-update verschijnen.
+// De sha256-checksums zijn verplicht: de backend weigert een download zonder
+// geldige pin (#69), want de engine is een exe die uitgevoerd wordt. De pins
+// hieronder zijn geverifieerd tegen de digests van de GitHub-release-assets.
 const DEFAULT_STT_MODELS = [
   {
     name: "Parakeet TDT 0.6b v3 (int8, EN+EU talen)",
     engineUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-win-x64-shared-MT-Release.tar.bz2",
+    engineSha256: "0043cd9cdd755d35627299e6a02839e95a262508ae9593af6c5c72ffd674b650",
     modelUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+    modelSha256: "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
     size: "~486 MB",
   },
 ];
@@ -1959,7 +1964,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#set-stt-download").addEventListener("click", async () => {
     const m = sttModels.find((x) => x.name === els.sttModelSel.value) || sttModels[0];
     if (!m) return;
-    try { await invoke("stt_download", { engineUrl: m.engineUrl, modelUrl: m.modelUrl }); } catch (e) { toast("✗ " + e, "err"); }
+    try { await invoke("stt_download", { engineUrl: m.engineUrl, engineSha256: m.engineSha256 || "", modelUrl: m.modelUrl, modelSha256: m.modelSha256 || "" }); } catch (e) { toast("✗ " + e, "err"); }
     refreshSttStatus();
   });
   document.querySelector("#set-stt-refresh").addEventListener("click", async () => {
