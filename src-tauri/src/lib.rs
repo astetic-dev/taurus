@@ -1213,7 +1213,10 @@ try {
 
 // --- STT: opname op een eigen audio-thread (cpal Streams zijn !Send) ---
 enum RecCmd {
-    Start,
+    // Antwoord: lukte het starten van de opname? Zonder dit kanaal bleef een
+    // mislukte start (geen microfoon) stil: de widget toonde "Luisteren…"
+    // terwijl er niets opgenomen werd, en de fout kwam pas bij stop (#75).
+    Start(std::sync::mpsc::Sender<Result<(), String>>),
     // Antwoord: pad van de geschreven WAV, of een fout.
     Stop(std::sync::mpsc::Sender<Result<std::path::PathBuf, String>>),
 }
@@ -1327,10 +1330,19 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<RecCmd>, level: std::sync::Arc<Mut
     let mut current: Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32, u16)> = None;
     for cmd in rx {
         match cmd {
-            RecCmd::Start => {
-                if current.is_none() {
-                    current = start_capture(level.clone()).ok();
-                }
+            RecCmd::Start(reply) => {
+                let res = if current.is_some() {
+                    Ok(())
+                } else {
+                    match start_capture(level.clone()) {
+                        Ok(c) => {
+                            current = Some(c);
+                            Ok(())
+                        }
+                        Err(e) => Err(e),
+                    }
+                };
+                let _ = reply.send(res);
             }
             RecCmd::Stop(reply) => {
                 let res = match current.take() {
@@ -1582,7 +1594,15 @@ fn stt_toggle(state: State<AppState>) -> Result<SttToggle, String> {
         if exe.is_none() || tokens.is_none() {
             return Err("STT model not installed — download it under Settings → Voice".into());
         }
-        state.stt.tx.send(RecCmd::Start).map_err(|e| e.to_string())?;
+        // Wacht op het antwoord van de audio-thread: een mislukte start (geen
+        // microfoon) komt zo METEEN terug i.p.v. pas bij stop (#75).
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        state
+            .stt
+            .tx
+            .send(RecCmd::Start(reply_tx))
+            .map_err(|e| e.to_string())?;
+        reply_rx.recv().map_err(|e| e.to_string())??;
         state.stt.recording.store(true, Ordering::Relaxed);
         return Ok(SttToggle { recording: true, text: None });
     }
