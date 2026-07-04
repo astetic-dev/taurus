@@ -404,6 +404,41 @@ enum LaunchKind {
     Resume,
 }
 
+// Splits een commando-override in tokens; dubbele quotes bewaren spaties, zodat
+// ook "C:\Program Files\tool.exe" --flag "een arg" werkt. split_whitespace
+// brak elk programma-pad met een spatie (#76).
+fn split_command(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut in_q = false;
+    for c in s.chars() {
+        match c {
+            '"' => in_q = !in_q,
+            c if c.is_whitespace() && !in_q => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+// Commando-override (bijv. nep-Claude voor de demo) -> (programma, argumenten).
+// Gedeeld door create_session en restart_session.
+fn parse_override(command: &str) -> Result<(String, Vec<String>), String> {
+    let mut toks = split_command(command);
+    if toks.is_empty() {
+        return Err("commando-override is leeg".into());
+    }
+    let prog = toks.remove(0);
+    Ok((prog, toks))
+}
+
 // Bouw (programma, argumenten) voor de gekozen agent. De `command`-escape-hatch
 // wordt door de aanroeper afgehandeld; hier gaat het puur om claude/agy. De twee
 // CLIs verschillen sterk in vlaggen, dus we bouwen ze apart op i.p.v. Claude's
@@ -510,9 +545,7 @@ fn create_session(
     let (program, args) = if !command.trim().is_empty() {
         // Commando-override (bijv. nep-Claude voor de demo): voer dit programma
         // uit i.p.v. de agent, zonder agent-vlaggen.
-        let mut toks: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
-        let prog = toks.remove(0);
-        (prog, toks)
+        parse_override(&command)?
     } else {
         build_command(
             &agent,
@@ -553,9 +586,7 @@ fn restart_session(
         }
     }
     let (program, args) = if !command.trim().is_empty() {
-        let mut toks: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
-        let prog = toks.remove(0);
-        (prog, toks)
+        parse_override(&command)?
     } else {
         build_command(
             &agent,
