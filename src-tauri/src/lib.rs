@@ -1626,6 +1626,7 @@ fn extract_tar_bz2(archive: &Path, dest: &Path) -> Result<(), String> {
 // download-klik. Alles komt in download.log terecht.
 #[tauri::command]
 fn stt_download(
+    app: AppHandle,
     engine_url: String,
     engine_sha256: String,
     model_url: String,
@@ -1674,7 +1675,13 @@ fn stt_download(
             Ok(())
         })();
         match res {
-            Ok(()) => dl_log(&d, "done"),
+            Ok(()) => {
+                dl_log(&d, "done");
+                // STT is nu bruikbaar: F9 alsnog registreren (bij het opstarten
+                // is dat overgeslagen omdat engine/model nog ontbraken, #79).
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                let _ = app.global_shortcut().register("F9");
+            }
             Err(e) => dl_log(&d, &format!("FAILED: {}", e)),
         }
         let _ = std::fs::remove_file(d.join(".downloading"));
@@ -1859,9 +1866,15 @@ pub fn run() {
             disable_accelerator_keys(app.handle());
             {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
-                // Mislukte registratie (F9 elders in gebruik) is geen ramp:
-                // de mic-knop in de topbar blijft werken.
-                let _ = app.global_shortcut().register("F9");
+                // F9 alleen systeembreed claimen als STT ook echt bruikbaar is
+                // (engine + model geinstalleerd); anders blijft de toets vrij
+                // voor andere programma's (#79). Na een geslaagde download
+                // registreert stt_download hem alsnog. Mislukte registratie
+                // (F9 elders in gebruik) is geen ramp: de mic-knop blijft werken.
+                let (exe, tokens) = stt_paths();
+                if exe.is_some() && tokens.is_some() {
+                    let _ = app.global_shortcut().register("F9");
+                }
             }
             Ok(())
         })
