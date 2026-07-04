@@ -1095,13 +1095,19 @@ const PREVIEW_BRIDGE = `<script>
     // anker (#...) blijft in het document; al het andere (relatief/mailto) doet niets
     // binnen de sandbox.
     var href = a.getAttribute('href') || '';
-    if (/^https?:\\/\\//i.test(href)) {
+    if (/^(https?:\\/\\/|mailto:)/i.test(href)) {
       ev.preventDefault();
       // Be authoritative: stop the page's own click handlers (e.g. a dashboard
       // openExternal() that would otherwise show a 'copy/paste' fallback).
       ev.stopImmediatePropagation();
       parent.postMessage({ type: 'taurus-open-external', url: href }, '*');
-    } else if (href.charAt(0) !== '#') {
+    } else if (href.charAt(0) === '#') {
+      // Anker: expliciet scrollen -- fragment-navigatie is binnen een sandboxed
+      // srcdoc-iframe niet overal betrouwbaar.
+      var el = document.getElementById(href.slice(1));
+      if (el) { ev.preventDefault(); el.scrollIntoView({ behavior: 'smooth' }); }
+      else { ev.preventDefault(); }
+    } else {
       ev.preventDefault(); // relatief e.d.: niet laten navigeren binnen de sandbox
     }
   }, true);
@@ -1180,7 +1186,12 @@ function mdToHtml(src) {
       continue;
     }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
-    if (h) { closeLists(); const n = h[1].length; html += `<h${n}>${mdInline(h[2])}</h${n}>`; i++; continue; }
+    if (h) {
+      closeLists(); const n = h[1].length;
+      // GitHub-achtige id zodat ankers ([tekst](#kop)) werken; entities eruit.
+      const id = h[2].toLowerCase().replace(/&[a-z#0-9]+;/g, "").replace(/[^a-z0-9\s-]/g, "").trim().replace(/\s+/g, "-");
+      html += `<h${n} id="${id}">${mdInline(h[2])}</h${n}>`; i++; continue;
+    }
     if (/^(?:---|\*\*\*|___)\s*$/.test(line)) { closeLists(); html += "<hr />"; i++; continue; }
     if (/^&gt;\s?/.test(line)) { closeLists(); html += `<blockquote>${mdInline(line.replace(/^&gt;\s?/, ""))}</blockquote>`; i++; continue; }
     const ul = line.match(/^\s*[-*+]\s+(.*)$/);
@@ -2049,7 +2060,7 @@ window.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("message", (e) => {
     const d = e.data;
     if (d && d.type === "taurus-open-external" && typeof d.url === "string"
-        && /^https?:\/\//i.test(d.url)) {
+        && /^(https?:\/\/|mailto:)/i.test(d.url)) {
       window.__TAURI__.opener.openUrl(d.url).catch(() => {});
     }
   });
