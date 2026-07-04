@@ -275,18 +275,39 @@ fn agent_exe(agent: &str) -> &'static str {
     }
 }
 
-// Zoek het exe van de agent via PATH, met fallback naar de kale naam.
-fn resolve_program(agent: &str) -> String {
-    let exe = agent_exe(agent);
-    if let Ok(paths) = std::env::var("PATH") {
-        for p in std::env::split_paths(&paths) {
-            let cand = p.join(exe);
+// Zoek <base>.exe, dan .cmd, dan .bat in de opgegeven PATH-string (PATHEXT-
+// volgorde: een native exe wint altijd van een shim). Een npm-installatie van
+// Claude Code zet alleen een claude.cmd op PATH (#40); CreateProcess kan een
+// .cmd/.bat niet direct starten, dus die komt terug als cmd.exe + "/c <pad>"-
+// prefix waar de agent-args achteraan komen.
+fn resolve_in_paths(base: &str, paths: &str) -> Option<(String, Vec<String>)> {
+    for ext in ["exe", "cmd", "bat"] {
+        for p in std::env::split_paths(paths) {
+            let cand = p.join(format!("{}.{}", base, ext));
             if cand.is_file() {
-                return cand.to_string_lossy().into_owned();
+                let full = cand.to_string_lossy().into_owned();
+                return Some(if ext == "exe" {
+                    (full, Vec::new())
+                } else {
+                    ("cmd.exe".to_string(), vec!["/c".into(), full])
+                });
             }
         }
     }
-    exe.to_string()
+    None
+}
+
+// Zoek het programma van de agent via PATH, met fallback naar de kale exe-naam.
+// Geeft (programma, prefix-args): leeg voor een exe, "/c <pad>" voor een shim.
+fn resolve_program(agent: &str) -> (String, Vec<String>) {
+    let exe = agent_exe(agent);
+    let base = exe.trim_end_matches(".exe");
+    if let Ok(paths) = std::env::var("PATH") {
+        if let Some(hit) = resolve_in_paths(base, &paths) {
+            return hit;
+        }
+    }
+    (exe.to_string(), Vec::new())
 }
 
 // Windows Job Object met kill-on-close rond het agent-proces. child.kill() is
@@ -528,8 +549,9 @@ fn build_command(
     model: &str,
     full_paths: bool,
 ) -> (String, Vec<String>) {
-    let program = resolve_program(agent);
-    let mut a: Vec<String> = Vec::new();
+    // `a` start met de eventuele cmd.exe-shim-prefix ("/c <pad>", #40); de
+    // agent-vlaggen komen daarachter.
+    let (program, mut a) = resolve_program(agent);
     match agent {
         // agy (Antigravity/Gemini-agent): kent geen --session-id / -n /
         // --permission-mode / --append-system-prompt. Modus: auto -> alle tools
@@ -2018,6 +2040,30 @@ mod tests {
         // agy kent geen prompt bij --continue en geen full-paths-equivalent.
         assert!(!a.contains(&"--prompt-interactive".to_string()));
         assert!(!a.contains(&"--append-system-prompt".to_string()));
+    }
+
+    #[test]
+    fn resolve_in_paths_prefers_exe_and_wraps_shims() {
+        let dir = std::env::temp_dir().join(format!("taurus-test-resolve-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = dir.to_string_lossy().into_owned();
+
+        // Alleen een .cmd-shim (npm-installatie): cmd.exe + /c-prefix (#40).
+        std::fs::write(dir.join("fakeagent.cmd"), "@echo off").unwrap();
+        let (prog, pre) = resolve_in_paths("fakeagent", &paths).unwrap();
+        assert_eq!(prog, "cmd.exe");
+        assert_eq!(pre[0], "/c");
+        assert!(pre[1].ends_with("fakeagent.cmd"));
+
+        // Komt er een echte exe bij, dan wint die (PATHEXT-volgorde).
+        std::fs::write(dir.join("fakeagent.exe"), "MZ").unwrap();
+        let (prog, pre) = resolve_in_paths("fakeagent", &paths).unwrap();
+        assert!(prog.ends_with("fakeagent.exe"));
+        assert!(pre.is_empty());
+
+        // Niets gevonden -> None (resolve_program valt dan terug op de kale naam).
+        assert!(resolve_in_paths("bestaatniet", &paths).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
