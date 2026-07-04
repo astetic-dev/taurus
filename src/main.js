@@ -1089,13 +1089,20 @@ const PREVIEW_BRIDGE = `<script>
   document.addEventListener('click', function (ev) {
     var a = ev.target && ev.target.closest && ev.target.closest('a[href]');
     if (!a) return;
-    var href = a.href || a.getAttribute('href');
+    // Het RUWE href-attribuut bekijken, niet a.href: die lost '#'/relatief op naar
+    // de app-origin (http://...localhost/#) en matchte dan als "externe" link ->
+    // localhost opende in de browser. Alleen echte http(s)-links gaan extern; een
+    // anker (#...) blijft in het document; al het andere (relatief/mailto) doet niets
+    // binnen de sandbox.
+    var href = a.getAttribute('href') || '';
     if (/^https?:\\/\\//i.test(href)) {
       ev.preventDefault();
       // Be authoritative: stop the page's own click handlers (e.g. a dashboard
       // openExternal() that would otherwise show a 'copy/paste' fallback).
       ev.stopImmediatePropagation();
       parent.postMessage({ type: 'taurus-open-external', url: href }, '*');
+    } else if (href.charAt(0) !== '#') {
+      ev.preventDefault(); // relatief e.d.: niet laten navigeren binnen de sandbox
     }
   }, true);
 <\/script>`;
@@ -1111,6 +1118,12 @@ const MD_STYLE = `<style>
   h1, h2, h3 { line-height: 1.25; } h1 { border-bottom: 1px solid #2e3340; padding-bottom: .3em; }
   blockquote { border-left: 3px solid #2e3340; margin: 0 0 12px; padding: 2px 14px; color: #9aa1b1; }
   img { max-width: 100%; }
+  table { border-collapse: collapse; margin: 0 0 14px; }
+  th, td { border: 1px solid #2e3340; padding: 6px 10px; text-align: left; }
+  th { background: #1b1e26; }
+  del { opacity: .65; }
+  li.md-task { list-style: none; margin-left: -18px; }
+  li.md-task input { accent-color: #7c9cff; vertical-align: middle; }
 </style>`;
 
 // Veilige, compacte markdown-renderer. Kernprincipe: escape EERST alles (zo kan
@@ -1119,17 +1132,20 @@ const MD_STYLE = `<style>
 // relatieve URL's; javascript:/data: worden geweigerd. Zie #61.
 function mdSafeUrl(u) {
   const s = String(u).trim();
-  if (/^javascript:/i.test(s) || /^data:/i.test(s) || /^vbscript:/i.test(s)) return "#";
   if (/^(https?:|mailto:)/i.test(s) || !/^[a-z0-9.+-]+:/i.test(s)) return s; // http(s)/mailto of geen schema (relatief/anker)
-  return "#";
+  return null; // javascript:, data:, vbscript:, elk ander schema -> blokkeren
 }
 function mdInline(s) {
   s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, url) => `<img alt="${alt}" src="${mdSafeUrl(url)}" />`);
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, txt, url) => `<a href="${mdSafeUrl(url)}">${txt}</a>`);
+  // Geblokkeerde URL -> GEEN <a>/<img> maar platte tekst. Een geneutraliseerd
+  // href="#" loste in de iframe op naar de app-origin en opende zo alsnog
+  // "localhost" in de externe browser -- dus helemaal geen link renderen.
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, url) => { const u = mdSafeUrl(url); return u ? `<img alt="${alt}" src="${u}" />` : alt; });
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, txt, url) => { const u = mdSafeUrl(url); return u ? `<a href="${u}">${txt}</a>` : txt; });
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
   s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
   return s;
 }
 function mdToHtml(src) {
@@ -1148,18 +1164,43 @@ function mdToHtml(src) {
       html += `<pre class="md-code"><code>${code}</code></pre>`;
       continue;
     }
+    // GFM-tabel: kopregel met | gevolgd door een scheidingsregel (|---|:--:|---:|).
+    if (line.includes("|") && i + 1 < lines.length && lines[i + 1].includes("-") && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes("|")) {
+      closeLists();
+      const splitRow = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      const aligns = splitRow(lines[i + 1]).map((c) => (/^:-+:$/.test(c) ? "center" : /^-+:$/.test(c) ? "right" : ""));
+      const cell = (tag, c, k) => `<${tag}${aligns[k] ? ` style="text-align:${aligns[k]}"` : ""}>${mdInline(c)}</${tag}>`;
+      html += `<table><tr>${splitRow(line).map((c, k) => cell("th", c, k)).join("")}</tr>`;
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && !/^\s*$/.test(lines[i])) {
+        html += `<tr>${splitRow(lines[i]).map((c, k) => cell("td", c, k)).join("")}</tr>`;
+        i++;
+      }
+      html += "</table>";
+      continue;
+    }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) { closeLists(); const n = h[1].length; html += `<h${n}>${mdInline(h[2])}</h${n}>`; i++; continue; }
     if (/^(?:---|\*\*\*|___)\s*$/.test(line)) { closeLists(); html += "<hr />"; i++; continue; }
     if (/^&gt;\s?/.test(line)) { closeLists(); html += `<blockquote>${mdInline(line.replace(/^&gt;\s?/, ""))}</blockquote>`; i++; continue; }
     const ul = line.match(/^\s*[-*+]\s+(.*)$/);
-    if (ul) { if (inOl) closeLists(); if (!inUl) { html += "<ul>"; inUl = true; } html += `<li>${mdInline(ul[1])}</li>`; i++; continue; }
+    if (ul) {
+      if (inOl) closeLists(); if (!inUl) { html += "<ul>"; inUl = true; }
+      // GFM-taaklijst: - [x] / - [ ] -> uitgeschakelde checkbox.
+      const task = ul[1].match(/^\[([ xX])\]\s+(.*)$/);
+      html += task
+        ? `<li class="md-task"><input type="checkbox" disabled${task[1] === " " ? "" : " checked"} /> ${mdInline(task[2])}</li>`
+        : `<li>${mdInline(ul[1])}</li>`;
+      i++; continue;
+    }
     const ol = line.match(/^\s*\d+\.\s+(.*)$/);
     if (ol) { if (inUl) closeLists(); if (!inOl) { html += "<ol>"; inOl = true; } html += `<li>${mdInline(ol[1])}</li>`; i++; continue; }
     if (/^\s*$/.test(line)) { closeLists(); i++; continue; }
     closeLists();
     let para = line; i++;
-    while (i < lines.length && !/^\s*$/.test(lines[i]) && !special.test(lines[i])) { para += " " + lines[i]; i++; }
+    // Stop de samenvoeging ook bij een mogelijke tabelregel (|) zodat een tabel
+    // direct na een alinea niet als tekst wordt opgeslokt.
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !special.test(lines[i]) && !lines[i].includes("|")) { para += " " + lines[i]; i++; }
     html += `<p>${mdInline(para)}</p>`;
   }
   closeLists();
