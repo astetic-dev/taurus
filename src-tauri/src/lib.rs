@@ -1287,9 +1287,10 @@ try {
   [void](Await ($rd.LoadAsync([uint32]$st.Size)) ([uint32]))
   $b=New-Object byte[] ([int]$st.Size)
   $rd.ReadBytes($b)
-  $p=Join-Path $env:TEMP 'taurus-tts.wav'
+  $p='__WAV__'
   [System.IO.File]::WriteAllBytes($p,$b)
   (New-Object System.Media.SoundPlayer($p)).PlaySync()
+  Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue
 } catch {
   Add-Type -AssemblyName System.Speech
   $f=New-Object System.Speech.Synthesis.SpeechSynthesizer
@@ -1297,10 +1298,19 @@ try {
   $f.Speak('__TEXT__')
 }
 "#;
+        // Uniek WAV-pad per aanroep (PID + teller): een vaste naam liet twee
+        // overlappende speaks of twee Taurus-instanties elkaars bestand
+        // overschrijven tijdens het afspelen (#80). Het script ruimt het
+        // bestand zelf op na PlaySync.
+        static TTS_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = TTS_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let wav = std::env::temp_dir().join(format!("taurus-tts-{}-{}.wav", std::process::id(), n));
+        let wav_esc = wav.to_string_lossy().replace('\'', "''");
         tmpl.replace("__NAME__", &name_esc)
             .replace("__TEXT__", &t)
             .replace("__RATEW__", &format!("{:.2}", rate_w))
             .replace("__RATES__", &r.to_string())
+            .replace("__WAV__", &wav_esc)
     } else {
         let sel = if name_esc.trim().is_empty() {
             String::new()
@@ -1339,8 +1349,10 @@ fn stt_dir() -> std::path::PathBuf {
     config_dir().join("stt")
 }
 
+// PID in de naam: twee Taurus-instanties schreven anders over elkaars
+// opname heen (#80). Binnen één proces is er hooguit één opname tegelijk.
 fn stt_wav_path() -> std::path::PathBuf {
-    std::env::temp_dir().join("taurus-stt.wav")
+    std::env::temp_dir().join(format!("taurus-stt-{}.wav", std::process::id()))
 }
 
 // Zet het gedeelde piekniveau (0..1) op de grootste absolute sample in dit blok.
@@ -1727,7 +1739,9 @@ fn stt_toggle(state: State<AppState>) -> Result<SttToggle, String> {
         .map_err(|e| e.to_string())?;
     state.stt.recording.store(false, Ordering::Relaxed);
     let wav = reply_rx.recv().map_err(|e| e.to_string())??;
-    transcribe(&wav).map(|text| SttToggle { recording: false, text: Some(text) })
+    let res = transcribe(&wav).map(|text| SttToggle { recording: false, text: Some(text) });
+    let _ = std::fs::remove_file(&wav); // opname is verwerkt; niets in temp laten slingeren
+    res
 }
 
 // Live microfoon-piekniveau (0..1) tijdens opname; de frontend pollt dit voor de
