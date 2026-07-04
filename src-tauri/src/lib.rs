@@ -536,6 +536,10 @@ fn build_command(
         // auto-goedkeuren; sandbox -> beperkte terminalrechten. full_paths heeft
         // geen equivalent en wordt overgeslagen. Het model is de volledige
         // agy-label-string (bijv. "Gemini 3.5 Flash (Medium)").
+        // LET OP (#81): --continue hervat het LAATSTE gesprek in de werkmap,
+        // niet een specifieke sessie (agy heeft geen sessie-id's). Meerdere
+        // bewaarde agy-sessies in dezelfde map hervatten dus allemaal
+        // hetzelfde (meest recente) gesprek.
         "agy" => {
             if let LaunchKind::Resume = kind {
                 a.push("--continue".into());
