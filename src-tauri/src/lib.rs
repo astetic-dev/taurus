@@ -78,11 +78,31 @@ fn ensure_config() -> std::path::PathBuf {
     p
 }
 
+// Parse mislukt maar het bestand bestaat: zet het veilig opzij. Zonder backup
+// toont de UI een lege lijst en overschrijft de eerstvolgende save het
+// origineel — een herstelbare tikfout (hand-editen) werd zo dataverlies (#74).
+fn backup_invalid(p: &Path) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name = format!(
+        "{}.invalid-{}",
+        p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        ts
+    );
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::copy(p, dir.join(name));
+    }
+}
+
 #[tauri::command]
 fn get_projects() -> Vec<Project> {
-    if let Ok(txt) = std::fs::read_to_string(ensure_config()) {
-        if let Ok(list) = serde_json::from_str::<Vec<Project>>(&txt) {
-            return list;
+    let p = ensure_config();
+    if let Ok(txt) = std::fs::read_to_string(&p) {
+        match serde_json::from_str::<Vec<Project>>(&txt) {
+            Ok(list) => return list,
+            Err(_) => backup_invalid(&p),
         }
     }
     default_projects()
@@ -185,9 +205,12 @@ fn save_sessions(sessions: Vec<PersistedSession>) -> Result<(), String> {
 
 #[tauri::command]
 fn get_sessions() -> Vec<PersistedSession> {
-    if let Ok(txt) = std::fs::read_to_string(sessions_path()) {
-        if let Ok(list) = serde_json::from_str::<Vec<PersistedSession>>(&txt) {
-            return list;
+    let p = sessions_path();
+    if let Ok(txt) = std::fs::read_to_string(&p) {
+        match serde_json::from_str::<Vec<PersistedSession>>(&txt) {
+            Ok(list) => return list,
+            // Corrupt: opzij zetten, anders wist persistSessionsToDisk het zo (#74).
+            Err(_) => backup_invalid(&p),
         }
     }
     Vec::new()
@@ -252,38 +275,131 @@ fn agent_exe(agent: &str) -> &'static str {
     }
 }
 
-// Zoek het exe van de agent via PATH, met fallback naar de kale naam.
-fn resolve_program(agent: &str) -> String {
-    let exe = agent_exe(agent);
-    if let Ok(paths) = std::env::var("PATH") {
-        for p in std::env::split_paths(&paths) {
-            let cand = p.join(exe);
+// Zoek <base>.exe, dan .cmd, dan .bat in de opgegeven PATH-string (PATHEXT-
+// volgorde: een native exe wint altijd van een shim). Een npm-installatie van
+// Claude Code zet alleen een claude.cmd op PATH (#40); CreateProcess kan een
+// .cmd/.bat niet direct starten, dus die komt terug als cmd.exe + "/c <pad>"-
+// prefix waar de agent-args achteraan komen.
+fn resolve_in_paths(base: &str, paths: &str) -> Option<(String, Vec<String>)> {
+    for ext in ["exe", "cmd", "bat"] {
+        for p in std::env::split_paths(paths) {
+            let cand = p.join(format!("{}.{}", base, ext));
             if cand.is_file() {
-                return cand.to_string_lossy().into_owned();
+                let full = cand.to_string_lossy().into_owned();
+                return Some(if ext == "exe" {
+                    (full, Vec::new())
+                } else {
+                    ("cmd.exe".to_string(), vec!["/c".into(), full])
+                });
             }
         }
     }
-    exe.to_string()
+    None
+}
+
+// Zoek het programma van de agent via PATH, met fallback naar de kale exe-naam.
+// Geeft (programma, prefix-args): leeg voor een exe, "/c <pad>" voor een shim.
+fn resolve_program(agent: &str) -> (String, Vec<String>) {
+    let exe = agent_exe(agent);
+    let base = exe.trim_end_matches(".exe");
+    if let Ok(paths) = std::env::var("PATH") {
+        if let Some(hit) = resolve_in_paths(base, &paths) {
+            return hit;
+        }
+    }
+    (exe.to_string(), Vec::new())
+}
+
+// Windows Job Object met kill-on-close rond het agent-proces. child.kill() is
+// TerminateProcess op alleen het directe kind; door de agent aan een job te
+// hangen ruimt Windows de HELE boom (claude + gespawnde MCP-servers) op zodra
+// de laatste job-handle sluit — ook bij een crash van Taurus zelf (#77).
+#[cfg(windows)]
+mod job {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+
+    pub struct Job(HANDLE);
+    // HANDLEs zijn gewoon over threads te dragen; alleen de wrapper mist de markers.
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
+    impl Drop for Job {
+        fn drop(&mut self) {
+            // Laatste handle dicht -> kill-on-close ruimt de procesboom op.
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    // Best effort: faalt de toewijzing (bv. proces al weg), dan gedraagt de
+    // sessie zich als voorheen (alleen child.kill op het directe kind).
+    pub fn assign(pid: u32) -> Option<Job> {
+        unsafe {
+            let hjob = CreateJobObjectW(None, None).ok()?;
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(
+                hjob,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .is_err()
+            {
+                let _ = CloseHandle(hjob);
+                return None;
+            }
+            let hproc = match OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid) {
+                Ok(h) => h,
+                Err(_) => {
+                    let _ = CloseHandle(hjob);
+                    return None;
+                }
+            };
+            let ok = AssignProcessToJobObject(hjob, hproc).is_ok();
+            let _ = CloseHandle(hproc);
+            if ok {
+                Some(Job(hjob))
+            } else {
+                let _ = CloseHandle(hjob);
+                None
+            }
+        }
+    }
 }
 
 // Een actieve terminal-sessie: de PTY-master (voor resize), de writer (stdin)
-// en het kindproces (om te kunnen afsluiten).
+// en het kindproces (om te kunnen afsluiten). De job-handle (kill-on-close)
+// neemt bij drop de hele procesboom mee.
 struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    #[cfg(windows)]
+    _job: Option<job::Job>,
 }
 
-#[derive(Default)]
 struct AppState {
     sessions: Mutex<HashMap<String, Session>>,
+    // STT-opname: commando-kanaal naar de audio-thread + zichtbare status.
+    stt: SttState,
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
+// `gen` is de generatieteller van de frontend: pty-output/pty-exit dragen hem
+// mee, zodat een VERLAAT event van een gekild proces (herstart hergebruikt het
+// id) nooit de nieuwe incarnatie als "beëindigd" kan markeren (#71).
 fn start_pty(
     app: &AppHandle,
     sessions: &Mutex<HashMap<String, Session>>,
     id: String,
+    gen: u64,
     program: String,
     path: &str,
     args: Vec<String>,
@@ -337,16 +453,24 @@ fn start_pty(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let chunk = buf[..n].to_vec();
-                    if app2.emit("pty-output", (id2.clone(), chunk)).is_err() {
+                    // Base64 i.p.v. Vec<u8>: Tauri serialiseert events als JSON,
+                    // en een byte-array wordt dan een array van getallen (3-4x
+                    // zo groot + parse-kosten) op het heetste pad van de app (#73).
+                    if app2.emit("pty-output", (id2.clone(), gen, b64(&buf[..n]))).is_err() {
                         break;
                     }
                 }
                 Err(_) => break,
             }
         }
-        let _ = app2.emit("pty-exit", id2.clone());
+        let _ = app2.emit("pty-exit", (id2.clone(), gen));
     });
+
+    // Agent aan een Job Object hangen zodat de hele procesboom opgeruimd
+    // wordt bij close/restart/crash (#77). Best effort: zonder PID of bij een
+    // mislukte toewijzing draait de sessie gewoon zonder job.
+    #[cfg(windows)]
+    let job_handle = child.process_id().and_then(job::assign);
 
     sessions.lock().unwrap().insert(
         id,
@@ -354,6 +478,8 @@ fn start_pty(
             writer,
             master: pair.master,
             child,
+            #[cfg(windows)]
+            _job: job_handle,
         },
     );
     Ok(())
@@ -374,6 +500,41 @@ enum LaunchKind {
     Resume,
 }
 
+// Splits een commando-override in tokens; dubbele quotes bewaren spaties, zodat
+// ook "C:\Program Files\tool.exe" --flag "een arg" werkt. split_whitespace
+// brak elk programma-pad met een spatie (#76).
+fn split_command(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut in_q = false;
+    for c in s.chars() {
+        match c {
+            '"' => in_q = !in_q,
+            c if c.is_whitespace() && !in_q => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+// Commando-override (bijv. nep-Claude voor de demo) -> (programma, argumenten).
+// Gedeeld door create_session en restart_session.
+fn parse_override(command: &str) -> Result<(String, Vec<String>), String> {
+    let mut toks = split_command(command);
+    if toks.is_empty() {
+        return Err("commando-override is leeg".into());
+    }
+    let prog = toks.remove(0);
+    Ok((prog, toks))
+}
+
 // Bouw (programma, argumenten) voor de gekozen agent. De `command`-escape-hatch
 // wordt door de aanroeper afgehandeld; hier gaat het puur om claude/agy. De twee
 // CLIs verschillen sterk in vlaggen, dus we bouwen ze apart op i.p.v. Claude's
@@ -388,14 +549,19 @@ fn build_command(
     model: &str,
     full_paths: bool,
 ) -> (String, Vec<String>) {
-    let program = resolve_program(agent);
-    let mut a: Vec<String> = Vec::new();
+    // `a` start met de eventuele cmd.exe-shim-prefix ("/c <pad>", #40); de
+    // agent-vlaggen komen daarachter.
+    let (program, mut a) = resolve_program(agent);
     match agent {
         // agy (Antigravity/Gemini-agent): kent geen --session-id / -n /
         // --permission-mode / --append-system-prompt. Modus: auto -> alle tools
         // auto-goedkeuren; sandbox -> beperkte terminalrechten. full_paths heeft
         // geen equivalent en wordt overgeslagen. Het model is de volledige
         // agy-label-string (bijv. "Gemini 3.5 Flash (Medium)").
+        // LET OP (#81): --continue hervat het LAATSTE gesprek in de werkmap,
+        // niet een specifieke sessie (agy heeft geen sessie-id's). Meerdere
+        // bewaarde agy-sessies in dezelfde map hervatten dus allemaal
+        // hetzelfde (meest recente) gesprek.
         "agy" => {
             if let LaunchKind::Resume = kind {
                 a.push("--continue".into());
@@ -464,6 +630,7 @@ fn create_session(
     app: AppHandle,
     state: State<AppState>,
     id: String,
+    gen: u64,
     path: String,
     title: String,
     task: String,
@@ -479,9 +646,7 @@ fn create_session(
     let (program, args) = if !command.trim().is_empty() {
         // Commando-override (bijv. nep-Claude voor de demo): voer dit programma
         // uit i.p.v. de agent, zonder agent-vlaggen.
-        let mut toks: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
-        let prog = toks.remove(0);
-        (prog, toks)
+        parse_override(&command)?
     } else {
         build_command(
             &agent,
@@ -494,7 +659,7 @@ fn create_session(
             full_paths,
         )
     };
-    start_pty(&app, &state.sessions, id, program, &path, args, cols, rows)
+    start_pty(&app, &state.sessions, id, gen, program, &path, args, cols, rows)
 }
 
 // Herstart een sessie: stop het huidige claude-proces en hervat hetzelfde gesprek
@@ -504,6 +669,7 @@ fn restart_session(
     app: AppHandle,
     state: State<AppState>,
     id: String,
+    gen: u64,
     path: String,
     title: String,
     session_id: String,
@@ -521,9 +687,7 @@ fn restart_session(
         }
     }
     let (program, args) = if !command.trim().is_empty() {
-        let mut toks: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
-        let prog = toks.remove(0);
-        (prog, toks)
+        parse_override(&command)?
     } else {
         build_command(
             &agent,
@@ -536,7 +700,7 @@ fn restart_session(
             full_paths,
         )
     };
-    start_pty(&app, &state.sessions, id, program, &path, args, cols, rows)
+    start_pty(&app, &state.sessions, id, gen, program, &path, args, cols, rows)
 }
 
 #[tauri::command]
@@ -600,7 +764,11 @@ fn scan_html(dir: &Path, depth: i32, out: &mut Vec<HtmlFile>) {
             scan_html(&p, depth - 1, out);
         } else if p
             .extension()
-            .map(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"))
+            .map(|e| {
+                e.eq_ignore_ascii_case("html")
+                    || e.eq_ignore_ascii_case("htm")
+                    || e.eq_ignore_ascii_case("md")
+            })
             .unwrap_or(false)
         {
             let mtime = entry
@@ -632,8 +800,17 @@ fn list_html(dir: String) -> Vec<HtmlFile> {
     out
 }
 
+// Preview-plafond aan de Rust-kant: voorheen werd het hele bestand gelezen en
+// over de IPC gestuurd en pas in JS op 2 MB gecontroleerd (#72). De frontend
+// herkent "file too large" en toont de preview_toobig-melding.
+const MAX_PREVIEW_BYTES: u64 = 2_000_000;
+
 #[tauri::command]
 fn read_file(path: String) -> Result<String, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.len() > MAX_PREVIEW_BYTES {
+        return Err(format!("file too large for preview ({} bytes)", meta.len()));
+    }
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
@@ -679,6 +856,23 @@ fn unique_path(dest: std::path::PathBuf) -> std::path::PathBuf {
     }
 }
 
+// Ligt de (nog niet bestaande) bestemming BINNEN de bron? Dan zou
+// copy_recursive de map in zichzelf blijven kopieren tot de schijf vol is
+// (bv. de werkmap zelf op de dropzone slepen: dest = <src>\input\<naam>).
+// We canonicaliseren beide kanten zodat relatieve paden, symlinks en
+// verschillend hoofdlettergebruik geen vals negatief opleveren (#70).
+fn dest_inside_src(src: &Path, dest: &Path) -> bool {
+    let src_c = match std::fs::canonicalize(src) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    // dest bestaat nog niet; de ouder (de input-map) wel — die is net aangemaakt.
+    dest.parent()
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .map(|p| p.starts_with(&src_c))
+        .unwrap_or(false)
+}
+
 // Kopieer een bestand of (recursief) een hele map naar `dest`.
 fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
     if src.is_dir() {
@@ -711,6 +905,12 @@ fn save_dropped_path(src: String, cwd: String, mode: String) -> Result<String, S
     let input_dir = Path::new(&cwd).join("input");
     std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
     let dest = unique_path(input_dir.join(name));
+    if dest_inside_src(src_path, &dest) {
+        return Err(format!(
+            "bestemming ligt binnen de bron (map zou in zichzelf gekopieerd worden): {}",
+            src
+        ));
+    }
 
     match mode.as_str() {
         "move" => {
@@ -801,6 +1001,12 @@ fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, S
                 None => continue,
             };
             let dest = unique_path(input_dir.join(name));
+            if dest_inside_src(src, &dest) {
+                return Err(format!(
+                    "bestemming ligt binnen de bron (map zou in zichzelf gekopieerd worden): {}",
+                    f
+                ));
+            }
             copy_recursive(src, &dest).map_err(|e| e.to_string())?;
             saved.push(dest.to_string_lossy().into_owned());
         }
@@ -1011,6 +1217,610 @@ fn branding() -> Branding {
     }
 }
 
+// ===== Spraak (TTS + STT) =====
+// TTS: Windows-native stemmen via System.Speech (SAPI) in een PowerShell-
+// kindproces -- geen downloads, geen cloud, geen extra Rust-deps. Het script
+// gaat als -EncodedCommand (base64/UTF-16LE) mee zodat er geen enkel
+// quoting-probleem is met arbitraire tekst.
+fn ps_encoded(script: &str) -> std::process::Command {
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let mut c = std::process::Command::new("powershell.exe");
+    c.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &b64(&utf16)]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    c
+}
+
+// Draai een PS-script dat per stem "<taal>\t<naam>" print en voeg elke stem toe als
+// "<engine>|<taal>|<naam>" (taal = BCP-47, bijv. nl-NL). De frontend toont de taal
+// leesbaar en groepeert; speak_text kiest de engine op de tag (taal wordt genegeerd).
+fn push_voices(out: &mut Vec<String>, engine: &str, script: &str) {
+    if let Ok(o) = ps_encoded(script).output() {
+        for l in String::from_utf8_lossy(&o.stdout).lines() {
+            let mut it = l.trim_end().splitn(2, '\t');
+            let lang = it.next().unwrap_or("").trim();
+            let name = it.next().unwrap_or("").trim();
+            if !name.is_empty() {
+                out.push(format!("{}|{}|{}", engine, lang, name));
+            }
+        }
+    }
+}
+
+// Stemmen getagd als "engine|taal|naam". WinRT/OneCore eerst (de rijkere set: bevat
+// natuurlijke stemmen en andere talen zoals het Nederlandse 'Microsoft Frank', dat
+// alleen in OneCore staat), SAPI als backup. Niet filteren op "Natural" -- dan
+// zouden juist die stemmen wegvallen.
+#[tauri::command]
+fn list_tts_voices() -> Vec<String> {
+    let mut out = Vec::new();
+    push_voices(
+        &mut out,
+        "winrt",
+        "$null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media,ContentType=WindowsRuntime]; \
+         [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | ForEach-Object { \"{0}`t{1}\" -f $_.Language, $_.DisplayName }",
+    );
+    push_voices(
+        &mut out,
+        "sapi",
+        "Add-Type -AssemblyName System.Speech; \
+         (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() \
+         | ForEach-Object { \"{0}`t{1}\" -f $_.VoiceInfo.Culture.Name, $_.VoiceInfo.Name }",
+    );
+    out
+}
+
+// Spreek tekst uit (asynchroon kindproces; blokkeert de UI nooit). Tekst wordt
+// afgekapt en PS-single-quote-ge-escaped; een onbekende stem valt stil terug
+// op de default.
+#[tauri::command]
+fn speak_text(text: String, voice: String, rate: i32) -> Result<(), String> {
+    let t: String = text.chars().take(2000).collect::<String>().replace('\'', "''");
+    if t.trim().is_empty() {
+        return Ok(());
+    }
+    let r = rate.clamp(-10, 10);
+    // Tag "engine|taal|naam" (taal genegeerd bij spreken). Terugval: oud "engine|naam"
+    // (2 velden) en ongetagd = klassieke SAPI.
+    let parts: Vec<&str> = voice.splitn(3, '|').collect();
+    let (engine, name) = match parts.as_slice() {
+        [e, _lang, n] => (*e, *n),
+        [e, n] => (*e, *n),
+        _ => ("sapi", voice.as_str()),
+    };
+    let name_esc = name.replace('\'', "''");
+    let script = if engine == "winrt" {
+        // Natuurlijke stem via WinRT: synthese -> WAV-stream -> tijdelijke .wav ->
+        // synchroon afspelen. Bij ELKE fout terugval op de klassieke SAPI-default,
+        // zodat een selectie nooit stil blijft. WinRT SpeakingRate: 0.5..~2.0 (1.0 =
+        // normaal); we mappen -10..10 daarop.
+        let rate_w = (1.0 + (r as f64) * 0.08).max(0.5);
+        let tmpl = r#"
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $null=[Windows.Media.SpeechSynthesis.SpeechSynthesizer,Windows.Media,ContentType=WindowsRuntime]
+  $null=[Windows.Storage.Streams.DataReader,Windows.Storage.Streams,ContentType=WindowsRuntime]
+  function Await($t,$ty){ $m=([System.WindowsRuntimeSystemExtensions].GetMethods()|?{$_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'})[0].MakeGenericMethod($ty); $nt=$m.Invoke($null,@($t)); [void]$nt.Wait(-1); $nt.Result }
+  $s=New-Object Windows.Media.SpeechSynthesis.SpeechSynthesizer
+  $v=[Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices|?{$_.DisplayName -eq '__NAME__'}|Select-Object -First 1
+  if($v){$s.Voice=$v}
+  $s.Options.SpeakingRate=[double]__RATEW__
+  $st=Await ($s.SynthesizeTextToStreamAsync('__TEXT__')) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
+  $rd=New-Object Windows.Storage.Streams.DataReader($st)
+  [void](Await ($rd.LoadAsync([uint32]$st.Size)) ([uint32]))
+  $b=New-Object byte[] ([int]$st.Size)
+  $rd.ReadBytes($b)
+  $p='__WAV__'
+  [System.IO.File]::WriteAllBytes($p,$b)
+  (New-Object System.Media.SoundPlayer($p)).PlaySync()
+  Remove-Item -LiteralPath $p -ErrorAction SilentlyContinue
+} catch {
+  Add-Type -AssemblyName System.Speech
+  $f=New-Object System.Speech.Synthesis.SpeechSynthesizer
+  $f.Rate=__RATES__
+  $f.Speak('__TEXT__')
+}
+"#;
+        // Uniek WAV-pad per aanroep (PID + teller): een vaste naam liet twee
+        // overlappende speaks of twee Taurus-instanties elkaars bestand
+        // overschrijven tijdens het afspelen (#80). Het script ruimt het
+        // bestand zelf op na PlaySync.
+        static TTS_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = TTS_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let wav = std::env::temp_dir().join(format!("taurus-tts-{}-{}.wav", std::process::id(), n));
+        let wav_esc = wav.to_string_lossy().replace('\'', "''");
+        tmpl.replace("__NAME__", &name_esc)
+            .replace("__TEXT__", &t)
+            .replace("__RATEW__", &format!("{:.2}", rate_w))
+            .replace("__RATES__", &r.to_string())
+            .replace("__WAV__", &wav_esc)
+    } else {
+        let sel = if name_esc.trim().is_empty() {
+            String::new()
+        } else {
+            format!("try {{ $s.SelectVoice('{}') }} catch {{}}; ", name_esc)
+        };
+        format!(
+            "Add-Type -AssemblyName System.Speech; \
+             $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
+             {}$s.Rate = {}; $s.Speak('{}')",
+            sel, r, t
+        )
+    };
+    ps_encoded(&script).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+// --- STT: opname op een eigen audio-thread (cpal Streams zijn !Send) ---
+enum RecCmd {
+    // Antwoord: lukte het starten van de opname? Zonder dit kanaal bleef een
+    // mislukte start (geen microfoon) stil: de widget toonde "Luisteren…"
+    // terwijl er niets opgenomen werd, en de fout kwam pas bij stop (#75).
+    Start(std::sync::mpsc::Sender<Result<(), String>>),
+    // Antwoord: pad van de geschreven WAV, of een fout.
+    Stop(std::sync::mpsc::Sender<Result<std::path::PathBuf, String>>),
+}
+
+struct SttState {
+    tx: std::sync::mpsc::Sender<RecCmd>,
+    recording: std::sync::atomic::AtomicBool,
+    // Live piekniveau van de microfoon (0..1) tijdens opname; de cpal-callback
+    // werkt het bij, de frontend pollt het via stt_level voor de equalizer.
+    level: std::sync::Arc<Mutex<f32>>,
+}
+
+fn stt_dir() -> std::path::PathBuf {
+    config_dir().join("stt")
+}
+
+// PID in de naam: twee Taurus-instanties schreven anders over elkaars
+// opname heen (#80). Binnen één proces is er hooguit één opname tegelijk.
+fn stt_wav_path() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("taurus-stt-{}.wav", std::process::id()))
+}
+
+// Zet het gedeelde piekniveau (0..1) op de grootste absolute sample in dit blok.
+fn set_peak(lvl: &Mutex<f32>, peak: f32) {
+    if let Ok(mut l) = lvl.lock() {
+        *l = peak;
+    }
+}
+
+fn start_capture(
+    level: std::sync::Arc<Mutex<f32>>,
+) -> Result<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32, u16), String> {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    let device = cpal::default_host()
+        .default_input_device()
+        .ok_or("no microphone found")?;
+    let cfg = device.default_input_config().map_err(|e| e.to_string())?;
+    let rate = cfg.sample_rate().0;
+    let channels = cfg.channels();
+    let buf = std::sync::Arc::new(Mutex::new(Vec::<f32>::new()));
+    let b2 = buf.clone();
+    let lvl = level;
+    let err_fn = |_e| {};
+    let stream = match cfg.sample_format() {
+        cpal::SampleFormat::F32 => device.build_input_stream(
+            &cfg.into(),
+            move |data: &[f32], _| {
+                b2.lock().unwrap().extend_from_slice(data);
+                set_peak(&lvl, data.iter().fold(0f32, |m, &s| m.max(s.abs())));
+            },
+            err_fn,
+            None,
+        ),
+        cpal::SampleFormat::I16 => device.build_input_stream(
+            &cfg.into(),
+            move |data: &[i16], _| {
+                let mut g = b2.lock().unwrap();
+                let mut peak = 0f32;
+                for s in data {
+                    let v = *s as f32 / 32768.0;
+                    g.push(v);
+                    peak = peak.max(v.abs());
+                }
+                set_peak(&lvl, peak);
+            },
+            err_fn,
+            None,
+        ),
+        cpal::SampleFormat::U16 => device.build_input_stream(
+            &cfg.into(),
+            move |data: &[u16], _| {
+                let mut g = b2.lock().unwrap();
+                let mut peak = 0f32;
+                for s in data {
+                    let v = (*s as f32 - 32768.0) / 32768.0;
+                    g.push(v);
+                    peak = peak.max(v.abs());
+                }
+                set_peak(&lvl, peak);
+            },
+            err_fn,
+            None,
+        ),
+        f => return Err(format!("unsupported sample format: {:?}", f)),
+    }
+    .map_err(|e| e.to_string())?;
+    stream.play().map_err(|e| e.to_string())?;
+    Ok((stream, buf, rate, channels))
+}
+
+// Multichannel middelen naar mono en als 16-bit PCM WAV wegschrijven op de
+// native samplerate (sherpa-onnx resamplet zelf).
+fn write_wav(buf: &[f32], rate: u32, channels: u16) -> Result<std::path::PathBuf, String> {
+    let path = stt_wav_path();
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).map_err(|e| e.to_string())?;
+    let ch = channels.max(1) as usize;
+    for frame in buf.chunks(ch) {
+        let mono: f32 = frame.iter().sum::<f32>() / ch as f32;
+        w.write_sample((mono.clamp(-1.0, 1.0) * 32767.0) as i16)
+            .map_err(|e| e.to_string())?;
+    }
+    w.finalize().map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+fn audio_thread(rx: std::sync::mpsc::Receiver<RecCmd>, level: std::sync::Arc<Mutex<f32>>) {
+    let mut current: Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32, u16)> = None;
+    for cmd in rx {
+        match cmd {
+            RecCmd::Start(reply) => {
+                let res = if current.is_some() {
+                    Ok(())
+                } else {
+                    match start_capture(level.clone()) {
+                        Ok(c) => {
+                            current = Some(c);
+                            Ok(())
+                        }
+                        Err(e) => Err(e),
+                    }
+                };
+                let _ = reply.send(res);
+            }
+            RecCmd::Stop(reply) => {
+                let res = match current.take() {
+                    Some((stream, buf, rate, ch)) => {
+                        drop(stream); // stopt de opname
+                        set_peak(&level, 0.0); // meter terug naar nul
+                        let samples = buf.lock().unwrap();
+                        if samples.len() < 1600 {
+                            Err("recording too short".to_string())
+                        } else {
+                            write_wav(&samples, rate, ch)
+                        }
+                    }
+                    None => Err("no recording in progress".to_string()),
+                };
+                let _ = reply.send(res);
+            }
+        }
+    }
+}
+
+// Zoek een bestand (op naam-predicaat) onder de stt-map, max `depth` niveaus.
+fn find_under(dir: &Path, pred: &dyn Fn(&str) -> bool, depth: i32) -> Option<std::path::PathBuf> {
+    if depth < 0 {
+        return None;
+    }
+    let rd = std::fs::read_dir(dir).ok()?;
+    let mut dirs = Vec::new();
+    for e in rd.flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        if p.is_file() && pred(&name) {
+            return Some(p);
+        }
+        if p.is_dir() {
+            dirs.push(p);
+        }
+    }
+    for d in dirs {
+        if let Some(hit) = find_under(&d, pred, depth - 1) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SttStatus {
+    engine: bool,
+    model: bool,
+    downloading: bool,
+    recording: bool,
+}
+
+fn stt_paths() -> (Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
+    let d = stt_dir();
+    let exe = find_under(&d, &|n| n == "sherpa-onnx-offline.exe", 3);
+    let tokens = find_under(&d, &|n| n == "tokens.txt", 3);
+    (exe, tokens)
+}
+
+#[tauri::command]
+fn stt_status(state: State<AppState>) -> SttStatus {
+    let (exe, tokens) = stt_paths();
+    SttStatus {
+        engine: exe.is_some(),
+        model: tokens.is_some(),
+        downloading: stt_dir().join(".downloading").is_file(),
+        recording: state
+            .stt
+            .recording
+            .load(std::sync::atomic::Ordering::Relaxed),
+    }
+}
+
+// Is de .downloading-marker een wees? De marker bevat het PID van het
+// PowerShell-downloadproces; leeft dat niet meer (crash, kill, reboot), dan
+// is de marker oud vuil en mag een nieuwe download gewoon starten.
+fn download_marker_stale(d: &Path) -> bool {
+    let pid = match std::fs::read_to_string(d.join(".downloading")) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => return false,
+    };
+    if pid.is_empty() || !pid.chars().all(|c| c.is_ascii_digit()) {
+        return true; // marker van een oude build zonder PID
+    }
+    let mut c = std::process::Command::new("tasklist");
+    c.args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    match c.output() {
+        Ok(o) => !String::from_utf8_lossy(&o.stdout).contains(&format!("\"{}\"", pid)),
+        Err(_) => false, // bij twijfel een lopende download niet overrulen
+    }
+}
+
+fn dl_log(d: &Path, msg: &str) {
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(d.join("download.log"))
+    {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
+// Download één bestand met PowerShell (blokkerend; wij zitten al op een
+// worker-thread). Eerst naar .part, daarna atomisch hernoemen zodat een
+// afgebroken download nooit voor een compleet bestand doorgaat.
+fn ps_fetch(url: &str, dest: &Path) -> Result<(), String> {
+    let part = dest.with_extension("part");
+    let u = url.replace('\'', "''");
+    let p = part.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; \
+         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+         Invoke-WebRequest -Uri '{u}' -OutFile '{p}' -UseBasicParsing"
+    );
+    let status = ps_encoded(&script).status().map_err(|e| e.to_string())?;
+    if !status.success() {
+        let _ = std::fs::remove_file(&part);
+        return Err(format!("download failed ({}): {}", status, url));
+    }
+    std::fs::rename(&part, dest).map_err(|e| e.to_string())
+}
+
+// SHA-256 van een bestand (streaming, dus ook het ~460 MB-model kan zonder
+// alles in het geheugen te laden).
+fn file_sha256(path: &Path) -> Result<String, String> {
+    use sha2::Digest;
+    let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = sha2::Sha256::new();
+    std::io::copy(&mut f, &mut hasher).map_err(|e| e.to_string())?;
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+// Verifieer een gedownload archief tegen zijn gepinde SHA-256. Mismatch ->
+// bestand weg (het is niet te vertrouwen) en een duidelijke fout. De engine
+// is een exe die we UITVOEREN; zonder deze check zou een kwaadaardige
+// registry-URL of een MITM directe code-executie opleveren (#69).
+fn verify_sha256(path: &Path, expected: &str) -> Result<(), String> {
+    let want = expected.trim().to_lowercase();
+    if want.len() != 64 || !want.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("invalid sha256 for {}: {:?}", path.display(), expected));
+    }
+    let got = file_sha256(path)?;
+    if got != want {
+        let _ = std::fs::remove_file(path);
+        return Err(format!(
+            "sha256 mismatch for {} (expected {}, got {}) — file removed",
+            path.display(),
+            want,
+            got
+        ));
+    }
+    Ok(())
+}
+
+// .tar.bz2 in-process uitpakken. NIET de systeem-tar: die is niet overal met
+// bzip2 gebouwd (een zlib-only bsdtar hangt er stil op, gezien in het wild).
+fn extract_tar_bz2(archive: &Path, dest: &Path) -> Result<(), String> {
+    let f = std::fs::File::open(archive).map_err(|e| e.to_string())?;
+    let dec = bzip2::read::BzDecoder::new(std::io::BufReader::new(f));
+    tar::Archive::new(dec).unpack(dest).map_err(|e| e.to_string())
+}
+
+// Download engine + model en pak ze uit, op een eigen worker-thread. De
+// marker (met ons eigen PID) maakt de voortgang pollbaar via stt_status en
+// een wees-marker (app gecrasht/afgesloten) zelfherstellend bij de volgende
+// download-klik. Alles komt in download.log terecht.
+#[tauri::command]
+fn stt_download(
+    app: AppHandle,
+    engine_url: String,
+    engine_sha256: String,
+    model_url: String,
+    model_sha256: String,
+) -> Result<(), String> {
+    for u in [&engine_url, &model_url] {
+        if !u.starts_with("https://") {
+            return Err(format!("https URLs only: {}", u));
+        }
+    }
+    // Checksums zijn verplicht (ook voor registry-modellen): de engine wordt
+    // uitgevoerd, dus zonder pin is elke download blind vertrouwen.
+    for s in [&engine_sha256, &model_sha256] {
+        let t = s.trim();
+        if t.len() != 64 || !t.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("model entry is missing a valid sha256 checksum".into());
+        }
+    }
+    let d = stt_dir();
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+    let marker = d.join(".downloading");
+    if marker.is_file() {
+        if download_marker_stale(&d) {
+            let _ = std::fs::remove_file(&marker);
+        } else {
+            return Err("a download is already running".into());
+        }
+    }
+    std::fs::write(&marker, std::process::id().to_string()).map_err(|e| e.to_string())?;
+    std::thread::spawn(move || {
+        let res = (|| -> Result<(), String> {
+            for (url, sha) in [(engine_url, engine_sha256), (model_url, model_sha256)] {
+                let name = url.rsplit('/').next().unwrap_or("archive.tar.bz2");
+                let file = d.join(name);
+                if !file.is_file() {
+                    dl_log(&d, &format!("downloading {}", url));
+                    ps_fetch(&url, &file)?;
+                }
+                // Ook een eerder gedownload (gecached) archief verifieren:
+                // pas na een geldige checksum wordt er uitgepakt.
+                dl_log(&d, &format!("verifying sha256 of {}", name));
+                verify_sha256(&file, &sha)?;
+                dl_log(&d, &format!("extracting {}", name));
+                extract_tar_bz2(&file, &d)?;
+            }
+            Ok(())
+        })();
+        match res {
+            Ok(()) => {
+                dl_log(&d, "done");
+                // STT is nu bruikbaar: F9 alsnog registreren (bij het opstarten
+                // is dat overgeslagen omdat engine/model nog ontbraken, #79).
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                let _ = app.global_shortcut().register("F9");
+            }
+            Err(e) => dl_log(&d, &format!("FAILED: {}", e)),
+        }
+        let _ = std::fs::remove_file(d.join(".downloading"));
+    });
+    Ok(())
+}
+
+// Toggle: eerste aanroep start de opname, tweede stopt hem, transcribeert de
+// WAV met de sherpa-onnx sidecar (NeMo-transducer zoals Parakeet v3) en geeft
+// de tekst terug. De frontend plaatst die in de actieve terminal.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SttToggle {
+    recording: bool,
+    text: Option<String>,
+}
+
+#[tauri::command]
+fn stt_toggle(state: State<AppState>) -> Result<SttToggle, String> {
+    use std::sync::atomic::Ordering;
+    if !state.stt.recording.load(Ordering::Relaxed) {
+        let (exe, tokens) = stt_paths();
+        if exe.is_none() || tokens.is_none() {
+            return Err("STT model not installed — download it under Settings → Voice".into());
+        }
+        // Wacht op het antwoord van de audio-thread: een mislukte start (geen
+        // microfoon) komt zo METEEN terug i.p.v. pas bij stop (#75).
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        state
+            .stt
+            .tx
+            .send(RecCmd::Start(reply_tx))
+            .map_err(|e| e.to_string())?;
+        reply_rx.recv().map_err(|e| e.to_string())??;
+        state.stt.recording.store(true, Ordering::Relaxed);
+        return Ok(SttToggle { recording: true, text: None });
+    }
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    state
+        .stt
+        .tx
+        .send(RecCmd::Stop(reply_tx))
+        .map_err(|e| e.to_string())?;
+    state.stt.recording.store(false, Ordering::Relaxed);
+    let wav = reply_rx.recv().map_err(|e| e.to_string())??;
+    let res = transcribe(&wav).map(|text| SttToggle { recording: false, text: Some(text) });
+    let _ = std::fs::remove_file(&wav); // opname is verwerkt; niets in temp laten slingeren
+    res
+}
+
+// Live microfoon-piekniveau (0..1) tijdens opname; de frontend pollt dit voor de
+// equalizer rond de opnameknop. 0 als er niet wordt opgenomen.
+#[tauri::command]
+fn stt_level(state: State<AppState>) -> f32 {
+    state.stt.level.lock().map(|l| *l).unwrap_or(0.0)
+}
+
+fn transcribe(wav: &Path) -> Result<String, String> {
+    let (exe, tokens) = stt_paths();
+    let (exe, tokens) = (exe.ok_or("engine missing")?, tokens.ok_or("model missing")?);
+    let model_dir = tokens.parent().ok_or("model folder missing")?.to_path_buf();
+    let onnx = |frag: &str| {
+        find_under(&model_dir, &|n| n.contains(frag) && n.ends_with(".onnx"), 1)
+            .ok_or_else(|| format!("{}*.onnx not found in the model folder", frag))
+    };
+    let (enc, dec, joi) = (onnx("encoder")?, onnx("decoder")?, onnx("joiner")?);
+    let mut c = std::process::Command::new(&exe);
+    c.arg(format!("--encoder={}", enc.display()))
+        .arg(format!("--decoder={}", dec.display()))
+        .arg(format!("--joiner={}", joi.display()))
+        .arg(format!("--tokens={}", tokens.display()))
+        .arg("--model-type=nemo_transducer")
+        .arg(wav);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    let out = c.output().map_err(|e| e.to_string())?;
+    let all = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // sherpa-onnx-offline print per bestand een JSON-regel met o.a. "text".
+    for line in all.lines() {
+        let l = line.trim();
+        if l.starts_with('{') {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(l) {
+                if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
+                    return Ok(t.trim().to_string());
+                }
+            }
+        }
+    }
+    Err(format!(
+        "no transcript in sidecar output: {}",
+        all.chars().take(400).collect::<String>()
+    ))
+}
+
 // Zet op Windows de WebView2 browser-accelerator-keys uit (F5, Ctrl+R,
 // Ctrl+Shift+R, Ctrl+Shift+I/devtools enz.). Die toetsen herladen of
 // onderbreken de webview en wissen daarmee alle agent-tabs uit beeld terwijl de
@@ -1050,14 +1860,62 @@ fn kill_all_sessions(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Audio-thread voor STT: cpal-streams zijn !Send, dus één eigen thread
+    // bezit de stream; commands praten er via een kanaal mee.
+    let (stt_tx, stt_rx) = std::sync::mpsc::channel();
+    // NB: niet 'stt_level' noemen -- dat zou de gelijknamige command-functie
+    // schaduwen in generate_handler! (E0618).
+    let mic_level = std::sync::Arc::new(Mutex::new(0.0f32));
+    let mic_level_thread = mic_level.clone();
+    std::thread::spawn(move || audio_thread(stt_rx, mic_level_thread));
+
     tauri::Builder::default()
-        .manage(AppState::default())
+        .manage(AppState {
+            sessions: Mutex::new(HashMap::new()),
+            stt: SttState {
+                tx: stt_tx,
+                recording: std::sync::atomic::AtomicBool::new(false),
+                level: mic_level,
+            },
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            // F9 = push-to-talk-toggle, ook zonder vensterfocus. Registratie
+            // aan de Rust-kant; de frontend krijgt een event en doet de rest.
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    // F9 = push-to-talk-INHOUDEN: indrukken start de opname, loslaten
+                    // stopt + transcribeert. De frontend doet de reconciliatie zodat
+                    // een korte tik geen halve opname achterlaat.
+                    if shortcut.matches(tauri_plugin_global_shortcut::Modifiers::empty(), tauri_plugin_global_shortcut::Code::F9) {
+                        match event.state() {
+                            ShortcutState::Pressed => { let _ = app.emit("stt-ptt-down", ()); }
+                            ShortcutState::Released => { let _ = app.emit("stt-ptt-up", ()); }
+                            #[allow(unreachable_patterns)]
+                            _ => {}
+                        }
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             #[cfg(target_os = "windows")]
             disable_accelerator_keys(app.handle());
+            {
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                // F9 alleen systeembreed claimen als STT ook echt bruikbaar is
+                // (engine + model geinstalleerd); anders blijft de toets vrij
+                // voor andere programma's (#79). Na een geslaagde download
+                // registreert stt_download hem alsnog. Mislukte registratie
+                // (F9 elders in gebruik) is geen ramp: de mic-knop blijft werken.
+                let (exe, tokens) = stt_paths();
+                if exe.is_some() && tokens.is_some() {
+                    let _ = app.global_shortcut().register("F9");
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1089,8 +1947,167 @@ pub fn run() {
             save_clipboard_to_input,
             copy_to_clipboard,
             branding,
+            list_tts_voices,
+            speak_text,
+            stt_status,
+            stt_download,
+            stt_toggle,
+            stt_level,
             debug_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// Unit-tests voor de pure helpers (#82). De grotere opsplitsing in modules
+// (en JS-tests na de ES-module-split) blijft in issue #82 openstaan.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn b64_matches_rfc4648_vectors() {
+        assert_eq!(b64(b""), "");
+        assert_eq!(b64(b"f"), "Zg==");
+        assert_eq!(b64(b"fo"), "Zm8=");
+        assert_eq!(b64(b"foo"), "Zm9v");
+        assert_eq!(b64(b"foob"), "Zm9vYg==");
+        assert_eq!(b64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(b64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(b64(&[0xff, 0x00, 0xee]), "/wDu");
+    }
+
+    #[test]
+    fn split_command_plain_and_quoted() {
+        assert_eq!(split_command("a b c"), vec!["a", "b", "c"]);
+        assert_eq!(
+            split_command(r#""C:\Program Files\tool.exe" --flag "an arg""#),
+            vec![r"C:\Program Files\tool.exe", "--flag", "an arg"]
+        );
+        assert!(split_command("   ").is_empty());
+        assert!(split_command(r#""""#).is_empty());
+        assert!(parse_override(r#""""#).is_err());
+        assert_eq!(
+            parse_override("prog -x").unwrap(),
+            ("prog".to_string(), vec!["-x".to_string()])
+        );
+    }
+
+    #[test]
+    fn norm_title_falls_back_and_trims() {
+        assert_eq!(norm_title("  "), "agent");
+        assert_eq!(norm_title(" ZGV-debug "), "ZGV-debug");
+    }
+
+    #[test]
+    fn logo_mime_by_extension() {
+        assert_eq!(logo_mime("a.SVG"), "image/svg+xml");
+        assert_eq!(logo_mime("a.jpeg"), "image/jpeg");
+        assert_eq!(logo_mime("a.webp"), "image/webp");
+        assert_eq!(logo_mime("a.png"), "image/png");
+        assert_eq!(logo_mime("noext"), "image/png");
+    }
+
+    #[test]
+    fn claude_session_file_encodes_the_path() {
+        let p = claude_session_file(r"C:\Users\AST\claude\Taurus", "uuid-1");
+        let s = p.to_string_lossy().into_owned();
+        assert!(s.contains("C--Users-AST-claude-Taurus"), "{}", s);
+        assert!(s.ends_with("uuid-1.jsonl"), "{}", s);
+    }
+
+    #[test]
+    fn build_command_claude_create_and_resume() {
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true);
+        assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
+        assert!(a.windows(2).any(|w| w == ["--permission-mode", "plan"]));
+        assert!(a.windows(2).any(|w| w == ["--model", "opus"]));
+        assert!(a.contains(&"--append-system-prompt".to_string()));
+        assert_eq!(a.last().unwrap(), "do it");
+
+        let (_, r) = build_command("claude", LaunchKind::Resume, "u1", "t", "do it", "default", "", false);
+        assert_eq!(r[0..2], ["--resume".to_string(), "u1".to_string()]);
+        // Bij resume geen taak meesturen en geen --permission-mode "default".
+        assert!(!r.contains(&"do it".to_string()));
+        assert!(!r.contains(&"--permission-mode".to_string()));
+    }
+
+    #[test]
+    fn build_command_agy_resume_continues_without_task() {
+        let (_, a) = build_command("agy", LaunchKind::Resume, "u1", "t", "task", "auto", "", true);
+        assert!(a.contains(&"--continue".to_string()));
+        assert!(a.contains(&"--dangerously-skip-permissions".to_string()));
+        // agy kent geen prompt bij --continue en geen full-paths-equivalent.
+        assert!(!a.contains(&"--prompt-interactive".to_string()));
+        assert!(!a.contains(&"--append-system-prompt".to_string()));
+    }
+
+    #[test]
+    fn resolve_in_paths_prefers_exe_and_wraps_shims() {
+        let dir = std::env::temp_dir().join(format!("taurus-test-resolve-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = dir.to_string_lossy().into_owned();
+
+        // Alleen een .cmd-shim (npm-installatie): cmd.exe + /c-prefix (#40).
+        std::fs::write(dir.join("fakeagent.cmd"), "@echo off").unwrap();
+        let (prog, pre) = resolve_in_paths("fakeagent", &paths).unwrap();
+        assert_eq!(prog, "cmd.exe");
+        assert_eq!(pre[0], "/c");
+        assert!(pre[1].ends_with("fakeagent.cmd"));
+
+        // Komt er een echte exe bij, dan wint die (PATHEXT-volgorde).
+        std::fs::write(dir.join("fakeagent.exe"), "MZ").unwrap();
+        let (prog, pre) = resolve_in_paths("fakeagent", &paths).unwrap();
+        assert!(prog.ends_with("fakeagent.exe"));
+        assert!(pre.is_empty());
+
+        // Niets gevonden -> None (resolve_program valt dan terug op de kale naam).
+        assert!(resolve_in_paths("bestaatniet", &paths).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unique_path_appends_a_counter() {
+        let dir = std::env::temp_dir().join(format!("taurus-test-unique-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("x.txt");
+        assert_eq!(unique_path(f.clone()), f);
+        std::fs::write(&f, "a").unwrap();
+        assert_eq!(unique_path(f.clone()), dir.join("x (2).txt"));
+        std::fs::write(dir.join("x (2).txt"), "b").unwrap();
+        assert_eq!(unique_path(f.clone()), dir.join("x (3).txt"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dest_inside_src_detects_self_copy() {
+        let root = std::env::temp_dir().join(format!("taurus-test-nest-{}", std::process::id()));
+        let input = root.join("input");
+        std::fs::create_dir_all(&input).unwrap();
+        // De werkmap zelf droppen: dest = <root>\input\<naam> ligt binnen root.
+        assert!(dest_inside_src(&root, &input.join("root")));
+        // Een bestand van elders is prima.
+        let elsewhere = std::env::temp_dir().join(format!("taurus-test-else-{}", std::process::id()));
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        assert!(!dest_inside_src(&elsewhere, &input.join("file.txt")));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    #[test]
+    fn verify_sha256_rejects_bad_pins_and_mismatches() {
+        let f = std::env::temp_dir().join(format!("taurus-test-sha-{}.bin", std::process::id()));
+        std::fs::write(&f, b"hello").unwrap();
+        // "hello" -> bekende SHA-256.
+        let good = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        assert!(verify_sha256(&f, good).is_ok());
+        assert!(verify_sha256(&f, &good.to_uppercase()).is_ok());
+        // Ongeldige pin (te kort / geen hex) wordt geweigerd.
+        std::fs::write(&f, b"hello").unwrap();
+        assert!(verify_sha256(&f, "abc").is_err());
+        // Mismatch: fout EN het bestand is verwijderd.
+        let wrong = "0000000000000000000000000000000000000000000000000000000000000000";
+        assert!(verify_sha256(&f, wrong).is_err());
+        assert!(!f.exists());
+    }
 }

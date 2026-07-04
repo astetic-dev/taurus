@@ -52,10 +52,20 @@ consistently. That's what Taurus is for.
 - **Per-project agent + model** — launch `claude` (Claude Code) or `agy` (a
   Gemini-backed agent CLI), optionally pinned to a model, set per project and
   overridable per session.
+- **Voice** — the terminal talks and listens. TTS via the Windows-native
+  voices (optional "agent is ready" announcement, right-click a tab to speak
+  the selection; voice/rate in Settings). Push-to-talk STT: F9 or the 🎙
+  button records, a local sherpa-onnx sidecar transcribes (NVIDIA Parakeet
+  TDT v3 by default, downloaded on demand from Settings → Voice), and the
+  text lands at the active prompt. Fully offline; the model list can follow
+  a registry URL so new models appear without an app update.
 - **Inline HTML preview** — right-click a tab → *HTML preview*, or click an `.html`
   path in the terminal; it renders beside (or instead of) the terminal.
 - **Restart / resume** — right-click a tab to restart the session and resume the
-  same conversation (handy after updating an MCP server).
+  same conversation (handy after updating an MCP server). Note for `agy`: it has
+  no session ids, so a restart uses `--continue` and resumes the **most recent**
+  conversation in that working folder — with several agy sessions in the same
+  folder they all resume the latest one.
 - **Open folder in Explorer**, **search** (Ctrl+Shift+F), **copy/paste**, font zoom
   (Ctrl+= / - / 0), tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W) — all toggleable.
 - **EN / NL** language switch.
@@ -111,12 +121,14 @@ Edit them with the in-app **Projects** editor, or by hand. Format:
 
 - `agent` (optional) — which agent CLI to launch: `claude` (default, Claude Code)
   or `agy` (a Gemini-backed agent CLI). Selectable per project in the editor and
-  overridable per session on the launch form.
+  overridable per session on the launch form. Resume limitation: `agy` has no
+  session ids, so restarts resume the folder's most recent conversation.
 - `model` (optional) — model the agent starts with (free text, e.g. `opus`,
   `sonnet`, `gemini-2.5-pro`). Empty means the agent's own default. Passed as
   `--model`.
 - `command` (optional) — run a different program instead of the agent for this
-  project (verbatim, no agent flags). Takes precedence over `agent`/`model`.
+  project (no agent flags). Takes precedence over `agent`/`model`. Use double
+  quotes around a program path or argument that contains spaces.
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
 

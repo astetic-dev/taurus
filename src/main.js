@@ -37,11 +37,30 @@ const I18N = {
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
     ctx_restart: "↻ Herstart (resume gesprek)", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
-    preview_none: "(geen .html in de werkmap)", preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten",
+    preview_none: "(geen .html/.md in de werkmap)", preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten", preview_toobig: "Bestand te groot om te previewen.",
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
     grp_sessions: "Sessies", set_persist: "Sessies onthouden en bij opstarten hervatten",
+    tab_general: "Algemeen", tab_theme: "Thema", tab_html: "HTML-preview", tab_terminal: "Terminal", tab_voice: "Spraak",
+    help_default: "Beweeg over een instelling voor uitleg.",
+    help_lang: "Taal van de interface: Nederlands of Engels. Wijziging is zichtbaar na Opslaan.",
+    help_fontsize: "Lettergrootte van de terminaltekst (punten).\nVoorbeeld: 13 = standaard; 15-16 leest prettiger op een groot scherm.",
+    help_scrollback: "Aantal regels terminaluitvoer dat bewaard blijft om terug te scrollen.\nVoorbeeld: 8000. Hoger = meer terug te lezen, maar meer geheugen per sessie.",
+    help_cursor: "Laat de tekstcursor in de terminal knipperen in plaats van stil te staan.",
+    help_persist: "Onthoudt open sessies en hervat ze bij het opstarten (--resume), zodat je verdergaat waar je gebleven was. Uit = elke start begint schoon.",
+    help_skin: "Visueel thema (skin) voor de hele app.\nVoorbeeld: 'Terminal (CRT)' = retro groen; 'Nord'/'Dracula' = donkere kleurschema's; 'Solarized Light' = licht.",
+    help_html_split: "Toont de HTML-preview naast de terminal (gesplitst), zodat je code en resultaat tegelijk ziet.",
+    help_html_full: "Toont de HTML-preview op het volledige venster en verbergt de terminal zolang de preview open is.",
+    help_fullpaths: "Vraagt Claude volledige bestandspaden te printen, zodat ze klikbaar worden.\nVoorbeeld: C:\\project\\index.html i.p.v. alleen index.html.",
+    help_copyselect: "Zodra je tekst in de terminal selecteert, gaat die automatisch naar het klembord - geen Ctrl+C nodig.",
+    help_pasteright: "Een rechtermuisklik in de terminal plakt de klembordinhoud.",
+    help_agentmouse: "Wie krijgt de muis in de terminal?\nUit: slepen selecteert tekst lokaal, rechtsklik plakt.\nAan: de agent (bijv. een TUI-menu) ontvangt klikken en scrollen. Geldt voor nieuwe sessies.",
+    help_ctrlshift: "Ctrl+Shift+C kopieert en Ctrl+Shift+V plakt in de terminal. De Shift-variant houdt gewone Ctrl+C vrij om een programma te onderbreken.",
+    help_weblinks: "Maakt URL's in de uitvoer klikbaar; ze openen in je standaardbrowser. Geldt voor nieuwe sessies.",
+    help_search: "Zoeken in de scrollback met Ctrl+Shift+F. Geldt voor nieuwe sessies.",
+    help_tabshortcuts: "Sneltoetsen voor tabs: Ctrl+Tab wisselt, Ctrl+1..9 springt naar een tab, Ctrl+T opent een nieuwe, Ctrl+W sluit de huidige.",
+    help_tabstatus: "Toont Claude's huidige bezigheid live op het tabblad.\nVoorbeeld: '✶ Orbiting…' terwijl Claude werkt; een stille groene stip = klaar/wachtend.",
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
     skin_default: "Standaard (donker)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
@@ -57,6 +76,20 @@ const I18N = {
     dropper_paste_failed: "✗ Plakken van object mislukt:",
     reload: "Herlaad", new_project: "Nieuwe agent", add_file: "Bestand toevoegen",
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
+    grp_voice: "Spraak", tts_enable: "Spreek uit wanneer een agent klaar is",
+    tts_voice: "Stem", tts_rate: "Spreeksnelheid", tts_test: "Test", rate_slow: "langzaam", rate_fast: "snel",
+    voice_natural: "Windows-stemmen", voice_classic: "Klassiek (SAPI)",
+    voice_install_hint: "Meer stemmen of talen nodig? Voeg ze toe via Windows-instellingen → Tijd en taal → Spraak (of taal toevoegen met Text-to-speech).",
+    tts_ready: "{title} is klaar",
+    ctx_speak: "🔊 Selectie uitspreken",
+    stt_head: "Spraak naar tekst — F9 inhouden (of klik 🎙)",
+    stt_model: "Model", stt_download: "Download",
+    stt_downloading: "Bezig met downloaden… (zie stt\\download.log)",
+    stt_ready_lbl: "geïnstalleerd", stt_missing_lbl: "niet geïnstalleerd",
+    stt_autosend: "Transcript direct versturen (Enter)",
+    stt_registry: "Modellenbibliotheek-URL", stt_refresh: "Vernieuw lijst",
+    stt_failed: "✗ Transcriptie mislukt:", stt_rec: "● Opname… (laat F9 los = stop)",
+    rec_idle: "Klik of F9 = dicteren", rec_listening: "● Luisteren…", rec_transcribing: "Transcriberen…",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Agents",
@@ -92,11 +125,30 @@ const I18N = {
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
     ctx_restart: "↻ Restart (resume conversation)", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
-    preview_none: "(no .html in the working folder)", preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview",
+    preview_none: "(no .html/.md in the working folder)", preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview", preview_toobig: "File too large to preview.",
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
     grp_sessions: "Sessions", set_persist: "Remember sessions and resume on startup",
+    tab_general: "General", tab_theme: "Theme", tab_html: "HTML preview", tab_terminal: "Terminal", tab_voice: "Voice",
+    help_default: "Hover a setting for an explanation.",
+    help_lang: "Interface language: Dutch or English. Applies right after you Save.",
+    help_fontsize: "Font size of the terminal text (points).\nExample: 13 = default; 15-16 reads better on a large display.",
+    help_scrollback: "Number of terminal output lines kept for scrolling back.\nExample: 8000. Higher = more history, but more memory per session.",
+    help_cursor: "Make the terminal text cursor blink instead of staying solid.",
+    help_persist: "Remembers open sessions and resumes them on startup (--resume) so you continue where you left off. Off = every launch starts clean.",
+    help_skin: "Visual theme (skin) for the whole app.\nExample: 'Terminal (CRT)' = retro green; 'Nord'/'Dracula' = dark colour schemes; 'Solarized Light' = light.",
+    help_html_split: "Shows the HTML preview beside the terminal (split), so you see code and result at once.",
+    help_html_full: "Shows the HTML preview full-window, hiding the terminal while the preview is open.",
+    help_fullpaths: "Asks Claude to print full file paths so they become clickable.\nExample: C:\\project\\index.html instead of just index.html.",
+    help_copyselect: "As soon as you select text in the terminal it goes to the clipboard automatically - no Ctrl+C needed.",
+    help_pasteright: "A right-click in the terminal pastes the clipboard contents.",
+    help_agentmouse: "Who gets the mouse in the terminal?\nOff: dragging selects text locally, right-click pastes.\nOn: the agent (e.g. a TUI menu) receives clicks and scrolling. Applies to new sessions.",
+    help_ctrlshift: "Ctrl+Shift+C copies and Ctrl+Shift+V pastes in the terminal. The Shift variant keeps plain Ctrl+C free to interrupt a program.",
+    help_weblinks: "Makes URLs in the output clickable; they open in your default browser. Applies to new sessions.",
+    help_search: "Search the scrollback with Ctrl+Shift+F. Applies to new sessions.",
+    help_tabshortcuts: "Tab shortcuts: Ctrl+Tab switches, Ctrl+1..9 jumps to a tab, Ctrl+T opens a new one, Ctrl+W closes the current.",
+    help_tabstatus: "Shows Claude's current activity live on the tab.\nExample: '✶ Orbiting…' while Claude works; a steady green dot = done/waiting.",
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
     skin_default: "Default (dark)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
@@ -112,6 +164,20 @@ const I18N = {
     dropper_paste_failed: "✗ Could not paste object:",
     reload: "Reload", new_project: "New agent", add_file: "Add file",
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
+    grp_voice: "Voice", tts_enable: "Speak when an agent is ready",
+    tts_voice: "Voice", tts_rate: "Speaking rate", tts_test: "Test", rate_slow: "slow", rate_fast: "fast",
+    voice_natural: "Windows voices", voice_classic: "Classic (SAPI)",
+    voice_install_hint: "Need more voices or languages? Add them via Windows Settings → Time & language → Speech (or add a language with Text-to-speech).",
+    tts_ready: "{title} is ready",
+    ctx_speak: "🔊 Speak selection",
+    stt_head: "Speech to text — hold F9 (or click 🎙)",
+    stt_model: "Model", stt_download: "Download",
+    stt_downloading: "Downloading… (see stt\\download.log)",
+    stt_ready_lbl: "installed", stt_missing_lbl: "not installed",
+    stt_autosend: "Send transcript immediately (Enter)",
+    stt_registry: "Model library URL", stt_refresh: "Refresh list",
+    stt_failed: "✗ Transcription failed:", stt_rec: "● Recording… (release F9 to stop)",
+    rec_idle: "Click or F9 to dictate", rec_listening: "● Listening…", rec_transcribing: "Transcribing…",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -152,8 +218,10 @@ async function applyBranding() {
     // ingebouwde skins staat en niemand het per ongeluk overschrijft. Het label
     // in de Thema-lijst komt uit de lokale branding (skinName/appName) — er staat
     // dus niets merkspecifieks in de publieke code.
+    // Ook ';' weren (net als bij font hieronder): anders injecteert een waarde
+    // als "red; background:url(...)" extra CSS-declaraties (#78).
     const decls = Object.entries(b.theme)
-      .filter(([k, v]) => /^--[\w-]+$/.test(k) && typeof v === "string" && !/[<>{}]/.test(v))
+      .filter(([k, v]) => /^--[\w-]+$/.test(k) && typeof v === "string" && !/[<>{};]/.test(v))
       .map(([k, v]) => `${k}: ${v};`);
     // Optioneel UI-lettertype hoort bij de merk-skin (overschrijft --ui-font).
     if (typeof b.font === "string" && b.font.trim() && !/[<>{};]/.test(b.font)) {
@@ -348,11 +416,17 @@ let projects = [];
 let selected = null;
 let current = "new";
 let seq = 0;
+// Generatieteller per (her)start: pty-events dragen de gen mee, zodat een
+// verlaat event van een gekild proces (herstart hergebruikt het sessie-id)
+// nooit de nieuwe incarnatie raakt (#71).
+let genSeq = 0;
 const sessions = new Map();
 const els = {};
 
 const DEFAULT_SETTINGS = {
-  lang: "nl",
+  // Standaardtaal volgt het OS: alleen een Nederlandstalig systeem start in het
+  // Nederlands; al het andere in het Engels. Een opgeslagen keuze wint altijd (#46).
+  lang: (navigator.language || "en").toLowerCase().startsWith("nl") ? "nl" : "en",
   fontSize: 13, scrollback: 8000, cursorBlink: true,
   htmlView: "split",
   copyOnSelect: true, pasteOnRightClick: true, ctrlShiftCV: true,
@@ -361,6 +435,10 @@ const DEFAULT_SETTINGS = {
   persistSessions: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
+  ttsEnabled: false, ttsVoice: "", ttsRate: 0, // Windows-native TTS
+  sttAutoSend: false, // transcript meteen met Enter versturen
+  sttModel: "", // gekozen model uit de bibliotheek (leeg = eerste)
+  sttRegistry: "", // optionele modellenbibliotheek-URL (JSON); leeg = ingebouwde lijst
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -393,6 +471,13 @@ function copyToClipboard(text) {
 }
 function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
+// Compacte drive-aanduiding achter de agentnaam: "(C:)" / "(X:)" / "(UNC)".
+// Vervangt de bredere LOCAL/NETWORK-regel zodat er meer agents in de lijst passen.
+function driveTag(p) {
+  if (p.startsWith("\\\\")) return "(UNC)";
+  const d = (p.match(/^([a-z]):/i) || [])[1];
+  return d ? `(${d.toUpperCase()}:)` : "";
+}
 function locText(p) {
   if (p.startsWith("\\\\")) return t("loc_net") + " (UNC)";
   const d = (p.match(/^([a-z]):/i) || [])[1];
@@ -492,8 +577,7 @@ function renderProjects() {
     card.dataset.idx = String(index);
     card.style.borderLeftColor = p.accent || "#7c9cff";
     card.innerHTML =
-      `<div class="pc-label">${escapeHtml(p.label)}</div>` +
-      `<div class="pc-loc ${locClass(p.path)}">${locText(p.path)}</div>` +
+      `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${locClass(p.path)}">${driveTag(p.path)}</span></div>` +
       `<div class="pc-actions">` +
         `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
         `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
@@ -629,6 +713,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     <div class="preview-pane">
       <div class="preview-bar">
         <select class="preview-file"></select>
+        <button class="preview-raw" title="Raw / rendered (markdown)">&lt;/&gt;</button>
         <button class="preview-refresh">↻</button>
         <button class="preview-mode">⇆</button>
         <button class="preview-close">✕</button>
@@ -715,7 +800,8 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
-    exited: false, working: false, awaiting: false, status: null, lastSpin: 0, buf: "",
+    gen: ++genSeq,
+    exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
   };
   sessions.set(id, session);
@@ -764,6 +850,8 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   });
 
   el.querySelector(".preview-file").addEventListener("change", (e) => renderPreview(session, e.target.value));
+  // Raw/rendered wisselen (alleen zinvol voor .md); hertekent het huidige bestand.
+  el.querySelector(".preview-raw").addEventListener("click", () => { session.previewRaw = !session.previewRaw; if (session.previewPath) renderPreview(session, session.previewPath); });
   el.querySelector(".preview-refresh").addEventListener("click", () => loadHtmlList(session));
   el.querySelector(".preview-mode").addEventListener("click", () => { session.previewMode = session.previewMode === "split" ? "full" : "split"; applyLayout(session); refitTerm(session); });
   el.querySelector(".preview-close").addEventListener("click", () => closePreview(session));
@@ -802,7 +890,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
         // Drive-letter paths may use either separator (C:\dir\f.html or C:/dir/f.html);
         // accept both so forward-slash absolute paths stay clickable too.
-        const re = /([A-Za-z]:[\\/][^\s"'<>|]+?\.html?|[\w.\-\\/]+\.html?)/gi;
+        const re = /([A-Za-z]:[\\/][^\s"'<>|]+?\.(?:html?|md)|[\w.\-\\/]+\.(?:html?|md))/gi;
         const links = [];
         let m;
         while ((m = re.exec(full)) !== null) {
@@ -840,7 +928,7 @@ async function startSession() {
 
   const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model });
   try {
-    await invoke("create_session", { id, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), cols: session.term.cols, rows: session.term.rows });
+    await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), cols: session.term.cols, rows: session.term.rows });
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -925,7 +1013,7 @@ async function restoreSessions() {
     session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
     try {
       await invoke("restart_session", {
-        id, path: meta.path, title: session.title, sessionId: uuid,
+        id, gen: session.gen, path: meta.path, title: session.title, sessionId: uuid,
         mode: session.mode, fullPaths: settings.fullPaths, command: "",
         agent: session.agent, model: resolveModelArg(session.agent, session.model),
         cols: session.term.cols, rows: session.term.rows,
@@ -1011,11 +1099,98 @@ const PREVIEW_BRIDGE = `<script>
     }
   }, true);
 <\/script>`;
+
+// Thema-CSS voor de markdown-render (de srcdoc-iframe erft de app-CSS niet).
+const MD_STYLE = `<style>
+  :root { color-scheme: dark; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; color: #e6e8ee; background: #14161c; padding: 20px 26px; line-height: 1.6; max-width: 820px; }
+  a { color: #7c9cff; }
+  code { background: #21252f; padding: 1px 5px; border-radius: 4px; font-family: "Cascadia Code", Consolas, monospace; font-size: .92em; }
+  pre.md-code { background: #1b1e26; border: 1px solid #2e3340; border-radius: 8px; padding: 12px 14px; overflow: auto; }
+  pre.md-code code { background: none; padding: 0; }
+  h1, h2, h3 { line-height: 1.25; } h1 { border-bottom: 1px solid #2e3340; padding-bottom: .3em; }
+  blockquote { border-left: 3px solid #2e3340; margin: 0 0 12px; padding: 2px 14px; color: #9aa1b1; }
+  img { max-width: 100%; }
+</style>`;
+
+// Veilige, compacte markdown-renderer. Kernprincipe: escape EERST alles (zo kan
+// ruwe HTML/<script> in de bron niets injecteren -- gelijk aan 'html:false');
+// pas daarna markdown-regels toe. Links/afbeeldingen krijgen alleen http(s)/mailto/
+// relatieve URL's; javascript:/data: worden geweigerd. Zie #61.
+function mdSafeUrl(u) {
+  const s = String(u).trim();
+  if (/^javascript:/i.test(s) || /^data:/i.test(s) || /^vbscript:/i.test(s)) return "#";
+  if (/^(https?:|mailto:)/i.test(s) || !/^[a-z0-9.+-]+:/i.test(s)) return s; // http(s)/mailto of geen schema (relatief/anker)
+  return "#";
+}
+function mdInline(s) {
+  s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, url) => `<img alt="${alt}" src="${mdSafeUrl(url)}" />`);
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, txt, url) => `<a href="${mdSafeUrl(url)}">${txt}</a>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  return s;
+}
+function mdToHtml(src) {
+  const lines = escapeHtml(String(src).replace(/\r\n/g, "\n")).split("\n");
+  const special = /^(#{1,6}\s|```|\s*[-*+]\s|\s*\d+\.\s|&gt;\s?|(?:---|\*\*\*|___)\s*$)/;
+  let html = "", i = 0, inUl = false, inOl = false;
+  const closeLists = () => { if (inUl) { html += "</ul>"; inUl = false; } if (inOl) { html += "</ol>"; inOl = false; } };
+  while (i < lines.length) {
+    const line = lines[i];
+    const fence = line.match(/^```/);
+    if (fence) {
+      closeLists(); i++;
+      let code = "";
+      while (i < lines.length && !/^```/.test(lines[i])) { code += lines[i] + "\n"; i++; }
+      i++;
+      html += `<pre class="md-code"><code>${code}</code></pre>`;
+      continue;
+    }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { closeLists(); const n = h[1].length; html += `<h${n}>${mdInline(h[2])}</h${n}>`; i++; continue; }
+    if (/^(?:---|\*\*\*|___)\s*$/.test(line)) { closeLists(); html += "<hr />"; i++; continue; }
+    if (/^&gt;\s?/.test(line)) { closeLists(); html += `<blockquote>${mdInline(line.replace(/^&gt;\s?/, ""))}</blockquote>`; i++; continue; }
+    const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+    if (ul) { if (inOl) closeLists(); if (!inUl) { html += "<ul>"; inUl = true; } html += `<li>${mdInline(ul[1])}</li>`; i++; continue; }
+    const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (ol) { if (inUl) closeLists(); if (!inOl) { html += "<ol>"; inOl = true; } html += `<li>${mdInline(ol[1])}</li>`; i++; continue; }
+    if (/^\s*$/.test(line)) { closeLists(); i++; continue; }
+    closeLists();
+    let para = line; i++;
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !special.test(lines[i])) { para += " " + lines[i]; i++; }
+    html += `<p>${mdInline(para)}</p>`;
+  }
+  closeLists();
+  return html;
+}
+
+// Toon een .html-preview (ruw) of een .md-bestand (gerenderd of raw). .md wordt
+// altijd escape-eerst gerenderd; ruwe HTML in de .md draait dus nooit als script.
 async function renderPreview(s, path) {
   if (!path) return;
+  s.previewPath = path;
   const frame = s.el.querySelector(".preview-frame");
-  try { frame.srcdoc = PREVIEW_BRIDGE + await invoke("read_file", { path }); }
-  catch (e) { frame.srcdoc = `<body style="font-family:sans-serif;color:#c66;padding:24px">${escapeHtml(String(e))}</body>`; }
+  const isMd = /\.md$/i.test(path);
+  try {
+    const raw = await invoke("read_file", { path });
+    if (isMd && !s.previewRaw) {
+      frame.srcdoc = PREVIEW_BRIDGE + MD_STYLE + `<body>${mdToHtml(raw)}</body>`;
+    } else if (isMd) {
+      frame.srcdoc = MD_STYLE + `<body><pre class="md-code"><code>${escapeHtml(raw)}</code></pre></body>`;
+    } else {
+      frame.srcdoc = PREVIEW_BRIDGE + raw;
+    }
+  } catch (e) {
+    // De 2 MB-grens wordt in Rust bewaakt (vóór lezen/IPC, #72); vertaal die
+    // fout naar de nette i18n-melding.
+    if (/file too large/i.test(String(e))) {
+      frame.srcdoc = MD_STYLE + `<body>${escapeHtml(t("preview_toobig"))}</body>`;
+    } else {
+      frame.srcdoc = `<body style="font-family:sans-serif;color:#c66;padding:24px">${escapeHtml(String(e))}</body>`;
+    }
+  }
 }
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
 async function openPreviewFile(s, rawPath) {
@@ -1052,36 +1227,57 @@ function lastSpinnerVerb(buf) {
 
 /* ============ PTY-events ============ */
 listen("pty-output", (event) => {
-  const [sid, bytes] = event.payload;
+  const [sid, gen, data] = event.payload;
   const s = sessions.get(sid);
-  if (!s) return;
-  const u8 = new Uint8Array(bytes);
+  if (!s || s.gen !== gen) return; // verlaat event van een vorige generatie
+  // data is base64 (één string i.p.v. duizenden JSON-getallen per chunk, #73).
+  const u8 = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
   s.term.write(u8);
   let render = false;
   if (!s.exited) {
-    s.buf = (s.buf + stripAnsi(s.decoder.decode(u8, { stream: true }))).slice(-600);
+    // Grotere buffer (4000) zodat de status-/spinnerregel niet uit beeld schuift bij
+    // een output-piek -- anders leek de agent "klaar" terwijl 'ie doorwerkte.
+    s.buf = (s.buf + stripAnsi(s.decoder.decode(u8, { stream: true }))).slice(-4000);
     const verb = lastSpinnerVerb(s.buf);
-    if (verb) {
+    // "Bezig"-signaal: een spinner-werkwoord OF Claude's "(esc to interrupt)"-hint,
+    // die de hele beurt getoond wordt (ook tijdens tools/streamen) en dus veel
+    // betrouwbaarder is dan "geen spinner gezien".
+    const busy = !!verb || /\besc to interrupt\b/i.test(s.buf);
+    if (busy) {
       s.lastSpin = Date.now();
-      // Claude is (weer) bezig -> geen flash; markeer werkend.
+      s.announced = false; // (weer) bezig -> een latere idle mag opnieuw melden
       if (!s.working || s.awaiting) { s.working = true; s.awaiting = false; render = true; }
-      if (settings.tabStatus && s.status !== verb) { s.status = verb; render = true; }
+      if (settings.tabStatus && verb && s.status !== verb) { s.status = verb; render = true; }
     }
   }
   if (render) renderTabs();
 });
 listen("pty-exit", (event) => {
-  const s = sessions.get(event.payload);
-  if (s) { s.exited = true; s.working = false; s.awaiting = false; s.status = null; s.term.write(`\r\n\x1b[2m${t("ended")}\x1b[0m\r\n`); renderTabs(); }
+  const [sid, gen] = event.payload;
+  const s = sessions.get(sid);
+  if (!s || s.gen !== gen) return; // exit van een gekilde vorige generatie: negeren
+  s.exited = true; s.working = false; s.awaiting = false; s.status = null; s.term.write(`\r\n\x1b[2m${t("ended")}\x1b[0m\r\n`); renderTabs();
 });
+// "Klaar" = langere tijd GEEN bezig-signaal, mét bevestigingsvenster tegen valse
+// meldingen: na READY_IDLE_MS valt "werkend" weg, en pas na nog eens READY_CONFIRM_MS
+// stabiel idle flashen/spreken we. Keert de spinner in dat venster terug, dan wist de
+// pty-handler s.working/announced en gebeurt er niets (geen valse "klaar"). Per beurt
+// hooguit één melding (s.announced), en alleen voor een tab die je niet bekijkt.
+const READY_IDLE_MS = 3000;
+const READY_CONFIRM_MS = 2000;
 setInterval(() => {
   let changed = false; const now = Date.now();
   for (const s of sessions.values()) {
-    // Spinner ~1,5s niet gezien -> beurt klaar. Wacht op input = flash (mits niet actief).
-    if (s.working && now - s.lastSpin > 1500) {
-      s.working = false; s.status = null;
-      if (s.id !== current && !s.exited) s.awaiting = true;
-      changed = true;
+    if (s.exited || !s.lastSpin) continue; // nooit gewerkt -> niets te melden
+    const idle = now - s.lastSpin;
+    if (s.working && idle > READY_IDLE_MS) { s.working = false; s.status = null; changed = true; }
+    if (!s.working && !s.announced && idle > READY_IDLE_MS + READY_CONFIRM_MS) {
+      s.announced = true; // afgehandeld (ook als je ernaar keek: geen latere melding)
+      if (s.id !== current) {
+        s.awaiting = true;
+        speak(t("tts_ready").replace("{title}", s.title || "agent"));
+        changed = true;
+      }
     }
   }
   if (changed) renderTabs();
@@ -1094,10 +1290,13 @@ async function restartSession(id) {
   closeTabMenu();
   s.term.reset();
   s.term.write(`\x1b[2m[${t("restarting")} ${s.uuid.slice(0, 8)}…]\x1b[0m\r\n`);
-  s.exited = false; s.working = false; s.awaiting = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
+  // Nieuwe generatie: verlate pty-events van het zojuist gekilde proces
+  // (zelfde id!) worden vanaf nu genegeerd (#71).
+  s.gen = ++genSeq;
+  s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
   if (current !== id) showView(id); else renderTabs();
   try {
-    await invoke("restart_session", { id, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
+    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
   } catch (e) { s.term.write(`\r\n\x1b[31m[${t("restart_failed")}: ${e}]\x1b[0m\r\n`); }
 }
 
@@ -1112,11 +1311,17 @@ function openTabMenu(x, y, id) {
   m.innerHTML = `
     <div class="ctx-item" data-act="restart">${t("ctx_restart")}</div>
     <div class="ctx-item" data-act="preview">${t("ctx_preview")}</div>
+    <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
     <div class="ctx-item" data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
   m.querySelector('[data-act="restart"]').addEventListener("click", () => restartSession(id));
   m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
+  m.querySelector('[data-act="speak"]').addEventListener("click", () => {
+    closeTabMenu();
+    const sel = s.term.getSelection();
+    if (sel) speak(sel, true); // force: uitspreken is hier expliciet gevraagd
+  });
   m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
   document.body.appendChild(m);
@@ -1155,7 +1360,24 @@ function doSearch(dir) {
 }
 
 /* ============ instellingen ============ */
+/* ============ instellingen: tabs + hover-uitleg ============ */
+function switchSettingsTab(name) {
+  els.settingsModal.querySelectorAll(".stab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  els.settingsModal.querySelectorAll(".spane").forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
+  hideHelpTip();
+}
+// Vast uitleg-paneel onderin de modal: toont de uitgebreide uitleg van de instelling
+// waar je overheen beweegt. Tekst komt uit de i18n-tabel (help_*), dus de taal volgt.
+// Niets gehoverd -> terug naar de standaard-hint. Een vast paneel i.p.v. een zwevende
+// tooltip zodat het ook in een smal venster (min. 720px) altijd past en leesbaar is.
+function showHelpTip(row) {
+  if (!els.helpTip) return;
+  els.helpTip.textContent = t(row.getAttribute("data-help-key")) || t("help_default");
+}
+function hideHelpTip() { if (els.helpTip) els.helpTip.textContent = t("help_default"); }
+
 function openSettings() {
+  switchSettingsTab("general");
   els.setLang.value = settings.lang;
   els.setFont.value = settings.fontSize;
   els.setScroll.value = settings.scrollback;
@@ -1175,7 +1397,48 @@ function openSettings() {
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
   els.setSkin.value = settings.skin || brandingSkin || (brandHasTheme ? "brand" : "default");
+  // Spraak: stemmen één keer ophalen, STT-modellenlijst + status verversen.
+  els.ttsOn.checked = settings.ttsEnabled;
+  els.ttsRate.value = settings.ttsRate | 0;
+  if (!els.ttsVoiceSel.options.length) {
+    invoke("list_tts_voices").then((vs) => {
+      // Elke stem is "engine|naam"; toon de nette naam, groepeer natuurlijk boven
+      // klassiek. De volledige getagde waarde blijft de option-value (voor speak_text).
+      // v = "engine|taal|naam". Toon "Naam — Taal" (taal leesbaar via Intl.DisplayNames).
+      const langName = (code) => {
+        if (!code) return "";
+        try { return new Intl.DisplayNames([settings.lang || "en"], { type: "language" }).of(code) || code; }
+        catch (_) { return code; }
+      };
+      const opt = (v) => {
+        const p = v.split("|");
+        const name = p.slice(2).join("|") || p.slice(1).join("|") || v; // 3-veld, val terug op oud 2-veld
+        const ln = p.length >= 3 ? langName(p[1]) : "";
+        return `<option value="${escapeHtml(v)}">${escapeHtml(ln ? `${name} — ${ln}` : name)}</option>`;
+      };
+      const nat = vs.filter((v) => v.startsWith("winrt|"));
+      const cls = vs.filter((v) => !v.startsWith("winrt|"));
+      let html = `<option value=""></option>`;
+      if (nat.length) html += `<optgroup label="${escapeHtml(t("voice_natural"))}">${nat.map(opt).join("")}</optgroup>`;
+      if (cls.length) html += `<optgroup label="${escapeHtml(t("voice_classic"))}">${cls.map(opt).join("")}</optgroup>`;
+      els.ttsVoiceSel.innerHTML = html;
+      els.ttsVoiceSel.value = settings.ttsVoice || "";
+    }).catch(() => {});
+  } else {
+    els.ttsVoiceSel.value = settings.ttsVoice || "";
+  }
+  els.sttAutoSend.checked = settings.sttAutoSend;
+  els.sttRegistryInput.value = settings.sttRegistry || "";
+  fillSttModelSelect();
+  refreshSttStatus();
   els.settingsModal.classList.remove("hidden");
+}
+
+function fillSttModelSelect() {
+  els.sttModelSel.innerHTML = sttModels
+    .map((m) => `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}${m.size ? ` (${escapeHtml(m.size)})` : ""}</option>`)
+    .join("");
+  els.sttModelSel.value = currentSttModel()?.name || "";
 }
 function saveSettingsFromForm() {
   const langChanged = settings.lang !== els.setLang.value;
@@ -1195,6 +1458,12 @@ function saveSettingsFromForm() {
   settings.fullPaths = els.setFullPaths.checked;
   settings.persistSessions = els.setPersist.checked;
   settings.skin = els.setSkin.value;
+  settings.ttsEnabled = els.ttsOn.checked;
+  settings.ttsVoice = els.ttsVoiceSel.value;
+  settings.ttsRate = Math.min(10, Math.max(-10, parseInt(els.ttsRate.value) || 0));
+  settings.sttAutoSend = els.sttAutoSend.checked;
+  settings.sttModel = els.sttModelSel.value;
+  settings.sttRegistry = els.sttRegistryInput.value.trim();
   applySkin(settings.skin);
   saveSettings();
   persistSessionsToDisk();
@@ -1209,6 +1478,7 @@ function saveSettingsFromForm() {
     applyI18n(); renderProjects(); renderTabs();
     if (selected) { els.locBadge.textContent = locText(selected.path); els.locBadge.className = "loc-badge " + locClass(selected.path); fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value); }
   }
+  hideHelpTip();
   els.settingsModal.classList.add("hidden");
 }
 
@@ -1503,6 +1773,124 @@ function showFileChooser(file, cwd) {
   list.prepend(row);
 }
 
+/* ============ spraak: TTS + STT ============ */
+// TTS via Windows-native stemmen (SAPI); STT via lokale sherpa-onnx sidecar
+// (Parakeet v3). Modellenbibliotheek: ingebouwde lijst, optioneel vervangen
+// door een registry-JSON zodat nieuwe modellen zonder app-update verschijnen.
+// De sha256-checksums zijn verplicht: de backend weigert een download zonder
+// geldige pin (#69), want de engine is een exe die uitgevoerd wordt. De pins
+// hieronder zijn geverifieerd tegen de digests van de GitHub-release-assets.
+const DEFAULT_STT_MODELS = [
+  {
+    name: "Parakeet TDT 0.6b v3 (int8, EN+EU talen)",
+    engineUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-win-x64-shared-MT-Release.tar.bz2",
+    engineSha256: "0043cd9cdd755d35627299e6a02839e95a262508ae9593af6c5c72ffd674b650",
+    modelUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+    modelSha256: "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
+    size: "~486 MB",
+  },
+];
+let sttModels = [...DEFAULT_STT_MODELS];
+let sttRecording = false;
+let sttBusy = false;
+let sttWantRecording = false; // gewenste staat (F9 ingedrukt = true); reconciler stemt af
+
+function speak(text, force) {
+  if (!force && !settings.ttsEnabled) return;
+  invoke("speak_text", { text, voice: settings.ttsVoice || "", rate: settings.ttsRate | 0 }).catch(() => {});
+}
+
+async function loadSttModels() {
+  if (!settings.sttRegistry) { sttModels = [...DEFAULT_STT_MODELS]; return; }
+  try {
+    const r = await fetch(settings.sttRegistry, { cache: "no-store" });
+    const j = await r.json();
+    if (Array.isArray(j.models) && j.models.length) sttModels = j.models;
+  } catch (_) { /* offline: hou de huidige lijst */ }
+}
+
+function currentSttModel() {
+  return sttModels.find((m) => m.name === settings.sttModel) || sttModels[0];
+}
+
+// Record-widget boven de DROPZONE: live equalizer-niveau + status.
+let sttLevelTimer = null;
+function setRecordLevel(v) {
+  // *2 tilt een stille microfoon wat op; geklemd op 1.
+  if (els.recordWidget) els.recordWidget.style.setProperty("--lvl", String(Math.min(1, v * 2)));
+}
+function startLevelPoll() {
+  stopLevelPoll();
+  sttLevelTimer = setInterval(async () => {
+    try { setRecordLevel(await invoke("stt_level")); } catch (_) {}
+  }, 90);
+}
+function stopLevelPoll() {
+  if (sttLevelTimer) { clearInterval(sttLevelTimer); sttLevelTimer = null; }
+  setRecordLevel(0);
+}
+function setRecordState(s) { // "idle" | "listening" | "transcribing"
+  if (els.recordWidget) {
+    els.recordWidget.classList.toggle("listening", s === "listening");
+    els.recordWidget.classList.toggle("transcribing", s === "transcribing");
+  }
+  if (els.recordStatus) {
+    els.recordStatus.textContent = t(s === "listening" ? "rec_listening" : s === "transcribing" ? "rec_transcribing" : "rec_idle");
+  }
+}
+
+// Opname sturen via een gewenste-staat + reconciler. F9 INHOUDEN zet de wens
+// (down = opnemen, up = stoppen); de 🎙-knop en de opnameknop boven de DROPZONE
+// schakelen de wens om (klik = aan/uit). De reconciler roept stt_toggle alleen aan
+// als werkelijke != gewenste staat, en draait na afloop opnieuw als de wens intussen
+// veranderde -- zo laat een korte F9-tik geen opname hangen. Widget-status:
+// listening tijdens opname, transcribing tijdens de (paar seconden durende) stop.
+function sttPttDown() { sttWantRecording = true; sttReconcile(); }
+function sttPttUp() { sttWantRecording = false; sttReconcile(); }
+function sttToggle() { sttWantRecording = !sttRecording; sttReconcile(); }
+
+async function sttReconcile() {
+  if (sttBusy || sttWantRecording === sttRecording) return;
+  sttBusy = true;
+  const starting = !sttRecording;
+  if (starting) { setRecordState("listening"); startLevelPoll(); }
+  else { setRecordState("transcribing"); stopLevelPoll(); }
+  try {
+    const r = await invoke("stt_toggle");
+    sttRecording = !!r.recording;
+    if (!r.recording && r.text) {
+      const s = sessions.get(current);
+      if (s) {
+        invoke("write_session", { id: s.id, data: r.text + (settings.sttAutoSend ? "\r" : "") });
+      } else {
+        copyToClipboard(r.text);
+        toast(r.text.slice(0, 120), "");
+      }
+    }
+  } catch (e) {
+    sttRecording = false;
+    toast(t("stt_failed") + " " + e, "err");
+  } finally {
+    sttBusy = false;
+    if (!sttRecording) { stopLevelPoll(); setRecordState("idle"); }
+    if (sttWantRecording !== sttRecording) sttReconcile(); // wens veranderde tijdens de invoke
+  }
+}
+
+// Instellingen → Spraak: statusregel + downloadknop, gepolld zolang de modal
+// open staat of er een download loopt.
+async function refreshSttStatus() {
+  let st = { engine: false, model: false, downloading: false };
+  try { st = await invoke("stt_status"); } catch (_) {}
+  const ok = st.engine && st.model;
+  els.sttState.textContent = st.downloading ? t("stt_downloading") : (ok ? t("stt_ready_lbl") : t("stt_missing_lbl"));
+  els.sttState.className = "stt-state " + (ok ? "ok" : "miss");
+  els.sttDownload.disabled = !!st.downloading || ok;
+  if (st.downloading && !els.settingsModal.classList.contains("hidden")) {
+    setTimeout(refreshSttStatus, 3000);
+  }
+}
+
 /* ============ init ============ */
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
@@ -1540,11 +1928,23 @@ window.addEventListener("DOMContentLoaded", () => {
     setFullPaths: document.querySelector("#set-fullpaths"),
     setPersist: document.querySelector("#set-persist"),
     setSkin: document.querySelector("#set-skin"),
+    recordWidget: document.querySelector("#record-widget"),
+    recordBtn: document.querySelector("#record-btn"),
+    recordStatus: document.querySelector("#record-status"),
+    ttsOn: document.querySelector("#set-tts-on"),
+    ttsVoiceSel: document.querySelector("#set-tts-voice"),
+    ttsRate: document.querySelector("#set-tts-rate"),
+    sttModelSel: document.querySelector("#set-stt-model"),
+    sttDownload: document.querySelector("#set-stt-download"),
+    sttState: document.querySelector("#stt-state"),
+    sttAutoSend: document.querySelector("#set-stt-autosend"),
+    sttRegistryInput: document.querySelector("#set-stt-registry"),
     toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
     agentInput: document.querySelector("#agent-input"),
     modelInput: document.querySelector("#model-input"),
     modelSuggestions: document.querySelector("#model-suggestions"),
+    helpTip: document.querySelector("#help-tip"),
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
     editorStatus: document.querySelector("#editor-status"),
@@ -1569,8 +1969,30 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
-  document.querySelector("#settings-cancel").addEventListener("click", () => els.settingsModal.classList.add("hidden"));
+  document.querySelector("#settings-cancel").addEventListener("click", () => { hideHelpTip(); els.settingsModal.classList.add("hidden"); });
+  // Spraak: mic-knop + F9-event uit de backend + instellingen-acties.
+  els.recordBtn.addEventListener("click", sttToggle); // grote opnameknop boven de DROPZONE
+  listen("stt-ptt-down", sttPttDown); // F9 ingedrukt -> opnemen
+  listen("stt-ptt-up", sttPttUp);     // F9 losgelaten -> stoppen + transcriberen
+  document.querySelector("#set-tts-test").addEventListener("click", () => {
+    // Test met de NU gekozen (nog niet opgeslagen) stem/snelheid.
+    invoke("speak_text", { text: t("tts_ready").replace("{title}", "Taurus"), voice: els.ttsVoiceSel.value, rate: parseInt(els.ttsRate.value) || 0 }).catch(() => {});
+  });
+  document.querySelector("#set-stt-download").addEventListener("click", async () => {
+    const m = sttModels.find((x) => x.name === els.sttModelSel.value) || sttModels[0];
+    if (!m) return;
+    try { await invoke("stt_download", { engineUrl: m.engineUrl, engineSha256: m.engineSha256 || "", modelUrl: m.modelUrl, modelSha256: m.modelSha256 || "" }); } catch (e) { toast("✗ " + e, "err"); }
+    refreshSttStatus();
+  });
+  document.querySelector("#set-stt-refresh").addEventListener("click", async () => {
+    settings.sttRegistry = els.sttRegistryInput.value.trim();
+    await loadSttModels();
+    fillSttModelSelect();
+  });
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
+  // Tabs in het instellingen-menu + hover-uitleg per instelling.
+  els.settingsModal.querySelectorAll(".stab").forEach((b) => b.addEventListener("click", () => switchSettingsTab(b.dataset.tab)));
+  els.settingsModal.addEventListener("mouseover", (e) => { const row = e.target.closest("[data-help-key]"); if (row) showHelpTip(row); else hideHelpTip(); });
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
   document.querySelector("#editor-save").addEventListener("click", saveEditor);
   document.querySelector("#editor-add").addEventListener("click", () => { editRows.push(blankRow()); renderEditor(); });
@@ -1595,6 +2017,7 @@ window.addEventListener("DOMContentLoaded", () => {
   applyI18n();
   wireGarble();
   wireFileDropper();
+  loadSttModels();
   // Expliciete skin-keuze meteen toepassen (geen flits); applyBranding() vult
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);
