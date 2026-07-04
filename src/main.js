@@ -218,8 +218,10 @@ async function applyBranding() {
     // ingebouwde skins staat en niemand het per ongeluk overschrijft. Het label
     // in de Thema-lijst komt uit de lokale branding (skinName/appName) — er staat
     // dus niets merkspecifieks in de publieke code.
+    // Ook ';' weren (net als bij font hieronder): anders injecteert een waarde
+    // als "red; background:url(...)" extra CSS-declaraties (#78).
     const decls = Object.entries(b.theme)
-      .filter(([k, v]) => /^--[\w-]+$/.test(k) && typeof v === "string" && !/[<>{}]/.test(v))
+      .filter(([k, v]) => /^--[\w-]+$/.test(k) && typeof v === "string" && !/[<>{};]/.test(v))
       .map(([k, v]) => `${k}: ${v};`);
     // Optioneel UI-lettertype hoort bij de merk-skin (overschrijft --ui-font).
     if (typeof b.font === "string" && b.font.trim() && !/[<>{};]/.test(b.font)) {
