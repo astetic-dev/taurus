@@ -794,7 +794,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
-    exited: false, working: false, awaiting: false, status: null, lastSpin: 0, buf: "",
+    exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
   };
   sessions.set(id, session);
@@ -1223,13 +1223,19 @@ listen("pty-output", (event) => {
   s.term.write(u8);
   let render = false;
   if (!s.exited) {
-    s.buf = (s.buf + stripAnsi(s.decoder.decode(u8, { stream: true }))).slice(-600);
+    // Grotere buffer (4000) zodat de status-/spinnerregel niet uit beeld schuift bij
+    // een output-piek -- anders leek de agent "klaar" terwijl 'ie doorwerkte.
+    s.buf = (s.buf + stripAnsi(s.decoder.decode(u8, { stream: true }))).slice(-4000);
     const verb = lastSpinnerVerb(s.buf);
-    if (verb) {
+    // "Bezig"-signaal: een spinner-werkwoord OF Claude's "(esc to interrupt)"-hint,
+    // die de hele beurt getoond wordt (ook tijdens tools/streamen) en dus veel
+    // betrouwbaarder is dan "geen spinner gezien".
+    const busy = !!verb || /\besc to interrupt\b/i.test(s.buf);
+    if (busy) {
       s.lastSpin = Date.now();
-      // Claude is (weer) bezig -> geen flash; markeer werkend.
+      s.announced = false; // (weer) bezig -> een latere idle mag opnieuw melden
       if (!s.working || s.awaiting) { s.working = true; s.awaiting = false; render = true; }
-      if (settings.tabStatus && s.status !== verb) { s.status = verb; render = true; }
+      if (settings.tabStatus && verb && s.status !== verb) { s.status = verb; render = true; }
     }
   }
   if (render) renderTabs();
@@ -1238,18 +1244,26 @@ listen("pty-exit", (event) => {
   const s = sessions.get(event.payload);
   if (s) { s.exited = true; s.working = false; s.awaiting = false; s.status = null; s.term.write(`\r\n\x1b[2m${t("ended")}\x1b[0m\r\n`); renderTabs(); }
 });
+// "Klaar" = langere tijd GEEN bezig-signaal, mét bevestigingsvenster tegen valse
+// meldingen: na READY_IDLE_MS valt "werkend" weg, en pas na nog eens READY_CONFIRM_MS
+// stabiel idle flashen/spreken we. Keert de spinner in dat venster terug, dan wist de
+// pty-handler s.working/announced en gebeurt er niets (geen valse "klaar"). Per beurt
+// hooguit één melding (s.announced), en alleen voor een tab die je niet bekijkt.
+const READY_IDLE_MS = 3000;
+const READY_CONFIRM_MS = 2000;
 setInterval(() => {
   let changed = false; const now = Date.now();
   for (const s of sessions.values()) {
-    // Spinner ~1,5s niet gezien -> beurt klaar. Wacht op input = flash (mits niet actief).
-    if (s.working && now - s.lastSpin > 1500) {
-      s.working = false; s.status = null;
-      if (s.id !== current && !s.exited) {
+    if (s.exited || !s.lastSpin) continue; // nooit gewerkt -> niets te melden
+    const idle = now - s.lastSpin;
+    if (s.working && idle > READY_IDLE_MS) { s.working = false; s.status = null; changed = true; }
+    if (!s.working && !s.announced && idle > READY_IDLE_MS + READY_CONFIRM_MS) {
+      s.announced = true; // afgehandeld (ook als je ernaar keek: geen latere melding)
+      if (s.id !== current) {
         s.awaiting = true;
-        // Hoorbare melding naast de tab-flash (optioneel, Instellingen → Spraak).
         speak(t("tts_ready").replace("{title}", s.title || "agent"));
+        changed = true;
       }
-      changed = true;
     }
   }
   if (changed) renderTabs();
@@ -1262,7 +1276,7 @@ async function restartSession(id) {
   closeTabMenu();
   s.term.reset();
   s.term.write(`\x1b[2m[${t("restarting")} ${s.uuid.slice(0, 8)}…]\x1b[0m\r\n`);
-  s.exited = false; s.working = false; s.awaiting = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
+  s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
   if (current !== id) showView(id); else renderTabs();
   try {
     await invoke("restart_session", { id, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
