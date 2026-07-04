@@ -684,6 +684,23 @@ fn unique_path(dest: std::path::PathBuf) -> std::path::PathBuf {
     }
 }
 
+// Ligt de (nog niet bestaande) bestemming BINNEN de bron? Dan zou
+// copy_recursive de map in zichzelf blijven kopieren tot de schijf vol is
+// (bv. de werkmap zelf op de dropzone slepen: dest = <src>\input\<naam>).
+// We canonicaliseren beide kanten zodat relatieve paden, symlinks en
+// verschillend hoofdlettergebruik geen vals negatief opleveren (#70).
+fn dest_inside_src(src: &Path, dest: &Path) -> bool {
+    let src_c = match std::fs::canonicalize(src) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    // dest bestaat nog niet; de ouder (de input-map) wel — die is net aangemaakt.
+    dest.parent()
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .map(|p| p.starts_with(&src_c))
+        .unwrap_or(false)
+}
+
 // Kopieer een bestand of (recursief) een hele map naar `dest`.
 fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
     if src.is_dir() {
@@ -716,6 +733,12 @@ fn save_dropped_path(src: String, cwd: String, mode: String) -> Result<String, S
     let input_dir = Path::new(&cwd).join("input");
     std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
     let dest = unique_path(input_dir.join(name));
+    if dest_inside_src(src_path, &dest) {
+        return Err(format!(
+            "bestemming ligt binnen de bron (map zou in zichzelf gekopieerd worden): {}",
+            src
+        ));
+    }
 
     match mode.as_str() {
         "move" => {
@@ -806,6 +829,12 @@ fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, S
                 None => continue,
             };
             let dest = unique_path(input_dir.join(name));
+            if dest_inside_src(src, &dest) {
+                return Err(format!(
+                    "bestemming ligt binnen de bron (map zou in zichzelf gekopieerd worden): {}",
+                    f
+                ));
+            }
             copy_recursive(src, &dest).map_err(|e| e.to_string())?;
             saved.push(dest.to_string_lossy().into_owned());
         }
