@@ -1936,3 +1936,132 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+// Unit-tests voor de pure helpers (#82). De grotere opsplitsing in modules
+// (en JS-tests na de ES-module-split) blijft in issue #82 openstaan.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn b64_matches_rfc4648_vectors() {
+        assert_eq!(b64(b""), "");
+        assert_eq!(b64(b"f"), "Zg==");
+        assert_eq!(b64(b"fo"), "Zm8=");
+        assert_eq!(b64(b"foo"), "Zm9v");
+        assert_eq!(b64(b"foob"), "Zm9vYg==");
+        assert_eq!(b64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(b64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(b64(&[0xff, 0x00, 0xee]), "/wDu");
+    }
+
+    #[test]
+    fn split_command_plain_and_quoted() {
+        assert_eq!(split_command("a b c"), vec!["a", "b", "c"]);
+        assert_eq!(
+            split_command(r#""C:\Program Files\tool.exe" --flag "an arg""#),
+            vec![r"C:\Program Files\tool.exe", "--flag", "an arg"]
+        );
+        assert!(split_command("   ").is_empty());
+        assert!(split_command(r#""""#).is_empty());
+        assert!(parse_override(r#""""#).is_err());
+        assert_eq!(
+            parse_override("prog -x").unwrap(),
+            ("prog".to_string(), vec!["-x".to_string()])
+        );
+    }
+
+    #[test]
+    fn norm_title_falls_back_and_trims() {
+        assert_eq!(norm_title("  "), "agent");
+        assert_eq!(norm_title(" ZGV-debug "), "ZGV-debug");
+    }
+
+    #[test]
+    fn logo_mime_by_extension() {
+        assert_eq!(logo_mime("a.SVG"), "image/svg+xml");
+        assert_eq!(logo_mime("a.jpeg"), "image/jpeg");
+        assert_eq!(logo_mime("a.webp"), "image/webp");
+        assert_eq!(logo_mime("a.png"), "image/png");
+        assert_eq!(logo_mime("noext"), "image/png");
+    }
+
+    #[test]
+    fn claude_session_file_encodes_the_path() {
+        let p = claude_session_file(r"C:\Users\AST\claude\Taurus", "uuid-1");
+        let s = p.to_string_lossy().into_owned();
+        assert!(s.contains("C--Users-AST-claude-Taurus"), "{}", s);
+        assert!(s.ends_with("uuid-1.jsonl"), "{}", s);
+    }
+
+    #[test]
+    fn build_command_claude_create_and_resume() {
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true);
+        assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
+        assert!(a.windows(2).any(|w| w == ["--permission-mode", "plan"]));
+        assert!(a.windows(2).any(|w| w == ["--model", "opus"]));
+        assert!(a.contains(&"--append-system-prompt".to_string()));
+        assert_eq!(a.last().unwrap(), "do it");
+
+        let (_, r) = build_command("claude", LaunchKind::Resume, "u1", "t", "do it", "default", "", false);
+        assert_eq!(r[0..2], ["--resume".to_string(), "u1".to_string()]);
+        // Bij resume geen taak meesturen en geen --permission-mode "default".
+        assert!(!r.contains(&"do it".to_string()));
+        assert!(!r.contains(&"--permission-mode".to_string()));
+    }
+
+    #[test]
+    fn build_command_agy_resume_continues_without_task() {
+        let (_, a) = build_command("agy", LaunchKind::Resume, "u1", "t", "task", "auto", "", true);
+        assert!(a.contains(&"--continue".to_string()));
+        assert!(a.contains(&"--dangerously-skip-permissions".to_string()));
+        // agy kent geen prompt bij --continue en geen full-paths-equivalent.
+        assert!(!a.contains(&"--prompt-interactive".to_string()));
+        assert!(!a.contains(&"--append-system-prompt".to_string()));
+    }
+
+    #[test]
+    fn unique_path_appends_a_counter() {
+        let dir = std::env::temp_dir().join(format!("taurus-test-unique-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("x.txt");
+        assert_eq!(unique_path(f.clone()), f);
+        std::fs::write(&f, "a").unwrap();
+        assert_eq!(unique_path(f.clone()), dir.join("x (2).txt"));
+        std::fs::write(dir.join("x (2).txt"), "b").unwrap();
+        assert_eq!(unique_path(f.clone()), dir.join("x (3).txt"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dest_inside_src_detects_self_copy() {
+        let root = std::env::temp_dir().join(format!("taurus-test-nest-{}", std::process::id()));
+        let input = root.join("input");
+        std::fs::create_dir_all(&input).unwrap();
+        // De werkmap zelf droppen: dest = <root>\input\<naam> ligt binnen root.
+        assert!(dest_inside_src(&root, &input.join("root")));
+        // Een bestand van elders is prima.
+        let elsewhere = std::env::temp_dir().join(format!("taurus-test-else-{}", std::process::id()));
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        assert!(!dest_inside_src(&elsewhere, &input.join("file.txt")));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    #[test]
+    fn verify_sha256_rejects_bad_pins_and_mismatches() {
+        let f = std::env::temp_dir().join(format!("taurus-test-sha-{}.bin", std::process::id()));
+        std::fs::write(&f, b"hello").unwrap();
+        // "hello" -> bekende SHA-256.
+        let good = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        assert!(verify_sha256(&f, good).is_ok());
+        assert!(verify_sha256(&f, &good.to_uppercase()).is_ok());
+        // Ongeldige pin (te kort / geen hex) wordt geweigerd.
+        std::fs::write(&f, b"hello").unwrap();
+        assert!(verify_sha256(&f, "abc").is_err());
+        // Mismatch: fout EN het bestand is verwijderd.
+        let wrong = "0000000000000000000000000000000000000000000000000000000000000000";
+        assert!(verify_sha256(&f, wrong).is_err());
+        assert!(!f.exists());
+    }
+}
