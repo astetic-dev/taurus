@@ -78,11 +78,31 @@ fn ensure_config() -> std::path::PathBuf {
     p
 }
 
+// Parse mislukt maar het bestand bestaat: zet het veilig opzij. Zonder backup
+// toont de UI een lege lijst en overschrijft de eerstvolgende save het
+// origineel — een herstelbare tikfout (hand-editen) werd zo dataverlies (#74).
+fn backup_invalid(p: &Path) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name = format!(
+        "{}.invalid-{}",
+        p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        ts
+    );
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::copy(p, dir.join(name));
+    }
+}
+
 #[tauri::command]
 fn get_projects() -> Vec<Project> {
-    if let Ok(txt) = std::fs::read_to_string(ensure_config()) {
-        if let Ok(list) = serde_json::from_str::<Vec<Project>>(&txt) {
-            return list;
+    let p = ensure_config();
+    if let Ok(txt) = std::fs::read_to_string(&p) {
+        match serde_json::from_str::<Vec<Project>>(&txt) {
+            Ok(list) => return list,
+            Err(_) => backup_invalid(&p),
         }
     }
     default_projects()
@@ -185,9 +205,12 @@ fn save_sessions(sessions: Vec<PersistedSession>) -> Result<(), String> {
 
 #[tauri::command]
 fn get_sessions() -> Vec<PersistedSession> {
-    if let Ok(txt) = std::fs::read_to_string(sessions_path()) {
-        if let Ok(list) = serde_json::from_str::<Vec<PersistedSession>>(&txt) {
-            return list;
+    let p = sessions_path();
+    if let Ok(txt) = std::fs::read_to_string(&p) {
+        match serde_json::from_str::<Vec<PersistedSession>>(&txt) {
+            Ok(list) => return list,
+            // Corrupt: opzij zetten, anders wist persistSessionsToDisk het zo (#74).
+            Err(_) => backup_invalid(&p),
         }
     }
     Vec::new()
