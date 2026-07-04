@@ -342,8 +342,10 @@ fn start_pty(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let chunk = buf[..n].to_vec();
-                    if app2.emit("pty-output", (id2.clone(), gen, chunk)).is_err() {
+                    // Base64 i.p.v. Vec<u8>: Tauri serialiseert events als JSON,
+                    // en een byte-array wordt dan een array van getallen (3-4x
+                    // zo groot + parse-kosten) op het heetste pad van de app (#73).
+                    if app2.emit("pty-output", (id2.clone(), gen, b64(&buf[..n]))).is_err() {
                         break;
                     }
                 }

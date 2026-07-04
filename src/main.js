@@ -1225,10 +1225,11 @@ function lastSpinnerVerb(buf) {
 
 /* ============ PTY-events ============ */
 listen("pty-output", (event) => {
-  const [sid, gen, bytes] = event.payload;
+  const [sid, gen, data] = event.payload;
   const s = sessions.get(sid);
   if (!s || s.gen !== gen) return; // verlaat event van een vorige generatie
-  const u8 = new Uint8Array(bytes);
+  // data is base64 (één string i.p.v. duizenden JSON-getallen per chunk, #73).
+  const u8 = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
   s.term.write(u8);
   let render = false;
   if (!s.exited) {
