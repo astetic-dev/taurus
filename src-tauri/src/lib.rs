@@ -281,10 +281,14 @@ struct AppState {
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
+// `gen` is de generatieteller van de frontend: pty-output/pty-exit dragen hem
+// mee, zodat een VERLAAT event van een gekild proces (herstart hergebruikt het
+// id) nooit de nieuwe incarnatie als "beëindigd" kan markeren (#71).
 fn start_pty(
     app: &AppHandle,
     sessions: &Mutex<HashMap<String, Session>>,
     id: String,
+    gen: u64,
     program: String,
     path: &str,
     args: Vec<String>,
@@ -339,14 +343,14 @@ fn start_pty(
                 Ok(0) => break,
                 Ok(n) => {
                     let chunk = buf[..n].to_vec();
-                    if app2.emit("pty-output", (id2.clone(), chunk)).is_err() {
+                    if app2.emit("pty-output", (id2.clone(), gen, chunk)).is_err() {
                         break;
                     }
                 }
                 Err(_) => break,
             }
         }
-        let _ = app2.emit("pty-exit", id2.clone());
+        let _ = app2.emit("pty-exit", (id2.clone(), gen));
     });
 
     sessions.lock().unwrap().insert(
@@ -465,6 +469,7 @@ fn create_session(
     app: AppHandle,
     state: State<AppState>,
     id: String,
+    gen: u64,
     path: String,
     title: String,
     task: String,
@@ -495,7 +500,7 @@ fn create_session(
             full_paths,
         )
     };
-    start_pty(&app, &state.sessions, id, program, &path, args, cols, rows)
+    start_pty(&app, &state.sessions, id, gen, program, &path, args, cols, rows)
 }
 
 // Herstart een sessie: stop het huidige claude-proces en hervat hetzelfde gesprek
@@ -505,6 +510,7 @@ fn restart_session(
     app: AppHandle,
     state: State<AppState>,
     id: String,
+    gen: u64,
     path: String,
     title: String,
     session_id: String,
@@ -537,7 +543,7 @@ fn restart_session(
             full_paths,
         )
     };
-    start_pty(&app, &state.sessions, id, program, &path, args, cols, rows)
+    start_pty(&app, &state.sessions, id, gen, program, &path, args, cols, rows)
 }
 
 #[tauri::command]

@@ -414,6 +414,10 @@ let projects = [];
 let selected = null;
 let current = "new";
 let seq = 0;
+// Generatieteller per (her)start: pty-events dragen de gen mee, zodat een
+// verlaat event van een gekild proces (herstart hergebruikt het sessie-id)
+// nooit de nieuwe incarnatie raakt (#71).
+let genSeq = 0;
 const sessions = new Map();
 const els = {};
 
@@ -794,6 +798,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
+    gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
   };
@@ -921,7 +926,7 @@ async function startSession() {
 
   const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model });
   try {
-    await invoke("create_session", { id, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), cols: session.term.cols, rows: session.term.rows });
+    await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), cols: session.term.cols, rows: session.term.rows });
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -1006,7 +1011,7 @@ async function restoreSessions() {
     session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
     try {
       await invoke("restart_session", {
-        id, path: meta.path, title: session.title, sessionId: uuid,
+        id, gen: session.gen, path: meta.path, title: session.title, sessionId: uuid,
         mode: session.mode, fullPaths: settings.fullPaths, command: "",
         agent: session.agent, model: resolveModelArg(session.agent, session.model),
         cols: session.term.cols, rows: session.term.rows,
@@ -1216,9 +1221,9 @@ function lastSpinnerVerb(buf) {
 
 /* ============ PTY-events ============ */
 listen("pty-output", (event) => {
-  const [sid, bytes] = event.payload;
+  const [sid, gen, bytes] = event.payload;
   const s = sessions.get(sid);
-  if (!s) return;
+  if (!s || s.gen !== gen) return; // verlaat event van een vorige generatie
   const u8 = new Uint8Array(bytes);
   s.term.write(u8);
   let render = false;
@@ -1241,8 +1246,10 @@ listen("pty-output", (event) => {
   if (render) renderTabs();
 });
 listen("pty-exit", (event) => {
-  const s = sessions.get(event.payload);
-  if (s) { s.exited = true; s.working = false; s.awaiting = false; s.status = null; s.term.write(`\r\n\x1b[2m${t("ended")}\x1b[0m\r\n`); renderTabs(); }
+  const [sid, gen] = event.payload;
+  const s = sessions.get(sid);
+  if (!s || s.gen !== gen) return; // exit van een gekilde vorige generatie: negeren
+  s.exited = true; s.working = false; s.awaiting = false; s.status = null; s.term.write(`\r\n\x1b[2m${t("ended")}\x1b[0m\r\n`); renderTabs();
 });
 // "Klaar" = langere tijd GEEN bezig-signaal, mét bevestigingsvenster tegen valse
 // meldingen: na READY_IDLE_MS valt "werkend" weg, en pas na nog eens READY_CONFIRM_MS
@@ -1276,10 +1283,13 @@ async function restartSession(id) {
   closeTabMenu();
   s.term.reset();
   s.term.write(`\x1b[2m[${t("restarting")} ${s.uuid.slice(0, 8)}…]\x1b[0m\r\n`);
+  // Nieuwe generatie: verlate pty-events van het zojuist gekilde proces
+  // (zelfde id!) worden vanaf nu genegeerd (#71).
+  s.gen = ++genSeq;
   s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
   if (current !== id) showView(id); else renderTabs();
   try {
-    await invoke("restart_session", { id, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
+    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
   } catch (e) { s.term.write(`\r\n\x1b[31m[${t("restart_failed")}: ${e}]\x1b[0m\r\n`); }
 }
 
