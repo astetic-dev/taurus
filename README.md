@@ -1,19 +1,21 @@
 # Taurus — Agent Launcher
 
-[![Taurus — Agent Launcher (click to watch the explainer)](media/screenshot.png)](https://youtu.be/ofswaJBX39k)
+[![Taurus — Agent Launcher (click to watch the features tour)](media/hero-features.png)](https://www.youtube.com/watch?v=TAyZlhlvigw)
 
-<sub>▶ Click the image to watch the explainer on YouTube.</sub>
+<sub>▶ Click the image to watch the **features tour** on YouTube.</sub>
 
 A small Tauri desktop app that runs and manages multiple **Claude Code** agents as
-**terminal tabs in one window**.
+**terminal tabs in one window** — with voice, a file DROPZONE and an inline
+HTML/Markdown viewer built in.
 
-_▶ Watch: [15-second teaser](https://youtu.be/7WDtN5giKSk) · [full explainer](https://youtu.be/ofswaJBX39k)._ Each agent starts in the working folder you pick,
-so you never have to wonder whether you're on a local (`C:`) or network (`X:`) path.
+_▶ Watch: [features tour](https://www.youtube.com/watch?v=TAyZlhlvigw) ·
+[original explainer](https://youtu.be/ofswaJBX39k) ·
+[15-second teaser](https://youtu.be/7WDtN5giKSk)._
 
-Pick a project on the left, see the folder + a **LOCAL / NETWORK** badge, give the
-session a title, choose a mode, and hit **Start** — the agent opens as an embedded
-terminal tab. Open several, switch between them, and let a tab flash in its own
-colour when an agent is done and waiting for you.
+Pick or create an agent on the left, see the folder + a **(C:) / (X:)** drive tag,
+give the session a title, choose a mode, and hit **Start** — the agent opens as an
+embedded terminal tab. Open several, drag them into the order you want, and let a
+tab flash in its own colour (or speak up) when an agent is done and waiting for you.
 
 > Windows-only for now (uses ConPTY + Windows Terminal-style embedding).
 
@@ -41,46 +43,93 @@ consistently. That's what Taurus is for.
 
 ## Features
 
+### Agents in tabs
+
 - **Embedded terminals with tabs** — each agent runs inside the window (xterm.js +
-  ConPTY via `portable-pty`); click tabs to switch.
-- **Attention flash** — a tab flashes in its own colour only when its agent has
-  finished and is waiting for input (a working agent shows a steady green dot).
-- **Live status** — optionally shows Claude's current activity verb on the tab.
-- **In-app project editor** — add/edit/remove launch buttons (name, folder with a
-  browse dialog, colour, default title/task, mode).
-- **Per-project mode** — start in `default`, `plan` or `auto` (`--permission-mode`).
-- **Per-project agent + model** — launch `claude` (Claude Code) or `agy` (a
-  Gemini-backed agent CLI), optionally pinned to a model, set per project and
-  overridable per session.
-- **Voice** — the terminal talks and listens. TTS via the Windows-native
-  voices (optional "agent is ready" announcement, right-click a tab to speak
-  the selection; voice/rate in Settings). Push-to-talk STT: F9 or the 🎙
-  button records, a local sherpa-onnx sidecar transcribes (NVIDIA Parakeet
-  TDT v3 by default, downloaded on demand from Settings → Voice), and the
-  text lands at the active prompt. Fully offline; the model list can follow
-  a registry URL so new models appear without an app update.
-- **Inline HTML preview** — right-click a tab → *HTML preview*, or click an `.html`
-  path in the terminal; it renders beside (or instead of) the terminal.
-- **Restart / resume** — right-click a tab to restart the session and resume the
-  same conversation (handy after updating an MCP server). Note for `agy`: it has
-  no session ids, so a restart uses `--continue` and resumes the **most recent**
-  conversation in that working folder — with several agy sessions in the same
-  folder they all resume the latest one.
-- **Open folder in Explorer**, **search** (Ctrl+Shift+F), **copy/paste**, font zoom
-  (Ctrl+= / - / 0), tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W) — all toggleable.
-- **EN / NL** language switch.
-- **White-label & skins** — rebrand from a local `branding.json` (name, logo,
-  colours), and pick a visual skin (retro Mac/Windows, XP, Aqua, green-CRT
-  terminal) in Settings. See [Branding](#branding-white-label).
+  ConPTY via `portable-pty`); click tabs to switch, **drag to reorder** them.
+- **The AGENTS sidebar** — one-line cards with a tinted **(C:) / (X:) / (UNC)**
+  drive tag so local vs network is obvious at a glance. Drag cards to reorder;
+  hover for edit/delete; **＋ Add agent** on the launch form saves a one-off
+  straight into the menu.
+- **Attention flash + voice** — a tab flashes in its own colour only when its agent
+  has *really* finished (busy detection with a confirmation window against false
+  "ready" alerts), and can announce it out loud ("Porter is ready").
+- **Live status** — optionally shows Claude's current activity verb on the tab
+  (✶ Orbiting…).
+- **Per-project agent, model & mode** — launch `claude` (Claude Code) or `agy`
+  (a Gemini-backed agent CLI), optionally pinned to a model, in `default`, `plan`
+  or `auto` (`--permission-mode`); all set per project, overridable per session.
+- **Restart / resume** — right-click a tab to restart and resume the same
+  conversation; optionally **remember sessions and resume them on startup**.
+  (`agy` has no session ids, so a restart resumes the folder's most recent
+  conversation.)
+- Works with a **native `claude.exe` or an npm install** — `.cmd`/`.bat` shims
+  (`npm i -g @anthropic-ai/claude-code`) are resolved and launched correctly.
 
-## Requirements
+### Voice
 
-- [Node.js](https://nodejs.org/) and [Rust](https://rustup.rs/) (MSVC toolchain)
+- **Talk to your agent (push-to-talk STT)** — hold **F9** or click the round
+  record button above the DROPZONE; a live level ring shows *Listening…*, release
+  (or click again) and the transcript lands at the active prompt (optionally sent
+  immediately). Speech-to-text runs **fully offline** via a local sherpa-onnx
+  sidecar (NVIDIA Parakeet TDT v3 by default, downloaded on demand from
+  Settings → Voice, hash-pinned). The model list can follow a registry URL so new
+  models appear without an app update.
+- **Your agent talks back (TTS)** — Windows voices, including the **natural
+  (neural) ones** when installed, grouped and labelled with their language
+  (e.g. *Microsoft Frank — Dutch*). Optional "agent is ready" announcement for
+  background tabs, speak-the-selection from a tab's context menu, and a
+  slow-to-fast rate slider.
+
+### DROPZONE
+
+- **Hand files to your agent, locally.** Drag a file or folder onto the sidebar
+  DROPZONE and pick **Move**, **Copy** (into the agent's `input/` folder) or
+  **Path only**; the full path is inserted at the active prompt so you can
+  immediately ask the agent to work on it. Paste works too (clipboard text, an
+  image, or a file copied in Explorer), and ＋ opens a file picker. Nothing is
+  ever uploaded anywhere — local files, local agent, local tools.
+
+### Inline viewer
+
+- **HTML preview** — click an `.html` path in the terminal (or right-click a tab →
+  *HTML preview*); it renders in a sandboxed pane beside (or instead of) the
+  terminal. External links open in your default browser; `mailto:` opens your
+  mail client.
+- **Markdown preview** — `.md` files render inline too: GFM **tables** (with
+  alignment), **task lists**, strikethrough, code blocks, working in-document
+  anchors — with a **`</>` raw/rendered toggle**. Rendering is escape-first
+  (raw HTML in a document can never execute) and `javascript:`/`data:` links are
+  stripped to plain text.
+
+### Comfort & polish
+
+- **Settings in tabs** (General / Theme / HTML preview / Terminal / Voice) with
+  per-setting hover help.
+- Search the scrollback (Ctrl+Shift+F), copy-on-select, right-click paste,
+  Ctrl+Shift+C/V, clickable links, font zoom (Ctrl+= / − / 0), tab shortcuts
+  (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W), agent-mouse toggle — all toggleable.
+- **EN / NL** — the default follows your OS language; your choice wins.
+- **White-label & skins** — rebrand from a local `branding.json` and pick from ten
+  visual skins. See [Branding](#branding-white-label).
+
+## Install
+
+Grab the latest release from the
+[**releases page**](https://github.com/astetic-dev/taurus/releases):
+`*-setup.exe` (installer), `.msi`, or the **portable** exe (no install).
+
+Requirements:
+
 - WebView2 runtime (preinstalled on Windows 11)
-- Windows Terminal (`wt`) — optional
-- The **Claude Code CLI** (`claude.exe`) available on your `PATH`
+- The **Claude Code CLI** on your `PATH` — native installer or
+  `npm install -g @anthropic-ai/claude-code` (both work)
+- For dictation: a microphone + the STT model (one-time download from
+  Settings → Voice, ~490 MB, stays on your machine)
 
 ## Develop
+
+[Node.js](https://nodejs.org/) and [Rust](https://rustup.rs/) (MSVC toolchain):
 
 ```powershell
 npm install
@@ -100,7 +149,7 @@ Output:
 ## Configuration
 
 Projects live in `%APPDATA%\Taurus\projects.json` (per user, created on first run).
-Edit them with the in-app **Projects** editor, or by hand. Format:
+Edit them with the in-app **Agents** editor, or by hand. Format:
 
 ```json
 [
@@ -163,7 +212,7 @@ Taurus; remove it to get Taurus back. Every field is optional:
 - `font` sets the UI font family (e.g. `"'IBM Plex Mono', monospace"`). IBM Plex
   Mono ships bundled (offline); any installed/CSS font name also works.
 - `garble` (`true`/`false`) toggles the hover **letter-scramble** effect on the
-  sidebar buttons, project cards and tab titles. It's on by default for a branded
+  sidebar buttons, agent cards and tab titles. It's on by default for a branded
   theme; set `false` to disable.
 - `logo` is an absolute path; it's read at startup and inlined as a data URI.
 - The in-app branding above is runtime/config-driven. To also change the
@@ -215,8 +264,19 @@ Unzip and run — no setup. A `branding.json` in `%APPDATA%\Taurus\` takes
 precedence over the one next to the exe. To also rebrand the installer's product
 name, build with a Tauri config overlay (`--config`).
 
+## Demo mode
+
+Want to show Taurus (or record a video) without exposing real projects?
+`demo\demo-on.ps1` backs up your config and swaps in two demo agents backed by a
+**fake Claude** (`mock-claude.mjs`) — no real data or MCP is ever touched.
+`demo\demo-off.ps1` restores your own configuration.
+
 ## How it works
 
 - Frontend: `src/` — vanilla HTML/CSS/JS (xterm.js vendored in `src/vendor/`).
 - Backend: `src-tauri/src/lib.rs` — Rust commands for project config, the native
-  folder picker, and the ConPTY sessions (`create/restart/write/resize/close`).
+  folder picker, the ConPTY sessions (`create/restart/write/resize/close`), voice
+  (Windows TTS + the sherpa-onnx STT sidecar) and the DROPZONE file operations.
+- Previews render in a **sandboxed iframe** (no same-origin, scripts contained);
+  Markdown is rendered escape-first by a small built-in renderer, so documents
+  can't inject HTML/JS into the app.
