@@ -23,7 +23,10 @@ const I18N = {
     launch_mode: "Modus", mode_default: "Standaard", mode_plan: "Plan-modus", mode_auto: "Auto (accepteert acties)",
     mode_sandbox: "Sandbox (beperkte rechten)",
     launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
-    launch_model: "Model", model_ph: "standaard", model_hint: "Leeg = de standaard van de agent.",
+    launch_model: "Model", model_ph: "standaard",
+    model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exact model-ID mag ook.",
+    model_fable: "nieuwste Fable", model_opus: "nieuwste Opus", model_sonnet: "nieuwste Sonnet",
+    model_haiku: "nieuwste Haiku", model_opusplan: "Opus in plan-modus, daarna Sonnet",
     cap_agent: "Agent", cap_model: "Model (leeg = standaard)",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
@@ -111,7 +114,10 @@ const I18N = {
     launch_mode: "Mode", mode_default: "Default", mode_plan: "Plan mode", mode_auto: "Auto (accepts actions)",
     mode_sandbox: "Sandbox (restricted)",
     launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
-    launch_model: "Model", model_ph: "default", model_hint: "Empty = the agent's default.",
+    launch_model: "Model", model_ph: "default",
+    model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact model ID works too.",
+    model_fable: "newest Fable", model_opus: "newest Opus", model_sonnet: "newest Sonnet",
+    model_haiku: "newest Haiku", model_opusplan: "Opus in plan mode, Sonnet after",
     cap_agent: "Agent", cap_model: "Model (empty = default)",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
@@ -332,22 +338,35 @@ function wireGarble() {
 // Welke agent-CLIs Taurus kan starten. De losse gemini-CLI is end-of-life en
 // staat hier bewust niet bij; "agy" is de ondersteunde Gemini-agent.
 const AGENTS = ["claude", "agy"];
-// Claude Code's --model accepteert een alias of een exact model-ID, geen vrije
-// weergavenaam (anders dan agy). We tonen nette namen als suggestie en vertalen
-// die in resolveModelArg() naar het model-ID dat de CLI accepteert; een alias of
-// ID die je zelf typt gaat ongewijzigd door. De opgeslagen/getoonde waarde blijft
-// de nette naam.
-const CLAUDE_MODELS = {
+// Een vastgepinde modellijst veroudert bij elke modelrelease (#92), dus pinnen
+// we niets meer: claude krijgt ALIASSEN, die de CLI zelf naar het nieuwste model
+// in die lijn vertaalt, en agy's lijst vragen we op bij de CLI (`agy models`).
+// Zo verschijnt een nieuw model zonder dat Taurus mee hoeft te updaten.
+// `claude --model` accepteert zo'n alias of een exact model-ID; vrije tekst
+// blijft toegestaan, dus een pin op een specifieke versie kan nog steeds.
+const CLAUDE_ALIASES = [
+  { value: "fable", key: "model_fable" },
+  { value: "opus", key: "model_opus" },
+  { value: "sonnet", key: "model_sonnet" },
+  { value: "haiku", key: "model_haiku" },
+  { value: "opusplan", key: "model_opusplan" },
+];
+// Projecten van vóór #92 bewaarden een weergavenaam in plaats van een alias.
+// Die blijven we vertalen zodat een opgeslagen agent gewoon start; nieuw kiezen
+// gebeurt via de aliassen hierboven. Alleen aanvullen bij een bewaarde naam die
+// anders als onbekend model naar de CLI zou gaan — niet uitbreiden met nieuwe.
+const CLAUDE_LEGACY_MODELS = {
   "Claude Opus 4.8": "claude-opus-4-8",
   "Claude Sonnet 4.6": "claude-sonnet-4-6",
   "Claude Haiku 4.5": "claude-haiku-4-5",
 };
-// Suggesties voor het model-veld (datalist). Vrije tekst blijft toegestaan en
-// leeg = de eigen default van de agent; de lijst is slechts een hint, want
-// model-ID's verschuiven en het veld dwingt niets af. agy selecteert op de
-// volledige label-string (incl. effort-suffix), dus die nemen we letterlijk over.
+// Terugvallijst voor het model-veld (datalist): gebruikt zolang de CLI zelf geen
+// lijst geeft — agy niet geïnstalleerd, of een oudere agy zonder `models`. agy
+// selecteert op de volledige label-string (incl. effort-suffix), dus die nemen
+// we letterlijk over. Een entry mag een string zijn of {value, key} met een
+// i18n-sleutel voor het label naast de waarde.
 const MODEL_SUGGESTIONS = {
-  claude: Object.keys(CLAUDE_MODELS),
+  claude: CLAUDE_ALIASES,
   agy: [
     "Gemini 3.5 Flash (Medium)",
     "Gemini 3.5 Flash (High)",
@@ -357,22 +376,56 @@ const MODEL_SUGGESTIONS = {
     "GPT-OSS 120B (Medium)",
   ],
 };
+// Modellen die de CLI zelf opsomt, per agent gecached: het is een procesaanroep
+// en de lijst verandert niet tijdens een sessie. null = geprobeerd en mislukt
+// (dan blijft de terugvallijst staan en proberen we het niet elke keer opnieuw;
+// ⟳ Herlaad herstart de webview en dus ook deze cache).
+const liveModels = new Map();
+
+// Vraag de agent-CLI om zijn modellen. Geeft true als er een nieuwe lijst is,
+// zodat de aanroeper de datalist opnieuw kan vullen. Alleen agy heeft hier een
+// commando voor; claude heeft het niet nodig, want aliassen verouderen niet.
+async function refreshLiveModels(agent) {
+  if (agent !== "agy" || liveModels.has(agent)) return false;
+  try {
+    const list = await invoke("list_agent_models", { agent });
+    if (Array.isArray(list) && list.length) {
+      liveModels.set(agent, list);
+      return true;
+    }
+  } catch (_) { /* niet geïnstalleerd/timeout: terugvallijst blijft staan */ }
+  liveModels.set(agent, null);
+  return false;
+}
+function modelSuggestionsFor(agent) {
+  const live = liveModels.get(agent);
+  if (live && live.length) return live;
+  return MODEL_SUGGESTIONS[agent] || MODEL_SUGGESTIONS.claude;
+}
+function suggestionValue(s) { return typeof s === "string" ? s : s.value; }
 // Vertaal de gekozen/ingetypte modelnaam naar de --model-waarde voor de agent.
-// Voor claude: nette naam -> model-ID; alles anders (alias of ID) ongewijzigd.
-// Voor agy: ongewijzigd (agy verwacht juist de volledige label-string).
+// Voor claude: oude weergavenaam -> model-ID; alles anders (alias of ID) gaat
+// ongewijzigd door. Voor agy: ongewijzigd (agy wil de volledige label-string).
 function resolveModelArg(agent, model) {
   const m = (model || "").trim();
-  if (agent === "claude" && CLAUDE_MODELS[m]) return CLAUDE_MODELS[m];
+  if (agent === "claude" && CLAUDE_LEGACY_MODELS[m]) return CLAUDE_LEGACY_MODELS[m];
   return m;
 }
 function fillModelDatalist(dl, agent) {
   if (!dl) return;
   dl.innerHTML = "";
-  for (const m of MODEL_SUGGESTIONS[agent] || MODEL_SUGGESTIONS.claude) {
+  for (const s of modelSuggestionsFor(agent)) {
     const o = document.createElement("option");
-    o.value = m;
+    o.value = suggestionValue(s);
+    if (typeof s !== "string" && s.key) o.label = t(s.key);
     dl.appendChild(o);
   }
+}
+// Vul direct met wat we hebben en nogmaals zodra de CLI-lijst binnen is, zodat
+// het veld nooit wacht op een procesaanroep.
+function updateModelDatalist(dl, agent) {
+  fillModelDatalist(dl, agent);
+  refreshLiveModels(agent).then((fresh) => { if (fresh) fillModelDatalist(dl, agent); });
 }
 
 // Modus-opties verschillen per agent. claude: --permission-mode default/plan/auto.
@@ -625,7 +678,7 @@ async function selectProject(p, card) {
   els.taskInput.value = p.task || "";
   els.agentInput.value = AGENTS.includes(p.agent) ? p.agent : "claude";
   els.modelInput.value = p.model || "";
-  fillModelDatalist(els.modelSuggestions, els.agentInput.value);
+  updateModelDatalist(els.modelSuggestions, els.agentInput.value);
   fillModeSelect(els.modeInput, els.agentInput.value, p.mode || "default");
   els.status.textContent = "";
   const ok = await invoke("path_exists", { path: p.path });
@@ -1574,7 +1627,7 @@ function renderEditor() {
           </select></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_model"))}</span>
           <input class="e-model" type="text" list="dl-emodel-${i}" autocomplete="off" placeholder="${escapeHtml(t("model_ph"))}" value="${escapeHtml(r.model || "")}" />
-          <datalist id="dl-emodel-${i}">${(MODEL_SUGGESTIONS[r.agent] || MODEL_SUGGESTIONS.claude).map((m) => `<option value="${escapeHtml(m)}"></option>`).join("")}</datalist></div>
+          <datalist id="dl-emodel-${i}">${modelSuggestionsFor(r.agent).map((s) => `<option value="${escapeHtml(suggestionValue(s))}"${typeof s !== "string" && s.key ? ` label="${escapeHtml(t(s.key))}"` : ""}></option>`).join("")}</datalist></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("launch_mode"))}</span>
           <select class="e-mode">${modesFor(r.agent).map((o) => `<option value="${o.value}"${clampMode(r.agent, r.mode || "default") === o.value ? " selected" : ""}>${escapeHtml(t(o.key))}</option>`).join("")}</select></div>
       </div>
@@ -1599,6 +1652,12 @@ function renderEditor() {
     row.querySelector(".e-del").addEventListener("click", () => { editRows.splice(i, 1); renderEditor(); });
     els.editorRows.appendChild(row);
   });
+  // Vraag de CLI-lijst op voor de agents in deze editor; levert dat een nieuwe
+  // lijst op, dan één keer opnieuw renderen zodat de datalists kloppen. Dit lust
+  // niet: refreshLiveModels geeft na de eerste poging altijd false.
+  for (const agent of new Set(editRows.map((r) => r.agent || "claude"))) {
+    refreshLiveModels(agent).then((fresh) => { if (fresh) renderEditor(); });
+  }
 }
 async function saveEditor() {
   const cleaned = editRows
@@ -2013,7 +2072,7 @@ window.addEventListener("DOMContentLoaded", () => {
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
   els.agentInput.addEventListener("change", () => {
     els.modelInput.value = "";
-    fillModelDatalist(els.modelSuggestions, els.agentInput.value);
+    updateModelDatalist(els.modelSuggestions, els.agentInput.value);
     fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value);
   });
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
