@@ -382,11 +382,19 @@ const MODEL_SUGGESTIONS = {
 // ⟳ Herlaad herstart de webview en dus ook deze cache).
 const liveModels = new Map();
 
+// Welke agents hun lijst bij de CLI mogen ophalen. claude hoort hier niet thuis
+// (aliassen verouderen niet) en agy staat er bewust nog NIET in: `agy models`
+// geeft bij piped uitvoer slugs ("gemini-3.6-flash-high") terwijl de vaste lijst
+// labels gebruikt ("Gemini 3.6 Flash (High)"), en agy accepteert een onbekend
+// --model zonder foutmelding -- de verkeerde vorm zou dus stil op het
+// default-model terugvallen in plaats van zichtbaar te falen. Zodra vaststaat
+// welke vorm --model honoreert, is "agy" hier toevoegen genoeg (#92).
+const LIVE_MODEL_AGENTS = new Set();
+
 // Vraag de agent-CLI om zijn modellen. Geeft true als er een nieuwe lijst is,
-// zodat de aanroeper de datalist opnieuw kan vullen. Alleen agy heeft hier een
-// commando voor; claude heeft het niet nodig, want aliassen verouderen niet.
+// zodat de aanroeper de datalist opnieuw kan vullen.
 async function refreshLiveModels(agent) {
-  if (agent !== "agy" || liveModels.has(agent)) return false;
+  if (!LIVE_MODEL_AGENTS.has(agent) || liveModels.has(agent)) return false;
   try {
     const list = await invoke("list_agent_models", { agent });
     if (Array.isArray(list) && list.length) {
