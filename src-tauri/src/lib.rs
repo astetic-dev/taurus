@@ -2246,10 +2246,13 @@ mod tests {
     fn list_agent_models_talks_to_the_agy_cli() {
         let models = list_agent_models("agy".to_string()).expect("agy models failed");
         assert!(!models.is_empty());
-        // agy's labels zijn de string die --model verwacht, incl. effort-suffix.
+        // agy kijkt naar zijn stdout: een terminal krijgt labels ("Gemini 3.6
+        // Flash (Low)"), een pipe -- dus ook wij -- krijgt slugs
+        // ("gemini-3.6-flash-low"). Beide vormen worden door --model
+        // geaccepteerd, dus we eisen alleen bruikbare, getrimde entries.
         assert!(
-            models.iter().any(|m| m.contains('(')),
-            "unexpected labels: {:?}",
+            models.iter().all(|m| !m.is_empty() && m.trim() == m),
+            "unexpected entries: {:?}",
             models
         );
         // Een agent zonder list-commando hoort netjes te falen i.p.v. te spawnen.

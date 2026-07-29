@@ -382,14 +382,16 @@ const MODEL_SUGGESTIONS = {
 // ⟳ Herlaad herstart de webview en dus ook deze cache).
 const liveModels = new Map();
 
-// Welke agents hun lijst bij de CLI mogen ophalen. claude hoort hier niet thuis
-// (aliassen verouderen niet) en agy staat er bewust nog NIET in: `agy models`
-// geeft bij piped uitvoer slugs ("gemini-3.6-flash-high") terwijl de vaste lijst
-// labels gebruikt ("Gemini 3.6 Flash (High)"), en agy accepteert een onbekend
-// --model zonder foutmelding -- de verkeerde vorm zou dus stil op het
-// default-model terugvallen in plaats van zichtbaar te falen. Zodra vaststaat
-// welke vorm --model honoreert, is "agy" hier toevoegen genoeg (#92).
-const LIVE_MODEL_AGENTS = new Set();
+// Welke agents hun lijst bij de CLI mogen ophalen. claude hoort hier niet thuis:
+// aliassen verouderen niet, en `claude` heeft geen list-commando.
+// agy geeft bij piped uitvoer slugs ("gemini-3.6-flash-low") en in een terminal
+// labels ("Gemini 3.6 Flash (Low)"); we krijgen dus slugs. Dat mag: geverifieerd
+// dat agy een slug zelf naar het label resolvet (`agy --model
+// gemini-3.6-flash-low` logt `Propagating selected model override to backend:
+// label="Gemini 3.6 Flash (Low)"`). Dat moest expliciet worden nagemeten omdat
+// agy een ONBEKEND --model zonder foutmelding slikt en stil op het default-model
+// terugvalt -- een verkeerde vorm zou dus nooit zichtbaar falen (#92).
+const LIVE_MODEL_AGENTS = new Set(["agy"]);
 
 // Vraag de agent-CLI om zijn modellen. Geeft true als er een nieuwe lijst is,
 // zodat de aanroeper de datalist opnieuw kan vullen.
