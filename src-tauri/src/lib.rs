@@ -310,6 +310,92 @@ fn resolve_program(agent: &str) -> (String, Vec<String>) {
     (exe.to_string(), Vec::new())
 }
 
+// Welk subcommando somt de modellen van deze agent op? Alleen agy heeft er een
+// (`agy models`, één label per regel). claude heeft het niet nodig: daar wijzen
+// de aliassen (fable/opus/sonnet/haiku) altijd naar het nieuwste model (#92).
+fn model_list_subcommand(agent: &str) -> Option<&'static str> {
+    match agent {
+        "agy" => Some("models"),
+        _ => None,
+    }
+}
+
+// Zet de stdout van het list-commando om in modelnamen. Puur, dus testbaar:
+// trimmen, lege regels en CR weg, ontdubbelen met behoud van volgorde (de CLI
+// zet het nieuwste bovenaan), en een plafond zodat onverwachte uitvoer -- een
+// hulptekst of een foutmelding op stdout -- de datalist niet volspamt.
+fn parse_model_list(stdout: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in stdout.lines() {
+        let name = line.trim();
+        // Modelnamen zijn korte labels; alles daarbuiten is geen modelregel.
+        if name.is_empty() || name.len() > 120 || out.iter().any(|s| s == name) {
+            continue;
+        }
+        out.push(name.to_string());
+        if out.len() == 64 {
+            break;
+        }
+    }
+    out
+}
+
+// Vraag de agent-CLI welke modellen beschikbaar zijn, zodat een nieuw model in
+// de suggestielijst verschijnt zonder dat Taurus mee hoeft te updaten (#92).
+// Faalt dit (agent niet geïnstalleerd, oudere CLI zonder `models`, timeout),
+// dan valt de frontend terug op zijn ingebouwde lijst.
+#[tauri::command]
+fn list_agent_models(agent: String) -> Result<Vec<String>, String> {
+    let sub = model_list_subcommand(&agent).ok_or("agent has no model list command")?;
+    // Zelfde programma-resolutie als bij het starten van een sessie, dus de
+    // cmd.exe-shim voor een npm-installatie werkt hier ook (#40).
+    let (program, mut args) = resolve_program(&agent);
+    args.push(sub.to_string());
+    let mut c = std::process::Command::new(&program);
+    c.args(&args)
+        // Geen stdin: een CLI die onverhoopt om invoer vraagt hangt anders tot
+        // de timeout i.p.v. meteen af te breken.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = c
+        .spawn()
+        .map_err(|e| format!("{} {}: {}", agent, sub, e))?;
+    // Wachten met plafond: de uitvoer is een handvol regels, dus de pipe loopt
+    // niet vol en pollen op try_wait volstaat.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("{} {} timed out", agent, sub));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("{} {}: {}", agent, sub, e)),
+        }
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("{} {}: {}", agent, sub, e))?;
+    if !out.status.success() {
+        return Err(format!("{} {} exited with {}", agent, sub, out.status));
+    }
+    let models = parse_model_list(&String::from_utf8_lossy(&out.stdout));
+    if models.is_empty() {
+        return Err(format!("{} {} returned no models", agent, sub));
+    }
+    Ok(models)
+}
+
 // Windows Job Object met kill-on-close rond het agent-proces. child.kill() is
 // TerminateProcess op alleen het directe kind; door de agent aan een job te
 // hangen ruimt Windows de HELE boom (claude + gespawnde MCP-servers) op zodra
@@ -1936,6 +2022,7 @@ pub fn run() {
             get_sessions,
             session_state,
             create_session,
+            list_agent_models,
             restart_session,
             write_session,
             resize_session,
@@ -2109,5 +2196,66 @@ mod tests {
         let wrong = "0000000000000000000000000000000000000000000000000000000000000000";
         assert!(verify_sha256(&f, wrong).is_err());
         assert!(!f.exists());
+    }
+
+    #[test]
+    fn parse_model_list_keeps_cli_order_and_cleans_up() {
+        // Echte `agy models`-uitvoer (ingekort), met CRLF zoals op Windows.
+        let out = "Gemini 3.6 Flash (High)\r\nGemini 3.5 Flash (Medium)\r\nGPT-OSS 120B (Medium)\r\n";
+        assert_eq!(
+            parse_model_list(out),
+            vec![
+                "Gemini 3.6 Flash (High)",
+                "Gemini 3.5 Flash (Medium)",
+                "GPT-OSS 120B (Medium)"
+            ]
+        );
+        // Lege regels en witruimte eromheen verdwijnen, volgorde blijft.
+        assert_eq!(parse_model_list("\n  A  \n\n\tB\n"), vec!["A", "B"]);
+        // Dubbelen vallen weg; de eerste (nieuwste) blijft staan.
+        assert_eq!(parse_model_list("A\nB\nA\n"), vec!["A", "B"]);
+        assert!(parse_model_list("").is_empty());
+        assert!(parse_model_list("   \n\n").is_empty());
+    }
+
+    #[test]
+    fn parse_model_list_bounds_unexpected_output() {
+        // Een hulptekst of stacktrace op stdout mag de datalist niet volspammen.
+        let long = "x".repeat(121);
+        assert!(parse_model_list(&long).is_empty());
+        let many = (0..200)
+            .map(|i| format!("model {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let got = parse_model_list(&many);
+        assert_eq!(got.len(), 64);
+        assert_eq!(got[0], "model 0");
+    }
+
+    #[test]
+    fn only_agy_has_a_model_list_command() {
+        assert_eq!(model_list_subcommand("agy"), Some("models"));
+        assert_eq!(model_list_subcommand("claude"), None);
+        assert_eq!(model_list_subcommand(""), None);
+    }
+
+    // Roept de echte CLI aan, dus alleen zinvol op een machine waar agy op PATH
+    // staat -- daarom #[ignore]: `cargo test -- --ignored` draait 'm bewust.
+    #[test]
+    #[ignore]
+    fn list_agent_models_talks_to_the_agy_cli() {
+        let models = list_agent_models("agy".to_string()).expect("agy models failed");
+        assert!(!models.is_empty());
+        // agy kijkt naar zijn stdout: een terminal krijgt labels ("Gemini 3.6
+        // Flash (Low)"), een pipe -- dus ook wij -- krijgt slugs
+        // ("gemini-3.6-flash-low"). Beide vormen worden door --model
+        // geaccepteerd, dus we eisen alleen bruikbare, getrimde entries.
+        assert!(
+            models.iter().all(|m| !m.is_empty() && m.trim() == m),
+            "unexpected entries: {:?}",
+            models
+        );
+        // Een agent zonder list-commando hoort netjes te falen i.p.v. te spawnen.
+        assert!(list_agent_models("claude".to_string()).is_err());
     }
 }
