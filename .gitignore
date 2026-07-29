@@ -17,6 +17,11 @@ projects.json
 projects.real.json
 /out
 
+# Claude Code: settings.local.json is the per-machine override (enabled MCP
+# servers, personal permission rules) and is personal by design. The shareable
+# project-level file is .claude/settings.json, so only the local one is ignored.
+.claude/settings.local.json
+
 # File-dropper: dropped/pasted files land in <working dir>/input. When Taurus
 # runs inside its own repo, that folder shows up here as a runtime artifact.
 /input/
