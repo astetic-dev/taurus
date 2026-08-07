@@ -120,7 +120,8 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
 
 // Een machine waarop een tab een agent kan draaien. Bewaard in
 // %APPDATA%\Taurus\hosts.json, naast projects.json en sessions.json.
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+// Debug bevat geen geheim: key_path is een pad, nooit de sleutel zelf.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 struct Host {
     id: String,
     nickname: String,
@@ -782,6 +783,24 @@ fn parse_override(command: &str) -> Result<(String, Vec<String>), String> {
 // wordt door de aanroeper afgehandeld; hier gaat het puur om claude/agy. De twee
 // CLIs verschillen sterk in vlaggen, dus we bouwen ze apart op i.p.v. Claude's
 // vlaggen voor beide aan te nemen.
+// Hoe heet de agent-binary OP EEN ANDERE MACHINE? Daar mag niets van dit
+// werkstation in meeliften: resolve_program levert een absoluut lokaal pad
+// (C:\Users\<mij>\.local\bin\claude.exe), en dat bestaat op de doelhost niet --
+// die heeft zijn eigen gebruiker en zijn eigen installatie. De host zoekt de
+// naam zelf op via zijn PATH. Op Windows expliciet met .exe, want de agent start
+// het programma via CreateProcess en die vult PATHEXT niet aan.
+fn remote_agent_program(agent: &str, os: &str) -> String {
+    let base = match agent {
+        "agy" => "agy",
+        _ => "claude",
+    };
+    if os == "windows" {
+        format!("{}.exe", base)
+    } else {
+        base.to_string()
+    }
+}
+
 fn build_command(
     agent: &str,
     kind: LaunchKind,
@@ -791,10 +810,16 @@ fn build_command(
     mode: &str,
     model: &str,
     full_paths: bool,
+    // Some(os) = dit commando draait op een remote host, niet hier.
+    remote_os: Option<&str>,
 ) -> (String, Vec<String>) {
     // `a` start met de eventuele cmd.exe-shim-prefix ("/c <pad>", #40); de
-    // agent-vlaggen komen daarachter.
-    let (program, mut a) = resolve_program(agent);
+    // agent-vlaggen komen daarachter. Remote is er geen shim: daar bestaat het
+    // lokale pad niet en resolvet de host zelf.
+    let (program, mut a) = match remote_os {
+        Some(os) => (remote_agent_program(agent, os), Vec::new()),
+        None => resolve_program(agent),
+    };
     match agent {
         // agy (Antigravity/Gemini-agent): kent geen --session-id / -n /
         // --permission-mode / --append-system-prompt. Modus: auto -> alle tools
@@ -922,6 +947,17 @@ fn shell_quote_posix(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+// PowerShell-quoting: alles tussen enkele quotes, en een enkele quote wordt
+// verdubbeld. Binnen '...' expandeert PowerShell niets, dus $ en ` zijn veilig.
+fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+// UTF-16LE, want dat verwacht powershell -EncodedCommand.
+fn utf16le(s: &str) -> Vec<u8> {
+    s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect()
+}
+
 // Kleine FNV-1a; genoeg om afgekapte paden uit elkaar te houden.
 fn fnv1a(s: &str) -> u32 {
     let mut h: u32 = 0x811c9dc5;
@@ -1018,17 +1054,25 @@ fn build_remote_payload(
             }
             Ok(s)
         }
-        // Geen multiplexer: kaal starten. De sessie sterft dan bij een
-        // verbindingsbreuk en het transcript (claude --resume) is de enige
-        // persistentie. Op Windows kan dat niet veilig: de remote shell is
-        // cmd.exe en een taak met " of & zou de aanroep slopen -- daar is de
-        // agent de route.
+        // Geen multiplexer: kaal starten. Er is dan geen scrollback en geen
+        // heraanhaken; of de sessie een verbindingsbreuk overleeft hangt van de
+        // host af. Gemeten: Windows' sshd kapt de procesboom NIET af, dus daar
+        // loopt de agent door; op Linux sterft hij zonder tmux wel, en is het
+        // transcript (claude --resume) de enige persistentie.
         "" | "none" => {
             if os == "windows" {
-                return Err(
-                    "Deze Windows-host heeft geen taurus-agent. Klik 'Add & test' om hem uit te rollen."
-                        .into(),
-                );
+                // De remote shell is cmd.exe, en een taak met " of & zou de
+                // aanroep slopen. -EncodedCommand neemt base64 UTF-16LE, dus
+                // [A-Za-z0-9+/=]: cmd.exe ziet geen enkel metateken meer.
+                let mut script = format!("Set-Location {}; & {}", ps_quote(cwd), ps_quote(program));
+                for a in args {
+                    script.push(' ');
+                    script.push_str(&ps_quote(a));
+                }
+                return Ok(format!(
+                    "powershell -NoProfile -EncodedCommand {}",
+                    b64(&utf16le(&script))
+                ));
             }
             let mut s = format!("cd {} && exec {}", shell_quote_posix(cwd), shell_quote_posix(program));
             for a in args {
@@ -1125,6 +1169,9 @@ fn create_session(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    // De host moet BEKEND zijn voordat het commando gebouwd wordt: remote levert
+    // een andere programmanaam op dan lokaal.
+    let host = lookup_host(&host_id)?;
     let (program, args) = if !command.trim().is_empty() {
         // Commando-override (bijv. nep-Claude voor de demo): voer dit programma
         // uit i.p.v. de agent, zonder agent-vlaggen.
@@ -1139,28 +1186,39 @@ fn create_session(
             &mode,
             &model,
             full_paths,
+            host.as_ref().map(|h| h.os.as_str()),
         )
     };
-    let (program, args, cwd) = apply_host(&host_id, &path, program, args)?;
+    let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
     start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)
+}
+
+// Leeg host_id = lokaal. Een onbekend id is een fout en geen stille terugval op
+// lokaal: dan zou een remote tab ongemerkt op het werkstation starten.
+fn lookup_host(host_id: &str) -> Result<Option<Host>, String> {
+    if host_id.trim().is_empty() {
+        return Ok(None);
+    }
+    get_hosts()
+        .into_iter()
+        .find(|h| h.id == host_id)
+        .map(Some)
+        .ok_or_else(|| format!("onbekende host: {}", host_id))
 }
 
 // Lokaal blijft alles zoals het was; remote wikkelt ssh eromheen en verschuift
 // de werkmap: `path` is dan de map OP DE HOST, en de lokale werkmap van ssh.exe
 // is de home van het werkstation (start_pty eist een bestaande lokale map).
 fn apply_host(
-    host_id: &str,
+    host: Option<&Host>,
     path: &str,
     program: String,
     args: Vec<String>,
 ) -> Result<(String, Vec<String>, String), String> {
-    if host_id.trim().is_empty() {
-        return Ok((program, args, path.to_string()));
-    }
-    let host = get_hosts()
-        .into_iter()
-        .find(|h| h.id == host_id)
-        .ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    let host = match host {
+        None => return Ok((program, args, path.to_string())),
+        Some(h) => h,
+    };
     let remote_cwd = if path.trim().is_empty() {
         host.default_project.trim().to_string()
     } else {
@@ -1172,7 +1230,7 @@ fn apply_host(
             host.nickname
         ));
     }
-    let (program, args) = wrap_remote(&host, &remote_cwd, program, args)?;
+    let (program, args) = wrap_remote(host, &remote_cwd, program, args)?;
     Ok((program, args, local_cwd_for_remote()))
 }
 
@@ -1201,6 +1259,7 @@ fn restart_session(
             let _ = s.child.kill();
         }
     }
+    let host = lookup_host(&host_id)?;
     let (program, args) = if !command.trim().is_empty() {
         parse_override(&command)?
     } else {
@@ -1213,13 +1272,14 @@ fn restart_session(
             &mode,
             &model,
             full_paths,
+            host.as_ref().map(|h| h.os.as_str()),
         )
     };
     // Remote herstart: het kappen hierboven doodt alleen de lokale ssh.exe. Draait
     // er een multiplexer op de host, dan leeft de agent daar gewoon door en haakt
     // `new-session -A` er weer aan -- dan is dit een heraanhaak-actie in plaats van
     // een herstart. Bestaat de sessie niet meer, dan start hij vers met --resume.
-    let (program, args, cwd) = apply_host(&host_id, &path, program, args)?;
+    let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
     start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)
 }
 
@@ -2583,14 +2643,50 @@ mod tests {
     fn build_remote_payload_refuses_combinations_that_cannot_work() {
         // tmux bestaat niet op Windows.
         assert!(build_remote_payload("tmux", "windows", "s", "C:\\p", "claude", &[]).is_err());
-        // Zonder multiplexer op Windows is de remote shell cmd.exe; een taak met
-        // " of & zou de aanroep slopen, dus daar weigeren we liever.
-        assert!(build_remote_payload("none", "windows", "s", "C:\\p", "claude", &[]).is_err());
-        assert!(build_remote_payload("", "windows", "s", "C:\\p", "claude", &[]).is_err());
         assert!(build_remote_payload("zellij", "linux", "s", "/p", "claude", &[]).is_err());
-        // Zonder multiplexer op Linux mag het wel: kaal, met exec.
+        // Zonder multiplexer op Linux: kaal, met exec.
         let s = build_remote_payload("none", "linux", "s", "/p", "claude", &[]).unwrap();
         assert_eq!(s, "cd '/p' && exec 'claude'");
+    }
+
+    #[test]
+    fn build_remote_payload_encodes_a_bare_windows_launch_for_powershell() {
+        // De remote shell is cmd.exe. Een taak met aanhalingstekens, een & en
+        // een apostrof is precies wat een naief samengesteld commando sloopt.
+        let args = vec![
+            "-n".to_string(),
+            r#"fix "the" thing & report it; it's urgent"#.to_string(),
+        ];
+        let s = build_remote_payload("none", "windows", "s", r"C:\proj", "claude", &args).unwrap();
+        assert!(s.starts_with("powershell -NoProfile -EncodedCommand "));
+        let enc = s.rsplit(' ').next().unwrap();
+        // Alleen base64-tekens: cmd.exe ziet geen enkel metateken.
+        assert!(
+            enc.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='),
+            "niet-base64 teken in payload: {}",
+            enc
+        );
+        // En het decodeert naar het bedoelde PowerShell-script.
+        let expected = b64(&utf16le(
+            "Set-Location 'C:\\proj'; & 'claude' '-n' 'fix \"the\" thing & report it; it''s urgent'",
+        ));
+        assert_eq!(enc, expected);
+    }
+
+    #[test]
+    fn ps_quote_doubles_the_single_quote_and_blocks_expansion() {
+        assert_eq!(ps_quote("plain"), "'plain'");
+        assert_eq!(ps_quote("it's"), "'it''s'");
+        // Binnen '...' expandeert PowerShell niets.
+        assert_eq!(ps_quote("$env:PATH `id`"), "'$env:PATH `id`'");
+        assert_eq!(ps_quote(""), "''");
+    }
+
+    #[test]
+    fn utf16le_is_what_encodedcommand_expects() {
+        // "Hi" -> 48 00 69 00
+        assert_eq!(utf16le("Hi"), vec![0x48, 0x00, 0x69, 0x00]);
+        assert_eq!(utf16le(""), Vec::<u8>::new());
     }
 
     #[test]
@@ -2672,16 +2768,44 @@ mod tests {
     #[test]
     fn apply_host_leaves_a_local_launch_untouched() {
         let (p, a, cwd) =
-            apply_host("", r"C:\proj", "claude".into(), vec!["-n".into()]).unwrap();
+            apply_host(None, r"C:\proj", "claude".into(), vec!["-n".into()]).unwrap();
         assert_eq!(p, "claude");
         assert_eq!(a, vec!["-n".to_string()]);
         assert_eq!(cwd, r"C:\proj", "lokale werkmap mag niet verschuiven");
     }
 
     #[test]
-    fn apply_host_reports_an_unknown_host_instead_of_launching() {
-        let e = apply_host("nope-does-not-exist", "/p", "claude".into(), vec![]).unwrap_err();
+    fn lookup_host_reports_an_unknown_id_instead_of_falling_back_to_local() {
+        assert!(lookup_host("").unwrap().is_none(), "leeg id = lokaal");
+        // Stil terugvallen op lokaal zou een remote tab ongemerkt op het
+        // werkstation starten -- met de agent-rechten van dit werkstation.
+        let e = lookup_host("nope-does-not-exist").unwrap_err();
         assert!(e.contains("onbekende host"), "onverwachte fout: {}", e);
+    }
+
+    #[test]
+    fn remote_launches_never_carry_a_local_path() {
+        // Gevonden tegen een echte host: build_command resolveert het programma
+        // via het PATH van DIT werkstation, dus er ging
+        // C:\Users\<mij>\.local\bin\claude.exe naar een machine met een andere
+        // gebruiker en een andere installatie. Remote hoort de kale naam te zijn.
+        for (os, expect) in [("windows", "claude.exe"), ("linux", "claude")] {
+            let (program, _) = build_command(
+                "claude",
+                LaunchKind::Create,
+                "sid",
+                "t",
+                "",
+                "default",
+                "",
+                false,
+                Some(os),
+            );
+            assert_eq!(program, expect);
+            assert!(!program.contains('\\') && !program.contains('/'), "geen pad: {}", program);
+        }
+        assert_eq!(remote_agent_program("agy", "linux"), "agy");
+        assert_eq!(remote_agent_program("agy", "windows"), "agy.exe");
     }
 
     #[test]
@@ -2716,6 +2840,48 @@ mod tests {
             probe_tcp("localhost", port, 2000),
             "moet het werkende adres vinden, ook als een ander adres eerst komt"
         );
+    }
+
+    // Print de ssh-aanroep die Taurus voor een echte host zou doen, zodat je hem
+    // los kunt uitvoeren en de keten kunt narekenen zonder de app te starten:
+    //   set TAURUS_TEST_HOST=192.168.2.9
+    //   set TAURUS_TEST_USER=arjen
+    //   set TAURUS_TEST_CWD=C:\pad\op\de\host
+    //   cargo test print_the_real_ssh_invocation -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn print_the_real_ssh_invocation() {
+        let host = Host {
+            id: "ursu".into(),
+            nickname: "ursu".into(),
+            hostname: std::env::var("TAURUS_TEST_HOST").expect("TAURUS_TEST_HOST"),
+            user: std::env::var("TAURUS_TEST_USER").unwrap_or_default(),
+            port: 22,
+            key_path: std::env::var("TAURUS_TEST_KEY").unwrap_or_default(),
+            default_project: String::new(),
+            os: std::env::var("TAURUS_TEST_OS").unwrap_or_else(|_| "windows".into()),
+            mux: std::env::var("TAURUS_TEST_MUX").unwrap_or_else(|_| "none".into()),
+            agent_version: String::new(),
+        };
+        let cwd = std::env::var("TAURUS_TEST_CWD").unwrap_or_else(|_| r"C:\Users\arjen".into());
+        // Exact het pad dat create_session loopt: agent-vlaggen eerst, dan de
+        // remote wikkel eromheen.
+        let (program, args) = build_command(
+            "claude",
+            LaunchKind::Create,
+            "11111111-2222-3333-4444-555555555555",
+            "remote test",
+            "",
+            "default",
+            "",
+            false,
+            Some(host.os.as_str()),
+        );
+        let (prog, a) = wrap_remote(&host, &cwd, program, args).expect("wrap_remote");
+        println!("PROGRAM: {}", prog);
+        for (i, x) in a.iter().enumerate() {
+            println!("ARG[{}]: {}", i, x);
+        }
     }
 
     // Meet tegen een echte host uit het eigen netwerk. Draaien met:
@@ -2829,14 +2995,14 @@ mod tests {
 
     #[test]
     fn build_command_claude_create_and_resume() {
-        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true);
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true, None);
         assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
         assert!(a.windows(2).any(|w| w == ["--permission-mode", "plan"]));
         assert!(a.windows(2).any(|w| w == ["--model", "opus"]));
         assert!(a.contains(&"--append-system-prompt".to_string()));
         assert_eq!(a.last().unwrap(), "do it");
 
-        let (_, r) = build_command("claude", LaunchKind::Resume, "u1", "t", "do it", "default", "", false);
+        let (_, r) = build_command("claude", LaunchKind::Resume, "u1", "t", "do it", "default", "", false, None);
         assert_eq!(r[0..2], ["--resume".to_string(), "u1".to_string()]);
         // Bij resume geen taak meesturen en geen --permission-mode "default".
         assert!(!r.contains(&"do it".to_string()));
@@ -2845,7 +3011,7 @@ mod tests {
 
     #[test]
     fn build_command_agy_resume_continues_without_task() {
-        let (_, a) = build_command("agy", LaunchKind::Resume, "u1", "t", "task", "auto", "", true);
+        let (_, a) = build_command("agy", LaunchKind::Resume, "u1", "t", "task", "auto", "", true, None);
         assert!(a.contains(&"--continue".to_string()));
         assert!(a.contains(&"--dangerously-skip-permissions".to_string()));
         // agy kent geen prompt bij --continue en geen full-paths-equivalent.
