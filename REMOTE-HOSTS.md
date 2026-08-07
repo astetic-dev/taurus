@@ -110,6 +110,7 @@ the placeholder with the public key from step 1.
 | `default_project` | working directory **on the host**, prefilled in the launch form |
 | `os` | `windows` or `linux` — decides how the command is quoted for the remote shell |
 | `mux` | `tmux`, `psmux`, `taurus-agent` or `none` — what keeps the session alive |
+| `via` | empty, or `wsl` to run the agent inside WSL on a Windows host |
 
 ## What `mux` buys you
 
@@ -118,10 +119,21 @@ the placeholder with the public key from step 1.
 | `tmux` / `psmux` | session survives a dropped connection, and reconnecting reattaches to the same agent instead of starting a second one |
 | `none` | no reattach. On **Windows** the agent still survives, because Windows' sshd does not kill the process tree when the connection drops. On **Linux** it does not — there, the transcript (`claude --resume`) is the only persistence, so you lose the in-flight turn |
 
-A Windows host with WSL is a third option: if WSL has both `tmux` and `claude`,
-you get real persistence without installing anything. The cost is that the agent
-then lives in Linux and reaches Windows paths through `/mnt/c`, and that WSL
-shuts its VM down when idle — which will end a "persistent" session.
+### Running in WSL (`via: wsl`)
+
+Windows has no tmux, so a Windows host normally cannot reattach. But a Windows
+host that has WSL usually already has one: pick **In WSL** in the add form and
+the agent runs there, with real tmux persistence, without installing anything.
+"Add & test" tells you whether that machine's WSL has both tmux and an agent CLI.
+
+What it costs:
+
+- the agent lives in Linux and reaches Windows drives through `/mnt/c`, which is
+  slow for git and file watching
+- WSL shuts its VM down when idle, which can end a session you expected to
+  persist — keep a process alive in WSL, or set `vmIdleTimeout` in `.wslconfig`
+- the DROPZONE cannot send files to a `via: wsl` host: the scp server runs on
+  Windows and cannot write into WSL's ext4 filesystem
 
 ## Security notes
 
