@@ -976,6 +976,11 @@ fn start_pty(
     let from_agent = std::env::var("CLAUDECODE").is_ok();
     for (k, v) in std::env::vars() {
         if inherits_session_marker(&k, from_agent) {
+            // LET OP: overslaan is hier niet genoeg. CommandBuilder::new() vult
+            // zichzelf met get_base_env(), dus de variabele staat er al in en
+            // blijft staan als we hem alleen niet opnieuw zetten. Hij moet er
+            // expliciet uit.
+            cmd.env_remove(&k);
             continue;
         }
         cmd.env(k, v);
@@ -2957,6 +2962,23 @@ mod tests {
         h.os = "windows".into();
         h.via = "wsl".into();
         assert_eq!(remote_agent_program("claude", effective_os(&h)), "claude");
+    }
+
+    #[test]
+    fn removing_a_marker_actually_takes_it_out_of_the_command() {
+        // De valkuil die de eerste poging tot deze fix liet mislukken:
+        // CommandBuilder::new() vult zichzelf met de HELE omgeving
+        // (get_base_env), dus een marker alleen NIET opnieuw zetten laat de
+        // geerfde waarde gewoon staan. Alleen env_remove haalt hem eruit.
+        std::env::set_var("TAURUS_TEST_MARKER_KEEP", "yes");
+        let mut cmd = CommandBuilder::new("cmd.exe");
+        assert!(
+            cmd.get_env("TAURUS_TEST_MARKER_KEEP").is_some(),
+            "de builder hoort de omgeving te erven"
+        );
+        cmd.env_remove("TAURUS_TEST_MARKER_KEEP");
+        assert!(cmd.get_env("TAURUS_TEST_MARKER_KEEP").is_none());
+        std::env::remove_var("TAURUS_TEST_MARKER_KEEP");
     }
 
     #[test]
