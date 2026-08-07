@@ -116,6 +116,137 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- remote hosts (#98) ----------
+
+// Een machine waarop een tab een agent kan draaien. Bewaard in
+// %APPDATA%\Taurus\hosts.json, naast projects.json en sessions.json.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct Host {
+    id: String,
+    nickname: String,
+    hostname: String,
+    #[serde(default)]
+    user: String,
+    #[serde(default = "default_ssh_port")]
+    port: u16,
+    // Pad naar de private key. Leeg = laat ssh zelf kiezen (~/.ssh/config of de
+    // agent). Alles loopt via resolve_key, zodat een latere sleutelbron (vault)
+    // maar een plek raakt.
+    #[serde(default)]
+    key_path: String,
+    // Werkmap op de host als een project er geen eigen remote pad bij zet.
+    #[serde(default)]
+    default_project: String,
+    // Hieronder: ingevuld door de probe bij "Add & test", niet met de hand.
+    // "linux" | "windows" | "" (nog niet getest).
+    #[serde(default)]
+    os: String,
+    // Wat houdt de sessie in leven als de verbinding wegvalt:
+    // "tmux" | "psmux" | "taurus-agent" | "none". Bij "none" is het transcript
+    // de enige persistentie (claude --resume) en sterft een lopende beurt.
+    #[serde(default)]
+    mux: String,
+    // Versie van de taurus-agent op de host; leeg als hij er niet staat.
+    #[serde(default)]
+    agent_version: String,
+}
+
+fn default_ssh_port() -> u16 {
+    22
+}
+
+fn hosts_path() -> std::path::PathBuf {
+    config_dir().join("hosts.json")
+}
+
+#[tauri::command]
+fn get_hosts() -> Vec<Host> {
+    let p = hosts_path();
+    if let Ok(txt) = std::fs::read_to_string(&p) {
+        match serde_json::from_str::<Vec<Host>>(&txt) {
+            Ok(list) => return list,
+            Err(_) => backup_invalid(&p),
+        }
+    }
+    Vec::new()
+}
+
+#[tauri::command]
+fn save_hosts(hosts: Vec<Host>) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(config_dir());
+    let txt = serde_json::to_string_pretty(&hosts).map_err(|e| e.to_string())?;
+    std::fs::write(hosts_path(), txt).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// Bereikbaarheid = kale TCP-connect naar de SSH-poort. Geen ICMP-ping: die
+// vraagt op Windows verhoogde rechten en zegt bovendien niets over sshd.
+const REACH_TIMEOUT_MS: u64 = 2000;
+
+#[derive(serde::Deserialize)]
+struct HostRef {
+    id: String,
+    hostname: String,
+    #[serde(default = "default_ssh_port")]
+    port: u16,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct HostStatus {
+    id: String,
+    reachable: bool,
+    // Hoe lang de check duurde; de UI kan er een trage host mee aanduiden.
+    ms: u64,
+}
+
+// De timeout geldt voor de HELE poging, niet per adres: een naam die zowel een
+// AAAA- als een A-record heeft zou anders 2x de timeout kosten en de dot twee
+// keer zo traag groen maken.
+fn probe_tcp(hostname: &str, port: u16, timeout_ms: u64) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    let addrs = match format!("{}:{}", hostname, port).to_socket_addrs() {
+        Ok(a) => a,
+        Err(_) => return false, // onbekende naam telt als onbereikbaar
+    };
+    for addr in addrs {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        if TcpStream::connect_timeout(&addr, left).is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+// Alle hosts tegelijk, want de host-picker checkt de hele lijst bij openen.
+// LET OP het `(async)`: een gewone synchrone #[tauri::command] draait bij Tauri
+// op de main thread, dus een blokkerende connect van 2s zou het venster laten
+// bevriezen. Met (async) gaat de aanroep naar de threadpool, en de threads
+// hieronder doen de hosts naast elkaar in plaats van na elkaar.
+#[tauri::command(async)]
+fn check_hosts(hosts: Vec<HostRef>) -> Vec<HostStatus> {
+    let handles: Vec<_> = hosts
+        .into_iter()
+        .map(|h| {
+            std::thread::spawn(move || {
+                let t0 = std::time::Instant::now();
+                let reachable = probe_tcp(&h.hostname, h.port, REACH_TIMEOUT_MS);
+                HostStatus {
+                    id: h.id,
+                    reachable,
+                    ms: t0.elapsed().as_millis() as u64,
+                }
+            })
+        })
+        .collect();
+    // Een gepanicte thread levert geen status op i.p.v. de hele lijst te slopen.
+    handles.into_iter().filter_map(|h| h.join().ok()).collect()
+}
+
 // Map-kiezer (bladeren-knop in de project-editor).
 #[tauri::command]
 fn pick_folder(app: AppHandle) -> Option<String> {
@@ -2013,6 +2144,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_projects,
             save_projects,
+            get_hosts,
+            save_hosts,
+            check_hosts,
             pick_folder,
             pick_file,
             path_exists,
@@ -2051,6 +2185,65 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probe_tcp_sees_an_open_port_and_misses_a_closed_one() {
+        use std::net::TcpListener;
+        // Poort 0 = het OS kiest een vrije poort; geen vaste poort die op een
+        // andere machine (of een parallelle testrun) al bezet kan zijn.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        assert!(probe_tcp("127.0.0.1", port, 1000), "open poort moet bereikbaar zijn");
+        drop(listener);
+        // Dicht: de kernel weigert meteen, dus een korte timeout volstaat.
+        assert!(!probe_tcp("127.0.0.1", port, 300), "gesloten poort mag niet bereikbaar heten");
+    }
+
+    #[test]
+    fn probe_tcp_treats_an_unresolvable_name_as_unreachable() {
+        // .invalid is gereserveerd (RFC 2606) en resolvet nooit.
+        assert!(!probe_tcp("taurus-nonexistent.invalid", 22, 300));
+    }
+
+    #[test]
+    fn host_json_fills_in_the_default_port_and_optional_fields() {
+        // Een met de hand geschreven hosts.json hoeft alleen het minimum te
+        // bevatten; alles wat de probe invult heeft een default.
+        let h: Host = serde_json::from_str(
+            r#"{"id":"h1","nickname":"Home PC","hostname":"192.168.1.42"}"#,
+        )
+        .expect("minimale host moet parsen");
+        assert_eq!(h.port, 22);
+        assert_eq!(h.user, "");
+        assert_eq!(h.key_path, "");
+        assert_eq!(h.os, "");
+        assert_eq!(h.mux, "");
+        assert_eq!(h.agent_version, "");
+    }
+
+    #[test]
+    fn host_round_trips_through_json() {
+        // save_hosts/get_hosts gebruiken dezelfde struct, dus een opgeslagen
+        // host moet ongewijzigd terugkomen -- inclusief een niet-default poort.
+        let src = Host {
+            id: "h2".into(),
+            nickname: "Work".into(),
+            hostname: "work.tail.net".into(),
+            user: "arjen".into(),
+            port: 2222,
+            key_path: r"C:\Users\AST\.ssh\id_ed25519".into(),
+            default_project: "/home/arjen/proj".into(),
+            os: "linux".into(),
+            mux: "tmux".into(),
+            agent_version: String::new(),
+        };
+        let txt = serde_json::to_string(&src).unwrap();
+        let back: Host = serde_json::from_str(&txt).unwrap();
+        assert_eq!(back.port, 2222);
+        assert_eq!(back.hostname, "work.tail.net");
+        assert_eq!(back.mux, "tmux");
+        assert_eq!(back.key_path, r"C:\Users\AST\.ssh\id_ed25519");
+    }
 
     #[test]
     fn b64_matches_rfc4648_vectors() {
