@@ -265,6 +265,13 @@ body.reordering, body.reordering * { cursor: grabbing !important; }
 .path-warn { color: var(--red); font-size: 12px; margin-top: 6px; }
 .claude-warn { color: var(--orange); font-size: 12px; margin-top: 6px; }
 .command-warn { color: var(--orange); font-size: 12px; margin-top: 6px; }
+.sublabel { display: block; font-size: 12px; color: var(--text-dim); margin: 10px 0 6px; }
+/* Hostaanduiding op de tab: leesbaar maar ondergeschikt aan de sessietitel. */
+.tab-host {
+  font-size: 10px; padding: 1px 5px; margin-right: 6px; border-radius: 3px;
+  background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-dim);
+  max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 /* Basisstyling voor elk uitgeschakeld veld: zonder dit is een disabled input in
    sommige skins nauwelijks te onderscheiden van een gewoon veld. Eerste gebruiker
    is de commando-override, die model/modus/taak laat vervallen (#93). De

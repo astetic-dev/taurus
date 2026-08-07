@@ -347,6 +347,10 @@ struct PersistedSession {
     agent: String,
     #[serde(default)]
     model: String,
+    // Op welke host draaide deze sessie; leeg = lokaal. Bestaande sessions.json
+    // zonder dit veld blijven daardoor gewoon lokale sessies.
+    #[serde(default)]
+    host_id: String,
 }
 
 fn sessions_path() -> std::path::PathBuf {

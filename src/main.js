@@ -27,6 +27,10 @@ const I18N = {
     model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exact model-ID mag ook.",
     model_fable: "nieuwste Fable", model_opus: "nieuwste Opus", model_sonnet: "nieuwste Sonnet",
     model_haiku: "nieuwste Haiku", model_opusplan: "Opus in plan-modus, daarna Sonnet",
+    launch_host: "Draait op", host_local: "Deze computer",
+    remote_workdir: "Werkmap op de host", remote_workdir_ph: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
+    remote_hint: "De agent draait op die machine; deze werkmap geldt daar.",
+    remote_need_path: "Vul een werkmap op de host in.",
     launch_command: "Commando-override", command_ph: "leeg = start de gekozen agent",
     command_hint: "Draait dit programma zoals het er staat, in plaats van de agent.",
     command_warn: "⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.",
@@ -122,6 +126,10 @@ const I18N = {
     model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact model ID works too.",
     model_fable: "newest Fable", model_opus: "newest Opus", model_sonnet: "newest Sonnet",
     model_haiku: "newest Haiku", model_opusplan: "Opus in plan mode, Sonnet after",
+    launch_host: "Runs on", host_local: "This computer",
+    remote_workdir: "Working directory on the host", remote_workdir_ph: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
+    remote_hint: "The agent runs on that machine; this working directory applies there.",
+    remote_need_path: "Enter a working directory on the host.",
     launch_command: "Command override", command_ph: "empty = start the selected agent",
     command_hint: "Runs this program as-is, instead of the agent.",
     command_warn: "⚠ Agent flags do not apply: model, mode and task are not passed.",
@@ -725,6 +733,31 @@ async function selectProject(p, card) {
 }
 async function loadProjects() { projects = await invoke("get_projects"); renderProjects(); }
 
+/* ============ remote hosts (#98) ============ */
+// De machines waarop een tab een agent kan draaien. Leeg = alleen lokaal, en dan
+// gedraagt de app zich exact zoals voorheen.
+let hosts = [];
+async function loadHosts() {
+  try { hosts = await invoke("get_hosts"); } catch (_) { hosts = []; }
+  fillHostSelect();
+}
+function hostById(id) { return hosts.find((h) => h.id === id) || null; }
+function fillHostSelect() {
+  const keep = els.hostInput.value;
+  els.hostInput.innerHTML = `<option value="">${escapeHtml(t("host_local"))}</option>` +
+    hosts.map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.nickname || h.hostname)}</option>`).join("");
+  // Selectie behouden zolang die host nog bestaat.
+  els.hostInput.value = hosts.some((h) => h.id === keep) ? keep : "";
+  refreshHostState();
+}
+// Bij een remote host betekent "werkmap" een pad OP DIE MACHINE, niet het lokale
+// projectpad -- daarom een eigen veld, voorgevuld met het standaardpad van de host.
+function refreshHostState() {
+  const h = hostById(els.hostInput.value);
+  els.remotePathRow.classList.toggle("hidden", !h);
+  if (h && !els.remotePathInput.value.trim()) els.remotePathInput.value = h.default_project || "";
+}
+
 // Open de OS-mapkiezer en start een ad-hoc launch in de gekozen map: vul het
 // startformulier voor die map (niet opgeslagen als project). Optimaal heeft de
 // map een CLAUDE.md; zo niet, dan toont selectProject een niet-blokkerende hint.
@@ -751,8 +784,12 @@ function renderTabs() {
     tab.style.setProperty("--tab-accent", s.accent || "#7c9cff");
     const live = settings.tabStatus && s.status && !s.exited;
     const shown = live ? `✶ ${s.status}…` : s.title;
-    tab.innerHTML = `<span class="tab-dot"></span><span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
-    tab.title = s.title;
+    // Bij tien agents over vier machines moet je op de tab kunnen zien waar er
+    // een draait -- zonder dat een lokale tab er anders uit gaat zien.
+    const host = s.hostId ? hostById(s.hostId) : null;
+    const badge = host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "";
+    tab.innerHTML = `<span class="tab-dot"></span>${badge}<span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
+    tab.title = host ? `${s.title} — ${host.nickname || host.hostname}` : s.title;
     tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
     tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
@@ -794,7 +831,7 @@ function showView(target) {
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -889,6 +926,8 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
+    // Leeg = lokaal. Bij een remote sessie geldt `path` op DIE machine.
+    hostId: hostId || "",
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
@@ -1014,10 +1053,17 @@ async function startSession() {
   const command = els.commandInput.value.trim();
   const agent = els.agentInput.value || "claude";
   const model = els.modelInput.value.trim();
+  const hostId = els.hostInput.value || "";
+  // Remote: het pad geldt op de HOST, dus niet het lokale projectpad meesturen.
+  const runPath = hostId ? els.remotePathInput.value.trim() : path;
+  if (hostId && !runPath) {
+    els.status.textContent = t("remote_need_path"); els.status.className = "status-msg err";
+    return;
+  }
 
-  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model });
+  const session = spawnTerminal({ id, uuid, path: runPath, title, accent, mode, command, agent, model, hostId });
   try {
-    await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), cols: session.term.cols, rows: session.term.rows });
+    await invoke("create_session", { id, gen: session.gen, path: runPath, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -1068,7 +1114,7 @@ function persistSessionsToDisk() {
   if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
   const list = [...sessions.values()]
     .filter((s) => !s.command)
-    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "" }));
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "" }));
   invoke("save_sessions", { sessions: list }).catch(() => {});
 }
 
@@ -1087,9 +1133,17 @@ async function restoreSessions() {
   for (const meta of saved) {
     const uuid = meta.uuid;
     if (!uuid) continue;
-    let st = { exists: false, ageSecs: 0 };
-    try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
-    if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
+    // Het transcript van een REMOTE sessie staat op de host, niet hier -- die
+    // check zou hem altijd overslaan. Draait er een multiplexer, dan haakt de
+    // herstart bovendien gewoon aan de nog levende sessie aan; zo niet, dan
+    // vindt claude --resume het transcript daar zelf.
+    if (!meta.host_id) {
+      let st = { exists: false, ageSecs: 0 };
+      try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
+      if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
+    } else if (!hostById(meta.host_id)) {
+      continue; // host is inmiddels verwijderd
+    }
 
     const id = "s" + (++seq);
     const session = spawnTerminal({
@@ -1097,6 +1151,7 @@ async function restoreSessions() {
       title: meta.title || "agent", accent: meta.accent || "#7c9cff",
       mode: meta.mode || "default", command: "",
       agent: meta.agent || "claude", model: meta.model || "",
+      hostId: meta.host_id || "",
     });
     session.el.classList.add("hidden");
     session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
@@ -1105,6 +1160,7 @@ async function restoreSessions() {
         id, gen: session.gen, path: meta.path, title: session.title, sessionId: uuid,
         mode: session.mode, fullPaths: settings.fullPaths, command: "",
         agent: session.agent, model: resolveModelArg(session.agent, session.model),
+        hostId: session.hostId || "",
         cols: session.term.cols, rows: session.term.rows,
       });
     } catch (_) {
@@ -1437,7 +1493,7 @@ async function restartSession(id) {
   s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
   if (current !== id) showView(id); else renderTabs();
   try {
-    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
+    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), hostId: s.hostId || "", cols: s.term.cols, rows: s.term.rows });
   } catch (e) { s.term.write(`\r\n\x1b[31m[${t("restart_failed")}: ${e}]\x1b[0m\r\n`); }
 }
 
@@ -2106,6 +2162,9 @@ window.addEventListener("DOMContentLoaded", () => {
     modelSuggestions: document.querySelector("#model-suggestions"),
     commandInput: document.querySelector("#command-input"),
     commandWarn: document.querySelector("#command-warn"),
+    hostInput: document.querySelector("#host-input"),
+    remotePathRow: document.querySelector("#remote-path-row"),
+    remotePathInput: document.querySelector("#remote-path-input"),
     helpTip: document.querySelector("#help-tip"),
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
@@ -2119,6 +2178,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
   els.commandInput.addEventListener("input", refreshOverrideState);
+  els.hostInput.addEventListener("change", refreshHostState);
   // Andere agent op het startformulier -> model-keuze EN modus-opties mee.
   // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
@@ -2187,7 +2247,8 @@ window.addEventListener("DOMContentLoaded", () => {
   applyBranding();
   renderTabs();
   loadProjects();
-  restoreSessions();
+  // Hosts eerst: restoreSessions moet een opgeslagen host_id kunnen opzoeken.
+  loadHosts().then(restoreSessions);
 
   // Toon de app-versie discreet onderin de sidebar.
   invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});
