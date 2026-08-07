@@ -200,26 +200,52 @@ struct HostStatus {
     ms: u64,
 }
 
-// De timeout geldt voor de HELE poging, niet per adres: een naam die zowel een
-// AAAA- als een A-record heeft zou anders 2x de timeout kosten en de dot twee
-// keer zo traag groen maken.
+// Alle adressen van een naam TEGELIJK proberen, eerste succes wint.
+//
+// Serieel proberen lijkt logisch maar is fout: een machinenaam op een netwerk met
+// IPv6 levert er zo zeven op (link-local, ULA, globaal, plus het IPv4-adres), en
+// de niet-routeerbare adressen lopen elk in een timeout. Op volgorde is de hele
+// deadline dan op voordat het adres dat WEL werkt aan de beurt is, en meldt de
+// picker een bereikbare host als onbereikbaar. Zo gemeten op een echte host met
+// zeven adressen waarvan alleen de laatste antwoordde.
+//
+// Het aantal adressen is begrensd, zodat een pathologische DNS-uitkomst geen
+// tientallen threads oplevert.
+const MAX_PROBE_ADDRS: usize = 8;
+
 fn probe_tcp(hostname: &str, port: u16, timeout_ms: u64) -> bool {
     use std::net::{TcpStream, ToSocketAddrs};
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-    let addrs = match format!("{}:{}", hostname, port).to_socket_addrs() {
-        Ok(a) => a,
+    use std::sync::mpsc;
+
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let addrs: Vec<_> = match format!("{}:{}", hostname, port).to_socket_addrs() {
+        Ok(a) => a.take(MAX_PROBE_ADDRS).collect(),
         Err(_) => return false, // onbekende naam telt als onbereikbaar
     };
+    if addrs.is_empty() {
+        return false;
+    }
+
+    let (tx, rx) = mpsc::channel();
     for addr in addrs {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            // Faalt de send, dan is de ontvanger al klaar (iemand anders was
+            // eerder of de deadline verliep) -- dat is geen fout.
+            let _ = tx.send(TcpStream::connect_timeout(&addr, timeout).is_ok());
+        });
+    }
+    drop(tx); // anders blokkeert recv tot in de eeuwigheid op onze eigen kopie
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
-        if left.is_zero() {
-            break;
-        }
-        if TcpStream::connect_timeout(&addr, left).is_ok() {
-            return true;
+        match rx.recv_timeout(left) {
+            Ok(true) => return true,
+            Ok(false) => continue,       // dit adres niet, wacht op de rest
+            Err(_) => return false,      // alle adressen op, of tijd om
         }
     }
-    false
 }
 
 // Alle hosts tegelijk, want de host-picker checkt de hele lijst bij openen.
@@ -2675,6 +2701,39 @@ mod tests {
     fn probe_tcp_treats_an_unresolvable_name_as_unreachable() {
         // .invalid is gereserveerd (RFC 2606) en resolvet nooit.
         assert!(!probe_tcp("taurus-nonexistent.invalid", 22, 300));
+    }
+
+    #[test]
+    fn probe_tcp_finds_the_working_address_of_a_multi_address_name() {
+        use std::net::TcpListener;
+        // "localhost" levert doorgaans zowel ::1 als 127.0.0.1 op. We luisteren
+        // op precies EEN daarvan, dus dit slaagt alleen als alle adressen aan
+        // bod komen. Serieel proberen met een gedeelde deadline liet een naam
+        // met meerdere adressen ten onrechte als onbereikbaar gelden.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        assert!(
+            probe_tcp("localhost", port, 2000),
+            "moet het werkende adres vinden, ook als een ander adres eerst komt"
+        );
+    }
+
+    // Meet tegen een echte host uit het eigen netwerk. Draaien met:
+    //   set TAURUS_TEST_HOST=192.168.2.9 && cargo test -- --ignored
+    // Geen adressen in de code: dit is een publieke repo.
+    #[test]
+    #[ignore]
+    fn probe_tcp_reaches_a_real_host_from_the_environment() {
+        let host = std::env::var("TAURUS_TEST_HOST")
+            .expect("zet TAURUS_TEST_HOST=<hostname of ip>");
+        let port: u16 = std::env::var("TAURUS_TEST_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(22);
+        let t0 = std::time::Instant::now();
+        let ok = probe_tcp(&host, port, REACH_TIMEOUT_MS);
+        println!("{}:{} bereikbaar={} in {:?}", host, port, ok, t0.elapsed());
+        assert!(ok, "{}:{} niet bereikbaar binnen {}ms", host, port, REACH_TIMEOUT_MS);
     }
 
     #[test]
