@@ -971,8 +971,13 @@ fn start_pty(
     }
     cmd.cwd(path);
     // Erf de omgeving van het werkstation (PATH, USERPROFILE, APPDATA ...) zodat
-    // claude zijn config/credentials vindt.
+    // claude zijn config/credentials vindt -- maar niet de variabelen waarmee een
+    // agent zijn EIGEN sessie beschrijft (#101).
+    let from_agent = std::env::var("CLAUDECODE").is_ok();
     for (k, v) in std::env::vars() {
+        if inherits_session_marker(&k, from_agent) {
+            continue;
+        }
         cmd.env(k, v);
     }
 
@@ -1028,6 +1033,26 @@ fn start_pty(
         },
     );
     Ok(())
+}
+
+// Beschrijft deze variabele de sessie van de agent die TAURUS startte? Zo ja,
+// hoort hij niet mee naar een nieuwe agent: die is geen kindsessie maar een
+// zelfstandige sessie. Erven we ze toch, dan zet claude zijn transcript uit
+// ("inherited CLAUDE_CODE_CHILD_SESSION marker") en werkt --resume niet meer --
+// zonder dat iets uitlegt waarom (#101).
+//
+// NO_COLOR alleen weglaten als de omgeving van een agent komt: los is het een
+// legitieme voorkeur van de gebruiker, maar naast CLAUDECODE is het gezet voor
+// een subproces van een agent, en Taurus levert juist een kleurenterminal.
+fn inherits_session_marker(key: &str, from_agent: bool) -> bool {
+    matches!(
+        key,
+        "CLAUDECODE"
+            | "CLAUDE_CODE_CHILD_SESSION"
+            | "CLAUDE_CODE_SESSION_ID"
+            | "CLAUDE_CODE_ENTRYPOINT"
+            | "CLAUDE_PID"
+    ) || (from_agent && key == "NO_COLOR")
 }
 
 fn norm_title(title: &str) -> String {
@@ -2932,6 +2957,29 @@ mod tests {
         h.os = "windows".into();
         h.via = "wsl".into();
         assert_eq!(remote_agent_program("claude", effective_os(&h)), "claude");
+    }
+
+    #[test]
+    fn session_markers_do_not_leak_into_a_new_agent() {
+        // Deze beschrijven de sessie van de agent die Taurus startte; erven zou
+        // de nieuwe agent tot kindsessie maken en zijn transcript uitzetten.
+        for k in [
+            "CLAUDECODE",
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CLAUDE_PID",
+        ] {
+            assert!(inherits_session_marker(k, true), "{} moet gefilterd worden", k);
+            assert!(inherits_session_marker(k, false), "{} ook zonder CLAUDECODE", k);
+        }
+        // Wat de agent WEL nodig heeft blijft staan.
+        for k in ["PATH", "USERPROFILE", "APPDATA", "HOME", "CLAUDE_CODE_GIT_BASH_PATH"] {
+            assert!(!inherits_session_marker(k, true), "{} mag niet verdwijnen", k);
+        }
+        // NO_COLOR: alleen weg als de omgeving van een agent komt.
+        assert!(inherits_session_marker("NO_COLOR", true));
+        assert!(!inherits_session_marker("NO_COLOR", false), "los is het een gebruikersvoorkeur");
     }
 
     #[test]
