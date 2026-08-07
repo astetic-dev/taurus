@@ -31,6 +31,8 @@ const I18N = {
     remote_workdir: "Werkmap op de host", remote_workdir_ph: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
     remote_hint: "De agent draait op die machine; deze werkmap geldt daar.",
     remote_need_path: "Vul een werkmap op de host in.",
+    remote_local_only: "Werkt alleen bij een sessie op deze computer",
+    dropper_remote: "De agent draait op een andere machine — bestanden hierheen slepen zou een pad opleveren dat die agent niet kan openen.",
     launch_command: "Commando-override", command_ph: "leeg = start de gekozen agent",
     command_hint: "Draait dit programma zoals het er staat, in plaats van de agent.",
     command_warn: "⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.",
@@ -130,6 +132,8 @@ const I18N = {
     remote_workdir: "Working directory on the host", remote_workdir_ph: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
     remote_hint: "The agent runs on that machine; this working directory applies there.",
     remote_need_path: "Enter a working directory on the host.",
+    remote_local_only: "Only works for a session on this computer",
+    dropper_remote: "The agent runs on another machine — dropping files here would produce a path that agent cannot open.",
     launch_command: "Command override", command_ph: "empty = start the selected agent",
     command_hint: "Runs this program as-is, instead of the agent.",
     command_warn: "⚠ Agent flags do not apply: model, mode and task are not passed.",
@@ -725,11 +729,7 @@ async function selectProject(p, card) {
   els.commandInput.value = p.command || "";
   refreshOverrideState();
   els.status.textContent = "";
-  const ok = await invoke("path_exists", { path: p.path });
-  els.warn.classList.toggle("hidden", ok);
-  let hasMd = false;
-  try { hasMd = await invoke("has_claude_md", { path: p.path }); } catch (_) {}
-  els.claudeWarn.classList.toggle("hidden", hasMd);
+  await refreshHostState(); // doet de lokale pad-checks, of slaat ze over bij remote
 }
 async function loadProjects() { projects = await invoke("get_projects"); renderProjects(); }
 
@@ -752,10 +752,29 @@ function fillHostSelect() {
 }
 // Bij een remote host betekent "werkmap" een pad OP DIE MACHINE, niet het lokale
 // projectpad -- daarom een eigen veld, voorgevuld met het standaardpad van de host.
-function refreshHostState() {
+async function refreshHostState() {
   const h = hostById(els.hostInput.value);
   els.remotePathRow.classList.toggle("hidden", !h);
   if (h && !els.remotePathInput.value.trim()) els.remotePathInput.value = h.default_project || "";
+  // "Map niet bereikbaar" en "Geen CLAUDE.md" zijn checks op DEZE machine. Bij een
+  // remote host gaat het om een pad daar, dus die zouden altijd vals alarm slaan.
+  if (h) {
+    els.warn.classList.add("hidden");
+    els.claudeWarn.classList.add("hidden");
+  } else if (selected && selected.path) {
+    await checkLocalPath(selected.path);
+  }
+}
+
+// De twee lokale controles op de gekozen werkmap, apart zodat zowel het kiezen
+// van een project als het terugschakelen naar "deze computer" ze kan herhalen.
+async function checkLocalPath(path) {
+  let ok = false;
+  try { ok = await invoke("path_exists", { path }); } catch (_) {}
+  els.warn.classList.toggle("hidden", ok);
+  let hasMd = false;
+  try { hasMd = await invoke("has_claude_md", { path }); } catch (_) {}
+  els.claudeWarn.classList.toggle("hidden", hasMd);
 }
 
 // Open de OS-mapkiezer en start een ad-hoc launch in de gekozen map: vul het
@@ -825,6 +844,7 @@ function showView(target) {
     const s = sessions.get(target);
     if (s) { s.awaiting = false; refitTerm(s); s.term.focus(); }
   }
+  updateDropperForSession(); // DROPZONE geldt per sessie: remote kan niet
   renderTabs();
 }
 
@@ -989,7 +1009,10 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   // split-paneel). Daarom reconstrueren we eerst de volledige LOGISCHE regel
   // (eerste rij + alle isWrapped-vervolgrijen) en matchen we daarop; anders zou
   // de bevraagde rij alleen een staartfragment zien -> verkeerd (relatief) pad.
-  if (term.registerLinkProvider) {
+  // Niet bij een remote sessie: de preview leest het bestand met read_file op DIT
+  // werkstation, en het pad dat de agent noemt bestaat op de host. Een klikbaar
+  // ogende link die niets doet is misleidender dan geen link.
+  if (term.registerLinkProvider && !hostId) {
     term.registerLinkProvider({
       provideLinks(y, cb) {
         const buf = term.buffer.active;
@@ -1505,22 +1528,29 @@ function openTabMenu(x, y, id) {
   if (!s) return;
   const m = document.createElement("div");
   m.className = "ctx-menu";
+  // Preview en Verkenner lezen de werkmap van DIT werkstation. Bij een remote
+  // sessie staat die map op de host: Verkenner zou niets of de verkeerde map
+  // openen en de preview blijft leeg. Uitgrijzen i.p.v. stil laten mislukken.
+  const off = s.hostId ? " disabled" : "";
+  const why = s.hostId ? ` title="${escapeHtml(t("remote_local_only"))}"` : "";
   m.innerHTML = `
     <div class="ctx-item" data-act="restart">${t("ctx_restart")}</div>
-    <div class="ctx-item" data-act="preview">${t("ctx_preview")}</div>
+    <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
     <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
-    <div class="ctx-item" data-act="explorer">${t("ctx_explorer")}</div>
+    <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
   m.querySelector('[data-act="restart"]').addEventListener("click", () => restartSession(id));
-  m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
   m.querySelector('[data-act="speak"]').addEventListener("click", () => {
     closeTabMenu();
     const sel = s.term.getSelection();
     if (sel) speak(sel, true); // force: uitspreken is hier expliciet gevraagd
   });
-  m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
+  if (!s.hostId) {
+    m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
+    m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
+  }
   document.body.appendChild(m);
   const r = m.getBoundingClientRect();
   if (r.right > window.innerWidth) m.style.left = (window.innerWidth - r.width - 6) + "px";
@@ -1838,6 +1868,23 @@ function dropperCwd() {
   return null;
 }
 
+// De DROPZONE zet een bestand in de input-map van de werkmap en plakt dat pad in
+// de prompt. Bij een remote sessie klopt geen van beide: de werkmap staat op de
+// host, dus save_dropped_path zou lokaal naar een niet-bestaand pad schrijven, en
+// "alleen pad" zou een pad van DIT werkstation in een prompt zetten die het niet
+// kan openen -- de agent meldt dan "file not found" en niemand weet waarom.
+// Overzetten hoort met scp te gebeuren; tot die er is, blokkeren we het zichtbaar.
+function activeSessionIsRemote() {
+  const s = sessions.get(current);
+  return !!(s && s.hostId);
+}
+function updateDropperForSession() {
+  if (!els.fileDropper) return;
+  const remote = activeSessionIsRemote();
+  els.fileDropper.classList.toggle("dropzone-disabled", remote);
+  els.fileDropper.title = remote ? t("dropper_remote") : "";
+}
+
 // Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
 // door een spatie zodat je meteen door kunt typen). `silent` = geen melding als er
 // geen actieve terminal is (voor auto-invoegen bij een drop op het startscherm).
@@ -1903,6 +1950,7 @@ function wireFileDropper() {
     if (!mode) return; // buiten de dropper: negeren
     const paths = (e.payload && e.payload.paths) || [];
     if (!paths.length) return;
+    if (activeSessionIsRemote()) { toast(t("dropper_remote"), "err"); return; }
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
     for (const src of paths) {
@@ -1924,6 +1972,7 @@ function wireFileDropper() {
   });
 
   els.dropperPaste.addEventListener("click", async () => {
+    if (activeSessionIsRemote()) { toast(t("dropper_remote"), "err"); return; }
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
     try {
@@ -1941,6 +1990,7 @@ function wireFileDropper() {
 // Komt het van elders -> vraag Verplaats/Kopieer/Alleen-pad (er is geen drop-positie
 // om op te hittesten, dus een kleine keuze-rij bovenin de dropper).
 async function addFileViaPicker() {
+  if (activeSessionIsRemote()) { toast(t("dropper_remote"), "err"); return; }
   const cwd = dropperCwd();
   if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
   const inputDir = cwd.replace(/\//g, "\\").replace(/\\+$/, "") + "\\input";

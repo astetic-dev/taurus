@@ -266,6 +266,11 @@ body.reordering, body.reordering * { cursor: grabbing !important; }
 .claude-warn { color: var(--orange); font-size: 12px; margin-top: 6px; }
 .command-warn { color: var(--orange); font-size: 12px; margin-top: 6px; }
 .sublabel { display: block; font-size: 12px; color: var(--text-dim); margin: 10px 0 6px; }
+/* Wat bij een remote sessie niet kan, wordt zichtbaar uitgeschakeld i.p.v. stil
+   te mislukken: de werkmap staat dan op een andere machine (#98). */
+.ctx-item.disabled { opacity: .4; cursor: not-allowed; pointer-events: none; }
+.dropzone-disabled { opacity: .45; }
+.dropzone-disabled .dz, .dropzone-disabled button { pointer-events: none; }
 /* Hostaanduiding op de tab: leesbaar maar ondergeschikt aan de sessietitel. */
 .tab-host {
   font-size: 10px; padding: 1px 5px; margin-right: 6px; border-radius: 3px;
