@@ -27,7 +27,11 @@ const I18N = {
     model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exact model-ID mag ook.",
     model_fable: "nieuwste Fable", model_opus: "nieuwste Opus", model_sonnet: "nieuwste Sonnet",
     model_haiku: "nieuwste Haiku", model_opusplan: "Opus in plan-modus, daarna Sonnet",
+    launch_command: "Commando-override", command_ph: "leeg = start de gekozen agent",
+    command_hint: "Draait dit programma zoals het er staat, in plaats van de agent.",
+    command_warn: "⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.",
     cap_agent: "Agent", cap_model: "Model (leeg = standaard)",
+    cap_command: "Commando-override — draait dit programma i.p.v. de agent (optioneel)",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
@@ -118,7 +122,11 @@ const I18N = {
     model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact model ID works too.",
     model_fable: "newest Fable", model_opus: "newest Opus", model_sonnet: "newest Sonnet",
     model_haiku: "newest Haiku", model_opusplan: "Opus in plan mode, Sonnet after",
+    launch_command: "Command override", command_ph: "empty = start the selected agent",
+    command_hint: "Runs this program as-is, instead of the agent.",
+    command_warn: "⚠ Agent flags do not apply: model, mode and task are not passed.",
     cap_agent: "Agent", cap_model: "Model (empty = default)",
+    cap_command: "Command override — runs this program instead of the agent (optional)",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
@@ -552,6 +560,22 @@ function escapeHtml(s) {
 }
 function modalOpen() { return !!document.querySelector(".modal:not(.hidden)"); }
 
+// Een commando-override draait dat programma zoals het er staat: create_session
+// slaat build_command dan volledig over, dus --model, de modus-mapping en de taak
+// gaan niet mee. Dat was onzichtbaar -- de velden bleven bewerkbaar en leken te
+// gelden, wat een agent stil op zijn default-model liet draaien (#93). Grijs ze
+// uit en toon waarom, zodra er een override staat.
+function applyOverrideState(command, fields, warnEl) {
+  const on = !!(command || "").trim();
+  for (const el of fields) if (el) el.disabled = on;
+  if (warnEl) warnEl.classList.toggle("hidden", !on);
+  return on;
+}
+// Het startformulier: model, modus en taak volgen het override-veld.
+function refreshOverrideState() {
+  applyOverrideState(els.commandInput.value, [els.modelInput, els.modeInput, els.taskInput], els.commandWarn);
+}
+
 /* ============ herordenen (slepen) ============ */
 // Slepen met de MUIS (pointer-events), niet HTML5-DnD: de file-dropper gebruikt
 // Tauri's eigen OS-drag-events (tauri://drag-*), en element-DnD is onder WebView2
@@ -690,6 +714,8 @@ async function selectProject(p, card) {
   els.modelInput.value = p.model || "";
   updateModelDatalist(els.modelSuggestions, els.agentInput.value);
   fillModeSelect(els.modeInput, els.agentInput.value, p.mode || "default");
+  els.commandInput.value = p.command || "";
+  refreshOverrideState();
   els.status.textContent = "";
   const ok = await invoke("path_exists", { path: p.path });
   els.warn.classList.toggle("hidden", ok);
@@ -985,7 +1011,7 @@ async function startSession() {
   const id = "s" + (++seq);
   const uuid = crypto.randomUUID();
   const mode = els.modeInput.value || "default";
-  const command = selected.command || "";
+  const command = els.commandInput.value.trim();
   const agent = els.agentInput.value || "claude";
   const model = els.modelInput.value.trim();
 
@@ -1019,7 +1045,7 @@ async function addAgentFromForm() {
     mode: els.modeInput.value || "default",
     agent: els.agentInput.value || "claude",
     model: els.modelInput.value.trim(),
-    command: selected.command || "",
+    command: els.commandInput.value.trim(),
   };
   const next = projects.filter((p) => p.id !== entry.id);
   next.push(entry);
@@ -1640,6 +1666,9 @@ function renderEditor() {
           <datalist id="dl-emodel-${i}">${modelSuggestionsFor(r.agent).map((s) => `<option value="${escapeHtml(suggestionValue(s))}"${typeof s !== "string" && s.key ? ` label="${escapeHtml(t(s.key))}"` : ""}></option>`).join("")}</datalist></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("launch_mode"))}</span>
           <select class="e-mode">${modesFor(r.agent).map((o) => `<option value="${o.value}"${clampMode(r.agent, r.mode || "default") === o.value ? " selected" : ""}>${escapeHtml(t(o.key))}</option>`).join("")}</select></div>
+        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_command"))}</span>
+          <input class="e-command" type="text" placeholder="${escapeHtml(t("command_ph"))}" value="${escapeHtml(r.command || "")}" />
+          <span class="e-cmdwarn hidden">${escapeHtml(t("command_warn"))}</span></div>
       </div>
       <button class="e-del">🗑</button>`;
     row.querySelector(".e-color").addEventListener("input", (e) => (editRows[i].accent = e.target.value));
@@ -1660,6 +1689,16 @@ function renderEditor() {
     });
     row.querySelector(".e-browse").addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
     row.querySelector(".e-del").addEventListener("click", () => { editRows.splice(i, 1); renderEditor(); });
+    // Override-veld (#93): schakelt model, modus en taak van DEZE rij uit, want
+    // die worden bij een override niet meegestuurd. Geen re-render -- dat zou de
+    // cursor uit het veld halen bij elke toetsaanslag.
+    const overrideFields = [row.querySelector(".e-model"), row.querySelector(".e-mode"), row.querySelector(".e-task")];
+    const cmdWarn = row.querySelector(".e-cmdwarn");
+    row.querySelector(".e-command").addEventListener("input", (e) => {
+      editRows[i].command = e.target.value;
+      applyOverrideState(e.target.value, overrideFields, cmdWarn);
+    });
+    applyOverrideState(r.command, overrideFields, cmdWarn);
     els.editorRows.appendChild(row);
   });
   // Vraag de CLI-lijst op voor de agents in deze editor; levert dat een nieuwe
@@ -1672,7 +1711,7 @@ function renderEditor() {
 async function saveEditor() {
   const cleaned = editRows
     .filter((r) => r.label.trim() && r.path.trim())
-    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: r.command || "" }));
+    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: (r.command || "").trim() }));
   if (cleaned.length === 0) { els.editorStatus.textContent = t("err_need_project"); els.editorStatus.className = "status-msg err"; return; }
   try { await invoke("save_projects", { projects: cleaned }); projects = cleaned; renderProjects(); els.editorModal.classList.add("hidden"); }
   catch (e) { els.editorStatus.textContent = "✗ " + e; els.editorStatus.className = "status-msg err"; }
@@ -2065,6 +2104,8 @@ window.addEventListener("DOMContentLoaded", () => {
     agentInput: document.querySelector("#agent-input"),
     modelInput: document.querySelector("#model-input"),
     modelSuggestions: document.querySelector("#model-suggestions"),
+    commandInput: document.querySelector("#command-input"),
+    commandWarn: document.querySelector("#command-warn"),
     helpTip: document.querySelector("#help-tip"),
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
@@ -2077,6 +2118,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
+  els.commandInput.addEventListener("input", refreshOverrideState);
   // Andere agent op het startformulier -> model-keuze EN modus-opties mee.
   // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
