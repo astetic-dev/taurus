@@ -149,6 +149,7 @@
                 <select id="agent-input">
                   <option value="claude" data-i18n="agent_claude">Claude Code</option>
                   <option value="agy" data-i18n="agent_agy">Antigravity</option>
+                  <option value="__command" data-i18n="agent_command">Eigen commando…</option>
                 </select>
               </div>
               <div class="field">
@@ -165,7 +166,7 @@
                   <option value="auto" data-i18n="mode_auto">Auto (accepteert acties)</option>
                 </select>
               </div>
-              <div class="field">
+              <div class="field hidden" id="command-field">
                 <label for="command-input"><span data-i18n="launch_command">Commando-override</span> <span class="opt" data-i18n="optional">(optioneel)</span></label>
                 <input id="command-input" type="text" autocomplete="off" data-i18n-ph="command_ph" placeholder="leeg = start de gekozen agent" />
                 <div class="hint" data-i18n="command_hint">Draait dit programma zoals het er staat, in plaats van de agent.</div>

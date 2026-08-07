@@ -286,7 +286,22 @@ body.reordering, body.reordering * { cursor: grabbing !important; }
    taaklijst-checkboxes daar blijven ongemoeid. */
 input:disabled, textarea:disabled, select:disabled { opacity: .45; cursor: not-allowed; }
 
-input, textarea {
+/* select stond hier niet in en kreeg dus de witte browser-default, naast
+   transparante invoervelden. Alles hetzelfde: appearance:none haalt de
+   platform-styling weg, met een eigen pijltje terug. */
+select {
+  appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 15px) calc(50% + 1px), calc(100% - 10px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
+}
+/* De uitklaplijst zelf tekent het OS; zonder dit blijft die wit. */
+select option { background: var(--bg-card); color: var(--text); }
+
+input, textarea, select {
   width: 100%;
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -297,7 +312,11 @@ input, textarea {
   font-family: inherit;
   resize: vertical;
 }
-input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+/* De taak is het veld waar een heel verhaal in gaat voordat de agent start --
+   dat verdient ruimte, zeker nu de andere rijen ingeklapt staan. */
+.e-task { min-height: 88px; resize: vertical; font-family: inherit; }
+.e-taskfield { grid-column: 1 / -1; }
 .hint { font-size: 11px; color: var(--text-dim); margin-top: 5px; }
 
 .launch-btn {

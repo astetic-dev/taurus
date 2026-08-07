@@ -57,6 +57,7 @@ const I18N = {
     cap_agent: "Agent", cap_model: "Model (leeg = standaard)",
     cap_command: "Commando-override — draait dit programma i.p.v. de agent (optioneel)",
     row_expand: "Openklappen", row_collapse: "Dichtklappen",
+    agent_command: "Eigen commando…",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
@@ -177,6 +178,7 @@ const I18N = {
     cap_agent: "Agent", cap_model: "Model (empty = default)",
     cap_command: "Command override — runs this program instead of the agent (optional)",
     row_expand: "Expand", row_collapse: "Collapse",
+    agent_command: "Own command…",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
@@ -621,9 +623,19 @@ function applyOverrideState(command, fields, warnEl) {
   if (warnEl) warnEl.classList.toggle("hidden", !on);
   return on;
 }
-// Het startformulier: model, modus en taak volgen het override-veld.
+// Het startformulier: de override zit achter de agent-keuze "Eigen commando…",
+// zodat het veld niet altijd in beeld staat voor iets dat zelden gebruikt wordt.
+// Model, modus en taak volgen dan de inhoud van dat veld.
 function refreshOverrideState() {
-  applyOverrideState(els.commandInput.value, [els.modelInput, els.modeInput, els.taskInput], els.commandWarn);
+  const chosen = els.agentInput.value === AGENT_COMMAND;
+  els.commandField.classList.toggle("hidden", !chosen);
+  applyOverrideState(chosen ? els.commandInput.value : "", [els.modelInput, els.modeInput, els.taskInput], els.commandWarn);
+}
+// Welke agent hoort er in het formulier te staan? Een project met een override
+// toont "Eigen commando…", ook al staat er claude/agy in projects.json.
+function agentChoiceFor(p) {
+  if ((p.command || "").trim()) return AGENT_COMMAND;
+  return AGENTS.includes(p.agent) ? p.agent : "claude";
 }
 
 /* ============ herordenen (slepen) ============ */
@@ -760,7 +772,7 @@ async function selectProject(p, card) {
   els.locBadge.className = "loc-badge " + locClass(p.path);
   els.titleInput.value = p.title || p.label;
   els.taskInput.value = p.task || "";
-  els.agentInput.value = AGENTS.includes(p.agent) ? p.agent : "claude";
+  els.agentInput.value = agentChoiceFor(p);
   els.modelInput.value = p.model || "";
   updateModelDatalist(els.modelSuggestions, els.agentInput.value);
   fillModeSelect(els.modeInput, els.agentInput.value, p.mode || "default");
@@ -1280,8 +1292,11 @@ async function startSession() {
   const id = "s" + (++seq);
   const uuid = crypto.randomUUID();
   const mode = els.modeInput.value || "default";
-  const command = els.commandInput.value.trim();
-  const agent = els.agentInput.value || "claude";
+  // "Eigen commando…" is een UI-keuze, geen agent: de agent blijft claude als
+  // terugval (de backend gebruikt hem toch niet zolang er een override staat).
+  const isCmd = els.agentInput.value === AGENT_COMMAND;
+  const command = isCmd ? els.commandInput.value.trim() : "";
+  const agent = isCmd ? "claude" : (els.agentInput.value || "claude");
   const model = els.modelInput.value.trim();
   const hostId = els.hostInput.value || "";
   // Remote: het pad geldt op de HOST, dus niet het lokale projectpad meesturen.
@@ -1319,9 +1334,9 @@ async function addAgentFromForm() {
     task: els.taskInput.value.trim(),
     accent: selected.accent || "#7c9cff",
     mode: els.modeInput.value || "default",
-    agent: els.agentInput.value || "claude",
+    agent: els.agentInput.value === AGENT_COMMAND ? "claude" : (els.agentInput.value || "claude"),
     model: els.modelInput.value.trim(),
-    command: els.commandInput.value.trim(),
+    command: els.agentInput.value === AGENT_COMMAND ? els.commandInput.value.trim() : "",
   };
   const next = projects.filter((p) => p.id !== entry.id);
   next.push(entry);
@@ -1940,11 +1955,19 @@ function openEditorAdd() {
 // (die de hele lijst opnieuw opbouwt), waar een klasse op het element dat niet
 // zou doen.
 let editorOpen = new Set();
+// Pseudo-agent: "voer mijn eigen commando uit". Staat niet in projects.json --
+// daar blijft het `command`-veld de waarheid, en de UI leidt de keuze eruit af.
+const AGENT_COMMAND = "__command";
 
 function renderEditor() {
   els.editorRows.innerHTML = "";
   editRows.forEach((r, i) => {
     const open = editorOpen.has(i);
+    // Een override VERVANGT de agent, dus hij hoort in de agent-keuze thuis in
+    // plaats van als extra veld dat altijd zichtbaar is. Het veld verschijnt
+    // alleen bij die keuze; de bestaande waarde in projects.json bepaalt of de
+    // rij er al mee begint.
+    const hasOverride = !!(r.command || "").trim();
     const row = document.createElement("div");
     row.className = "erow" + (open ? " open" : "");
     // Ingeklapt toont een rij precies wat hem identificeert: kleur, label, pad.
@@ -1970,14 +1993,15 @@ function renderEditor() {
         <div class="e-grid">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_tabtitle"))}</span>
           <input class="e-title" type="text" placeholder="${escapeHtml(t("ph_title"))}" value="${escapeHtml(r.title || "")}" /></div>
-        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_task"))}</span>
-          <input class="e-task" type="text" placeholder="${escapeHtml(t("ph_task"))}" value="${escapeHtml(r.task || "")}" /></div>
         </div>
+        <div class="e-field e-taskfield"><span class="e-cap">${escapeHtml(t("cap_task"))}</span>
+          <textarea class="e-task" rows="4" placeholder="${escapeHtml(t("ph_task"))}">${escapeHtml(r.task || "")}</textarea></div>
         <div class="e-grid e-grid3">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_agent"))}</span>
           <select class="e-agent">
-            <option value="claude"${(r.agent || "claude") === "claude" ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
-            <option value="agy"${r.agent === "agy" ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>
+            <option value="claude"${(!hasOverride && (r.agent || "claude") === "claude") ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
+            <option value="agy"${(!hasOverride && r.agent === "agy") ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>
+            <option value="${AGENT_COMMAND}"${hasOverride ? " selected" : ""}>${escapeHtml(t("agent_command"))}</option>
           </select></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_model"))}</span>
           <input class="e-model" type="text" list="dl-emodel-${i}" autocomplete="off" placeholder="${escapeHtml(t("model_ph"))}" value="${escapeHtml(r.model || "")}" />
@@ -1985,9 +2009,9 @@ function renderEditor() {
         <div class="e-field"><span class="e-cap">${escapeHtml(t("launch_mode"))}</span>
           <select class="e-mode">${modesFor(r.agent).map((o) => `<option value="${o.value}"${clampMode(r.agent, r.mode || "default") === o.value ? " selected" : ""}>${escapeHtml(t(o.key))}</option>`).join("")}</select></div>
         </div>
-        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_command"))}</span>
+        <div class="e-field e-cmdfield${hasOverride ? "" : " hidden"}"><span class="e-cap">${escapeHtml(t("cap_command"))}</span>
           <input class="e-command" type="text" placeholder="${escapeHtml(t("command_ph"))}" value="${escapeHtml(r.command || "")}" />
-          <span class="e-cmdwarn hidden">${escapeHtml(t("command_warn"))}</span></div>
+          <span class="e-cmdwarn${hasOverride ? "" : " hidden"}">${escapeHtml(t("command_warn"))}</span></div>
       </div>`;
     // Uitklappen: alleen deze rij, de andere blijven zoals ze staan.
     const toggle = () => {
@@ -2015,9 +2039,17 @@ function renderEditor() {
     // meeveranderen; de modus wordt geclampt (claude "plan" bestaat niet voor
     // agy) en het model gewist (een model van de vorige agent is niet geldig).
     row.querySelector(".e-agent").addEventListener("change", (e) => {
-      editRows[i].agent = e.target.value;
-      editRows[i].mode = clampMode(e.target.value, editRows[i].mode || "default");
-      editRows[i].model = "";
+      if (e.target.value === AGENT_COMMAND) {
+        // Agent blijft staan als terugvalwaarde; de backend negeert hem toch
+        // zolang er een override is. Een placeholder zodat het veld niet leeg
+        // opent en de rij meteen als override herkenbaar is.
+        editRows[i].command = editRows[i].command || "cmd.exe";
+      } else {
+        editRows[i].agent = e.target.value;
+        editRows[i].command = "";
+        editRows[i].mode = clampMode(e.target.value, editRows[i].mode || "default");
+        editRows[i].model = "";
+      }
       renderEditor();
     });
     row.querySelector(".e-browse").addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
@@ -2039,7 +2071,7 @@ function renderEditor() {
       editRows[i].command = e.target.value;
       applyOverrideState(e.target.value, overrideFields, cmdWarn);
     });
-    applyOverrideState(r.command, overrideFields, cmdWarn);
+    if (hasOverride) applyOverrideState(r.command, overrideFields, cmdWarn);
     els.editorRows.appendChild(row);
   });
   // Vraag de CLI-lijst op voor de agents in deze editor; levert dat een nieuwe
@@ -2495,6 +2527,7 @@ window.addEventListener("DOMContentLoaded", () => {
     modelSuggestions: document.querySelector("#model-suggestions"),
     commandInput: document.querySelector("#command-input"),
     commandWarn: document.querySelector("#command-warn"),
+    commandField: document.querySelector("#command-field"),
     hostInput: document.querySelector("#host-input"),
     remotePathRow: document.querySelector("#remote-path-row"),
     remotePathInput: document.querySelector("#remote-path-input"),
@@ -2541,6 +2574,8 @@ window.addEventListener("DOMContentLoaded", () => {
   // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
   els.agentInput.addEventListener("change", () => {
+    refreshOverrideState();
+    if (els.agentInput.value === AGENT_COMMAND) return; // geen model/modus bij een eigen commando
     els.modelInput.value = "";
     updateModelDatalist(els.modelSuggestions, els.agentInput.value);
     fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value);
