@@ -150,6 +150,23 @@ struct Host {
     // Versie van de taurus-agent op de host; leeg als hij er niet staat.
     #[serde(default)]
     agent_version: String,
+    // "" = de agent draait rechtstreeks op de host. "wsl" = hij draait in WSL op
+    // een Windows-host. Dat is de goedkope route naar echte persistentie op
+    // Windows: WSL heeft tmux, Windows niet. De prijs is dat de agent dan in
+    // Linux zit en Windows-paden via /mnt/c ziet, en dat WSL zijn VM afsluit bij
+    // inactiviteit -- wat een "persistente" sessie alsnog kan beeindigen.
+    #[serde(default)]
+    via: String,
+}
+
+// Onder welk OS draait de agent uiteindelijk? Bij `via: wsl` is de host Windows
+// maar is alles daarbinnen Linux: paden, quoting en de naam van de binary.
+fn effective_os(host: &Host) -> &str {
+    if host.via == "wsl" {
+        "linux"
+    } else {
+        &host.os
+    }
 }
 
 fn default_ssh_port() -> u16 {
@@ -289,6 +306,9 @@ struct HostProbe {
     // Uitgaand HTTPS naar api.anthropic.com. Zonder dit kan er geen agent
     // draaien, hoe goed de rest ook werkt -- dus expliciet meten.
     outbound: bool,
+    // Alleen voor Windows-hosts: heeft WSL zowel tmux als een agent-CLI? Dan is
+    // `via: wsl` de enige route naar echte sessiepersistentie op die machine.
+    wsl_usable: bool,
     error: String,
 }
 
@@ -424,6 +444,22 @@ try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -Timeo
     if p.mux.is_empty() {
         p.mux = "none".into();
     }
+
+    // Windows zonder multiplexer: kijk of WSL er wel een heeft. Dat is de enige
+    // route naar heraanhaken op zo'n machine zonder iets te installeren. Losse
+    // ronde, want het script moet door cmd.exe EN door sh heen -- vandaar base64.
+    if p.os == "windows" {
+        let inner = "command -v tmux >/dev/null 2>&1 || exit 1; \
+                     { command -v claude >/dev/null 2>&1 || [ -x \"$HOME/.local/bin/claude\" ]; } || exit 1; \
+                     echo WSLOK";
+        let cmd = format!(
+            "wsl -e sh -c \"echo {} | base64 -d | sh\"",
+            b64(inner.as_bytes())
+        );
+        if let Ok((out, _)) = ssh_run(&host, &cmd) {
+            p.wsl_usable = out.contains("WSLOK");
+        }
+    }
     p
 }
 
@@ -456,6 +492,15 @@ fn remote_join(os: &str, dir: &str, name: &str) -> String {
 #[tauri::command(async)]
 fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<String, String> {
     let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    if host.via == "wsl" {
+        // De scp-server draait op Windows en kan niet in het ext4 van WSL
+        // schrijven; dat zou via \\wsl.localhost\<distro>\... moeten en dat is
+        // een eigen puzzel. Liever een duidelijke melding dan een bestand dat
+        // ergens anders landt dan de agent verwacht.
+        return Err(
+            "Bestanden overzetten naar een agent in WSL kan nog niet. Zet het bestand met de hand neer, of gebruik een host zonder WSL-route.".into(),
+        );
+    }
     let name = Path::new(&src)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -1278,6 +1323,35 @@ fn build_remote_payload(
     program: &str,
     args: &[String],
 ) -> Result<String, String> {
+    build_remote_payload_via(mux, os, "", session, cwd, program, args)
+}
+
+// `via: wsl` bouwt de Linux-payload en zet die in WSL. De payload gaat als
+// base64 door cmd.exe: hij bevat quotes en pipes, en die zouden er onderweg
+// anders uit gehaald worden. Deze exacte vorm is tegen een echte host getest.
+fn build_remote_payload_via(
+    mux: &str,
+    os: &str,
+    via: &str,
+    session: &str,
+    cwd: &str,
+    program: &str,
+    args: &[String],
+) -> Result<String, String> {
+    if via == "wsl" {
+        let inner = build_remote_payload(mux, "linux", session, cwd, program, args)?;
+        // Het script gaat naar een BESTAND en wordt daarna met exec gestart, niet
+        // door een pipe (`... | sh`) gevoerd. Met een pipe krijgt die shell zijn
+        // stdin van de pipe in plaats van de terminal, en dan weigert tmux te
+        // starten met "open terminal failed: not a terminal". Na de pipeline erft
+        // exec de stdin van de buitenste sh, en dat is de pty van ssh -t.
+        return Ok(format!(
+            "wsl -e sh -c \"echo {} | base64 -d > /tmp/{}.sh && exec sh /tmp/{}.sh\"",
+            b64(inner.as_bytes()),
+            session,
+            session
+        ));
+    }
     match mux {
         // Eigen agent: geen shellquoting nodig, en hij bestaat op beide OS'en.
         "taurus-agent" => {
@@ -1364,7 +1438,15 @@ fn wrap_remote(
         return Err("host heeft geen hostname".into());
     }
     let session = mux_session_name(&host.id, cwd);
-    let payload = build_remote_payload(&host.mux, &host.os, &session, cwd, &program, &args)?;
+    let payload = build_remote_payload_via(
+        &host.mux,
+        effective_os(host),
+        &host.via,
+        &session,
+        cwd,
+        &program,
+        &args,
+    )?;
 
     // -t forceert een pty aan de andere kant; zonder pty tekent de agent-TUI niet.
     let mut a = vec!["-t".to_string()];
@@ -1423,7 +1505,7 @@ fn create_session(
             &mode,
             &model,
             full_paths,
-            host.as_ref().map(|h| h.os.as_str()),
+            host.as_ref().map(|h| effective_os(h)),
         )
     };
     let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
@@ -1509,7 +1591,7 @@ fn restart_session(
             &mode,
             &model,
             full_paths,
-            host.as_ref().map(|h| h.os.as_str()),
+            host.as_ref().map(|h| effective_os(h)),
         )
     };
     // Remote herstart: het kappen hierboven doodt alleen de lokale ssh.exe. Draait
@@ -2800,7 +2882,56 @@ mod tests {
             os: "linux".into(),
             mux: "tmux".into(),
             agent_version: String::new(),
+            via: String::new(),
         }
+    }
+
+    #[test]
+    fn via_wsl_builds_a_linux_payload_and_wraps_it_for_cmd() {
+        let mut h = test_host();
+        h.os = "windows".into();
+        h.via = "wsl".into();
+        h.mux = "tmux".into();
+        assert_eq!(effective_os(&h), "linux", "binnen WSL is alles Linux");
+
+        let (_, args) = wrap_remote(&h, "/home/arjen/proj", "claude".into(), vec!["-n".into()]).unwrap();
+        let payload = args.last().unwrap();
+        assert!(payload.starts_with("wsl -e sh -c \""));
+        // Alles tussen de dubbele quotes moet shell-neutraal zijn: de echte
+        // payload zit als base64 verpakt, want hij bevat zelf quotes en pipes
+        // die cmd.exe er anders uit haalt.
+        assert!(
+            payload.contains("> /tmp/") && payload.contains("&& exec sh /tmp/"),
+            "moet via een bestand starten, niet via een pipe -- anders heeft tmux geen tty: {}",
+            payload
+        );
+        let inner = payload
+            .trim_start_matches("wsl -e sh -c \"echo ")
+            .split(' ')
+            .next()
+            .unwrap();
+        assert!(
+            inner.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='),
+            "payload is niet zuiver base64: {}",
+            inner
+        );
+        // En het is de tmux-vorm, niet de PowerShell-vorm van een Windows-host.
+        let expected = b64(
+            build_remote_payload("tmux", "linux", &mux_session_name(&h.id, "/home/arjen/proj"),
+                                 "/home/arjen/proj", "claude", &["-n".to_string()])
+                .unwrap()
+                .as_bytes(),
+        );
+        assert_eq!(inner, expected);
+    }
+
+    #[test]
+    fn via_wsl_uses_the_unix_agent_name() {
+        // Zonder dit zou "claude.exe" in WSL gezocht worden.
+        let mut h = test_host();
+        h.os = "windows".into();
+        h.via = "wsl".into();
+        assert_eq!(remote_agent_program("claude", effective_os(&h)), "claude");
     }
 
     #[test]
@@ -3112,6 +3243,7 @@ mod tests {
             os: std::env::var("TAURUS_TEST_OS").unwrap_or_else(|_| "windows".into()),
             mux: std::env::var("TAURUS_TEST_MUX").unwrap_or_else(|_| "none".into()),
             agent_version: String::new(),
+            via: String::new(),
         };
         let cwd = std::env::var("TAURUS_TEST_CWD").unwrap_or_else(|_| r"C:\Users\arjen".into());
         // Exact het pad dat create_session loopt: agent-vlaggen eerst, dan de
@@ -3183,6 +3315,7 @@ mod tests {
             os: "linux".into(),
             mux: "tmux".into(),
             agent_version: String::new(),
+            via: String::new(),
         };
         let txt = serde_json::to_string(&src).unwrap();
         let back: Host = serde_json::from_str(&txt).unwrap();

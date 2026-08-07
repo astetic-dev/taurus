@@ -347,6 +347,11 @@
             <div class="e-pathrow"><input id="hf-key" type="text" placeholder="~/.ssh/id_ed25519" /><button id="hf-key-browse" class="e-browse">📁</button></div></div>
           <div class="e-field"><span class="e-cap" data-i18n="host_default_project">Standaard werkmap op de host</span>
             <input id="hf-project" type="text" placeholder="C:\Users\arjen  of  /home/arjen/proj" /></div>
+          <div class="e-field"><span class="e-cap" data-i18n="host_via">Waar draait de agent</span>
+            <select id="hf-via">
+              <option value="" data-i18n="host_via_direct">Rechtstreeks op de machine</option>
+              <option value="wsl" data-i18n="host_via_wsl">In WSL (Windows-host, geeft tmux-persistentie)</option>
+            </select></div>
           <div class="modal-actions">
             <button id="hf-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
             <button id="hf-test" class="btn-primary" data-i18n="host_add_test">Toevoegen &amp; testen</button>

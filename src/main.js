@@ -44,6 +44,9 @@ const I18N = {
     host_no_claude: "⚠ Geen agent-CLI gevonden op deze machine — een sessie zal niet starten.",
     host_no_outbound: "⚠ Geen uitgaand HTTPS naar api.anthropic.com — een agent kan hier niet werken.",
     host_no_mux: "ℹ Geen tmux/psmux: een sessie is niet opnieuw aan te haken.",
+    host_via: "Waar draait de agent", host_via_direct: "Rechtstreeks op de machine",
+    host_via_wsl: "In WSL (Windows-host, geeft tmux-persistentie)",
+    host_wsl_tip: "💡 WSL op deze machine heeft tmux én een agent-CLI. Kies \"In WSL\" voor sessies die een verbroken verbinding overleven — de agent werkt dan wel in Linux, met Windows-schijven onder /mnt/c.",
     dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
     dropper_sending: "Bestand overzetten naar de host…",
     dropper_sent: "Op de host gezet",
@@ -160,6 +163,9 @@ const I18N = {
     host_no_claude: "⚠ No agent CLI found on this machine — a session will not start.",
     host_no_outbound: "⚠ No outbound HTTPS to api.anthropic.com — an agent cannot work here.",
     host_no_mux: "ℹ No tmux/psmux: a session cannot be reattached.",
+    host_via: "Where the agent runs", host_via_direct: "Directly on the machine",
+    host_via_wsl: "In WSL (Windows host, gives tmux persistence)",
+    host_wsl_tip: "💡 WSL on this machine has both tmux and an agent CLI. Pick \"In WSL\" for sessions that survive a dropped connection — the agent then works in Linux, with Windows drives under /mnt/c.",
     dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
     dropper_sending: "Copying file to the host…",
     dropper_sent: "Placed on the host",
@@ -840,7 +846,7 @@ function renderHostRows() {
 
 function openHostForm() {
   els.hfNickname.value = ""; els.hfHostname.value = ""; els.hfPort.value = "22";
-  els.hfUser.value = ""; els.hfKey.value = ""; els.hfProject.value = "";
+  els.hfUser.value = ""; els.hfKey.value = ""; els.hfProject.value = ""; els.hfVia.value = "";
   els.hostStatusMsg.textContent = ""; els.hostStatusMsg.className = "status-msg";
   els.hfReport.classList.add("hidden");
   els.hfForm.classList.remove("hidden");
@@ -865,6 +871,7 @@ async function addAndTestHost() {
     port: parseInt(els.hfPort.value, 10) || 22,
     key_path: els.hfKey.value.trim(),
     default_project: els.hfProject.value.trim(),
+    via: els.hfVia.value || "",
     os: "", mux: "", agent_version: "",
   };
   els.hostStatusMsg.textContent = t("host_testing");
@@ -881,7 +888,9 @@ async function addAndTestHost() {
     els.hostStatusMsg.className = "status-msg err";
     return;
   }
-  host.os = p.os; host.mux = p.mux || "none";
+  host.os = p.os;
+  // Via WSL is de multiplexer die van WSL (tmux), niet die van Windows.
+  host.mux = host.via === "wsl" ? "tmux" : (p.mux || "none");
   hosts.push(host);
   await invoke("save_hosts", { hosts });
   fillHostSelect();
@@ -925,6 +934,9 @@ function showProbeReport(p) {
   if (p.authOk && !p.outbound) lines.push(t("host_no_outbound"));
   if (p.authOk && (!p.mux || p.mux === "none")) lines.push(t("host_no_mux"));
   else if (p.mux) lines.push(`persistentie: ${p.mux}`);
+  // Windows zonder multiplexer maar mét een bruikbare WSL: dat is de enige route
+  // naar heraanhaken op die machine zonder iets te installeren.
+  if (p.wslUsable && (!p.mux || p.mux === "none")) lines.push(t("host_wsl_tip"));
   if (!lines.length) return;
   els.hfReport.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
   els.hfReport.classList.remove("hidden");
@@ -2445,6 +2457,7 @@ window.addEventListener("DOMContentLoaded", () => {
     hfUser: document.querySelector("#hf-user"),
     hfKey: document.querySelector("#hf-key"),
     hfProject: document.querySelector("#hf-project"),
+    hfVia: document.querySelector("#hf-via"),
     hfTest: document.querySelector("#hf-test"),
     hostStatusMsg: document.querySelector("#hf-status"),
     hfReport: document.querySelector("#hf-report"),
