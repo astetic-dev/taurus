@@ -56,6 +56,7 @@ const I18N = {
     command_warn: "⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.",
     cap_agent: "Agent", cap_model: "Model (leeg = standaard)",
     cap_command: "Commando-override — draait dit programma i.p.v. de agent (optioneel)",
+    row_expand: "Openklappen", row_collapse: "Dichtklappen",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
@@ -175,6 +176,7 @@ const I18N = {
     command_warn: "⚠ Agent flags do not apply: model, mode and task are not passed.",
     cap_agent: "Agent", cap_model: "Model (empty = default)",
     cap_command: "Command override — runs this program instead of the agent (optional)",
+    row_expand: "Expand", row_collapse: "Collapse",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
@@ -1920,7 +1922,9 @@ function slugify(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-")
 function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "" }; }
 function openEditor() {
   editRows = projects.map((p) => ({ ...p }));
-  if (editRows.length === 0) editRows.push(blankRow());
+  editorOpen = new Set();
+  // Eén enkele (lege) agent hoeft niet ingeklapt: dan is er niets te overzien.
+  if (editRows.length === 0) { editRows.push(blankRow()); editorOpen.add(0); }
   renderEditor();
   els.editorStatus.textContent = "";
   els.editorModal.classList.remove("hidden");
@@ -1929,24 +1933,47 @@ function openEditor() {
 function openEditorAdd() {
   openEditor();
   editRows.push(blankRow());
+  editorOpen.add(editRows.length - 1); // verse rij open: die ga je meteen invullen
   renderEditor();
 }
+// Welke rijen staan open. Een Set van INDEXEN houdt stand over een re-render
+// (die de hele lijst opnieuw opbouwt), waar een klasse op het element dat niet
+// zou doen.
+let editorOpen = new Set();
+
 function renderEditor() {
   els.editorRows.innerHTML = "";
   editRows.forEach((r, i) => {
+    const open = editorOpen.has(i);
     const row = document.createElement("div");
-    row.className = "erow";
+    row.className = "erow" + (open ? " open" : "");
+    // Ingeklapt toont een rij precies wat hem identificeert: kleur, label, pad.
+    // Uitgeklapt komen de negen velden erbij -- die samen zo'n 350px hoog waren,
+    // waardoor er maar twee agents tegelijk op het scherm pasten.
     row.innerHTML = `
-      <input class="e-color" type="color" value="${r.accent || "#7c9cff"}" />
+      <div class="ehead">
+        <input class="e-color" type="color" value="${r.accent || "#7c9cff"}" />
+        <button class="e-toggle" aria-expanded="${open}" title="${escapeHtml(t(open ? "row_collapse" : "row_expand"))}">${open ? "▾" : "▸"}</button>
+        <div class="ehead-main">
+          <div class="ehead-label">${escapeHtml(r.label || t("ph_label"))}</div>
+          <div class="ehead-path">${escapeHtml(r.path || "—")}</div>
+        </div>
+        <button class="e-del" title="${escapeHtml(t("host_del"))}">🗑</button>
+      </div>
       <div class="e-fields">
+        <div class="e-grid">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_button"))}</span>
           <input class="e-label" type="text" placeholder="${escapeHtml(t("ph_label"))}" value="${escapeHtml(r.label)}" /></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_workdir"))}</span>
           <div class="e-pathrow"><input class="e-path" type="text" placeholder="${escapeHtml(t("ph_path"))}" value="${escapeHtml(r.path)}" /><button class="e-browse">📁</button></div></div>
+        </div>
+        <div class="e-grid">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_tabtitle"))}</span>
           <input class="e-title" type="text" placeholder="${escapeHtml(t("ph_title"))}" value="${escapeHtml(r.title || "")}" /></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_task"))}</span>
           <input class="e-task" type="text" placeholder="${escapeHtml(t("ph_task"))}" value="${escapeHtml(r.task || "")}" /></div>
+        </div>
+        <div class="e-grid e-grid3">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_agent"))}</span>
           <select class="e-agent">
             <option value="claude"${(r.agent || "claude") === "claude" ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
@@ -1957,14 +1984,29 @@ function renderEditor() {
           <datalist id="dl-emodel-${i}">${modelSuggestionsFor(r.agent).map((s) => `<option value="${escapeHtml(suggestionValue(s))}"${typeof s !== "string" && s.key ? ` label="${escapeHtml(t(s.key))}"` : ""}></option>`).join("")}</datalist></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("launch_mode"))}</span>
           <select class="e-mode">${modesFor(r.agent).map((o) => `<option value="${o.value}"${clampMode(r.agent, r.mode || "default") === o.value ? " selected" : ""}>${escapeHtml(t(o.key))}</option>`).join("")}</select></div>
+        </div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_command"))}</span>
           <input class="e-command" type="text" placeholder="${escapeHtml(t("command_ph"))}" value="${escapeHtml(r.command || "")}" />
           <span class="e-cmdwarn hidden">${escapeHtml(t("command_warn"))}</span></div>
-      </div>
-      <button class="e-del">🗑</button>`;
+      </div>`;
+    // Uitklappen: alleen deze rij, de andere blijven zoals ze staan.
+    const toggle = () => {
+      if (editorOpen.has(i)) editorOpen.delete(i); else editorOpen.add(i);
+      renderEditor();
+    };
+    row.querySelector(".e-toggle").addEventListener("click", toggle);
+    row.querySelector(".ehead-main").addEventListener("click", toggle);
+    // De kop toont label en pad; die moeten meelopen terwijl je typt, anders
+    // klopt de ingeklapte rij niet meer met wat erin staat.
     row.querySelector(".e-color").addEventListener("input", (e) => (editRows[i].accent = e.target.value));
-    row.querySelector(".e-label").addEventListener("input", (e) => (editRows[i].label = e.target.value));
-    row.querySelector(".e-path").addEventListener("input", (e) => (editRows[i].path = e.target.value));
+    row.querySelector(".e-label").addEventListener("input", (e) => {
+      editRows[i].label = e.target.value;
+      row.querySelector(".ehead-label").textContent = e.target.value || t("ph_label");
+    });
+    row.querySelector(".e-path").addEventListener("input", (e) => {
+      editRows[i].path = e.target.value;
+      row.querySelector(".ehead-path").textContent = e.target.value || "—";
+    });
     row.querySelector(".e-title").addEventListener("input", (e) => (editRows[i].title = e.target.value));
     row.querySelector(".e-task").addEventListener("input", (e) => (editRows[i].task = e.target.value));
     row.querySelector(".e-mode").addEventListener("change", (e) => (editRows[i].mode = e.target.value));
@@ -1979,7 +2021,15 @@ function renderEditor() {
       renderEditor();
     });
     row.querySelector(".e-browse").addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
-    row.querySelector(".e-del").addEventListener("click", () => { editRows.splice(i, 1); renderEditor(); });
+    row.querySelector(".e-del").addEventListener("click", () => {
+      editRows.splice(i, 1);
+      // editorOpen bevat INDEXEN, en die schuiven op bij een splice: zonder dit
+      // klapt na het verwijderen een andere rij open dan je open had staan.
+      editorOpen = new Set(
+        [...editorOpen].filter((n) => n !== i).map((n) => (n > i ? n - 1 : n))
+      );
+      renderEditor();
+    });
     // Override-veld (#93): schakelt model, modus en taak van DEZE rij uit, want
     // die worden bij een override niet meegestuurd. Geen re-render -- dat zou de
     // cursor uit het veld halen bij elke toetsaanslag.

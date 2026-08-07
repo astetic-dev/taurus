@@ -603,15 +603,33 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 .btn-ghost.add { width: 100%; margin: 4px 0 14px; }
 
 /* ---- Project-editor ---- */
-.editor-rows { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+/* Rijen staan dicht: negen velden per agent onder elkaar lieten er maar twee
+   tegelijk op het scherm passen (#100). De kop toont wat een rij identificeert
+   -- kleur, label, pad -- en klikken vouwt er één open. */
+.editor-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; max-height: 46vh; overflow-y: auto; }
 .erow {
-  display: flex; gap: 10px; align-items: flex-start;
+  display: flex; flex-direction: column; gap: 10px;
   background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 8px; padding: 10px;
+  border-radius: 8px; padding: 8px 10px;
 }
-.e-color { width: 34px; height: 34px; padding: 0; border: none; background: none; cursor: pointer; flex: none; }
+.erow.open { border-color: var(--accent); }
+.ehead { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ehead-main { flex: 1; min-width: 0; cursor: pointer; }
+.ehead-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ehead-path { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e-toggle {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 12px; padding: 2px 4px; flex: none;
+}
+.e-toggle:hover { color: var(--accent); }
+/* Ingeklapt: alleen de kop. */
+.erow:not(.open) .e-fields { display: none; }
+.e-color { width: 26px; height: 26px; padding: 0; border: none; background: none; cursor: pointer; flex: none; }
 .e-fields { flex: 1; display: flex; flex-direction: column; gap: 9px; min-width: 0; }
-.e-field { display: flex; flex-direction: column; gap: 3px; }
+/* Verwante velden naast elkaar; dat halveert ook een OPEN rij. */
+.e-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.e-grid.e-grid3 { grid-template-columns: 1fr 1fr 1fr; }
+.e-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .e-cap { font-size: 10.5px; color: var(--text-dim); letter-spacing: .2px; }
 .e-cmdwarn { font-size: 10.5px; color: var(--orange); }
 
