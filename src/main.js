@@ -32,6 +32,18 @@ const I18N = {
     remote_hint: "De agent draait op die machine; deze werkmap geldt daar.",
     remote_need_path: "Vul een werkmap op de host in.",
     remote_local_only: "Werkt alleen bij een sessie op deze computer",
+    hosts_title: "Machines", host_manage: "Machines beheren…", host_add: "＋ Machine toevoegen…",
+    host_nickname: "Naam", host_nickname_ph: "bijv. support01",
+    host_hostname: "Hostnaam of IP", host_port: "Poort", host_user: "Gebruikersnaam",
+    host_key: "SSH-key (leeg = ssh kiest zelf)", host_default_project: "Standaard werkmap op de host",
+    host_add_test: "Toevoegen & testen", host_testing: "Verbinden…", host_retest: "Opnieuw testen",
+    host_del: "Verwijderen", close: "Sluiten",
+    host_need_fields: "Naam, hostnaam en gebruikersnaam zijn verplicht.",
+    host_none: "Nog geen machines. Voeg er een toe om een agent elders te draaien.",
+    host_ok: "Verbinding gelukt", host_reachable: "bereikbaar", host_unreachable: "onbereikbaar",
+    host_no_claude: "⚠ Geen agent-CLI gevonden op deze machine — een sessie zal niet starten.",
+    host_no_outbound: "⚠ Geen uitgaand HTTPS naar api.anthropic.com — een agent kan hier niet werken.",
+    host_no_mux: "ℹ Geen tmux/psmux: een sessie is niet opnieuw aan te haken.",
     dropper_remote: "De agent draait op een andere machine — bestanden hierheen slepen zou een pad opleveren dat die agent niet kan openen.",
     launch_command: "Commando-override", command_ph: "leeg = start de gekozen agent",
     command_hint: "Draait dit programma zoals het er staat, in plaats van de agent.",
@@ -133,6 +145,18 @@ const I18N = {
     remote_hint: "The agent runs on that machine; this working directory applies there.",
     remote_need_path: "Enter a working directory on the host.",
     remote_local_only: "Only works for a session on this computer",
+    hosts_title: "Machines", host_manage: "Manage machines…", host_add: "＋ Add machine…",
+    host_nickname: "Name", host_nickname_ph: "e.g. support01",
+    host_hostname: "Hostname or IP", host_port: "Port", host_user: "Username",
+    host_key: "SSH key (empty = let ssh decide)", host_default_project: "Default working directory on the host",
+    host_add_test: "Add & test", host_testing: "Connecting…", host_retest: "Test again",
+    host_del: "Remove", close: "Close",
+    host_need_fields: "Name, hostname and username are required.",
+    host_none: "No machines yet. Add one to run an agent elsewhere.",
+    host_ok: "Connection succeeded", host_reachable: "reachable", host_unreachable: "unreachable",
+    host_no_claude: "⚠ No agent CLI found on this machine — a session will not start.",
+    host_no_outbound: "⚠ No outbound HTTPS to api.anthropic.com — an agent cannot work here.",
+    host_no_mux: "ℹ No tmux/psmux: a session cannot be reattached.",
     dropper_remote: "The agent runs on another machine — dropping files here would produce a path that agent cannot open.",
     launch_command: "Command override", command_ph: "empty = start the selected agent",
     command_hint: "Runs this program as-is, instead of the agent.",
@@ -742,17 +766,180 @@ async function loadHosts() {
   fillHostSelect();
 }
 function hostById(id) { return hosts.find((h) => h.id === id) || null; }
+// Laatste item opent de beheermodal; die keuze is geen host, dus we zetten de
+// select daarna meteen terug op wat er stond.
+const HOST_MANAGE = "__manage";
 function fillHostSelect() {
   const keep = els.hostInput.value;
   els.hostInput.innerHTML = `<option value="">${escapeHtml(t("host_local"))}</option>` +
-    hosts.map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.nickname || h.hostname)}</option>`).join("");
+    hosts.map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.nickname || h.hostname)}</option>`).join("") +
+    `<option value="${HOST_MANAGE}">${escapeHtml(t("host_manage"))}</option>`;
   // Selectie behouden zolang die host nog bestaat.
   els.hostInput.value = hosts.some((h) => h.id === keep) ? keep : "";
   refreshHostState();
 }
+/* ---- host-modal: kiezen, toevoegen, testen ---- */
+let hostStatus = {}; // id -> {reachable, ms}, gevuld door check_hosts
+
+function openHostModal() {
+  els.hfForm.classList.add("hidden");
+  els.hostStatusMsg.textContent = "";
+  els.hfReport.classList.add("hidden");
+  renderHostRows();
+  els.hostModal.classList.remove("hidden");
+  refreshHostReachability();
+}
+// De dots vullen zich ná de eerste render: check_hosts doet alle hosts naast
+// elkaar, dus de modal is meteen zichtbaar i.p.v. te wachten op de traagste.
+async function refreshHostReachability() {
+  if (!hosts.length) return;
+  try {
+    const list = await invoke("check_hosts", { hosts: hosts.map((h) => ({ id: h.id, hostname: h.hostname, port: h.port || 22 })) });
+    hostStatus = {};
+    for (const s of list) hostStatus[s.id] = s;
+  } catch (_) { hostStatus = {}; }
+  renderHostRows();
+}
+function renderHostRows() {
+  if (!hosts.length) {
+    els.hostRows.innerHTML = `<div class="host-empty">${escapeHtml(t("host_none"))}</div>`;
+    return;
+  }
+  els.hostRows.innerHTML = "";
+  hosts.forEach((h, i) => {
+    const st = hostStatus[h.id];
+    const cls = !st ? "pending" : st.reachable ? "up" : "down";
+    const label = !st ? "…" : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
+    const row = document.createElement("div");
+    row.className = "host-row";
+    row.innerHTML = `
+      <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(h.nickname || h.hostname)}</div>
+        <div class="host-sub">${escapeHtml((h.user ? h.user + "@" : "") + h.hostname + (h.port && h.port !== 22 ? ":" + h.port : ""))}
+          · ${escapeHtml(h.os || "?")} · ${escapeHtml(h.mux || "none")}</div>
+      </div>
+      <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
+      <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
+    row.querySelector(".host-test").addEventListener("click", () => testExistingHost(i));
+    row.querySelector(".host-del").addEventListener("click", async () => {
+      hosts.splice(i, 1);
+      await invoke("save_hosts", { hosts });
+      fillHostSelect();
+      renderHostRows();
+    });
+    els.hostRows.appendChild(row);
+  });
+}
+
+function openHostForm() {
+  els.hfNickname.value = ""; els.hfHostname.value = ""; els.hfPort.value = "22";
+  els.hfUser.value = ""; els.hfKey.value = ""; els.hfProject.value = "";
+  els.hostStatusMsg.textContent = ""; els.hostStatusMsg.className = "status-msg";
+  els.hfReport.classList.add("hidden");
+  els.hfForm.classList.remove("hidden");
+  els.hfNickname.focus();
+}
+
+// "Toevoegen & testen": de host wordt pas opgeslagen als de probe lukt, zodat
+// hosts.json geen half-werkende entries verzamelt. De probe vult os en mux zelf
+// in -- dat zijn eigenschappen van de machine, niet iets om met de hand te typen.
+async function addAndTestHost() {
+  const nickname = els.hfNickname.value.trim();
+  const hostname = els.hfHostname.value.trim();
+  const user = els.hfUser.value.trim();
+  if (!nickname || !hostname || !user) {
+    els.hostStatusMsg.textContent = t("host_need_fields");
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  const host = {
+    id: uniqueHostId(slugify(nickname)),
+    nickname, hostname, user,
+    port: parseInt(els.hfPort.value, 10) || 22,
+    key_path: els.hfKey.value.trim(),
+    default_project: els.hfProject.value.trim(),
+    os: "", mux: "", agent_version: "",
+  };
+  els.hostStatusMsg.textContent = t("host_testing");
+  els.hostStatusMsg.className = "status-msg";
+  els.hfReport.classList.add("hidden");
+  els.hfTest.disabled = true;
+  let p;
+  try { p = await invoke("probe_host", { host }); }
+  catch (e) { p = { reachable: false, error: String(e) }; }
+  finally { els.hfTest.disabled = false; }
+
+  if (!p.reachable || !p.authOk) {
+    els.hostStatusMsg.textContent = "✗ " + (p.error || t("host_unreachable"));
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  host.os = p.os; host.mux = p.mux || "none";
+  hosts.push(host);
+  await invoke("save_hosts", { hosts });
+  fillHostSelect();
+  renderHostRows();
+  els.hostStatusMsg.textContent = "✓ " + t("host_ok");
+  els.hostStatusMsg.className = "status-msg ok";
+  showProbeReport(p);
+  els.hfForm.classList.add("hidden");
+}
+
+// Bestaande host opnieuw meten (bv. nadat er tmux is geïnstalleerd).
+async function testExistingHost(i) {
+  const h = hosts[i];
+  els.hostStatusMsg.textContent = `${h.nickname}: ${t("host_testing")}`;
+  els.hostStatusMsg.className = "status-msg";
+  let p;
+  try { p = await invoke("probe_host", { host: h }); }
+  catch (e) { p = { reachable: false, error: String(e) }; }
+  if (p.reachable && p.authOk) {
+    hosts[i] = { ...h, os: p.os, mux: p.mux || "none" };
+    await invoke("save_hosts", { hosts });
+    fillHostSelect();
+    els.hostStatusMsg.textContent = `${h.nickname}: ✓ ${t("host_ok")}`;
+    els.hostStatusMsg.className = "status-msg ok";
+  } else {
+    els.hostStatusMsg.textContent = `${h.nickname}: ✗ ${p.error || t("host_unreachable")}`;
+    els.hostStatusMsg.className = "status-msg err";
+  }
+  showProbeReport(p);
+  hostStatus[h.id] = { id: h.id, reachable: !!p.reachable, ms: 0 };
+  renderHostRows();
+}
+
+// Wat de probe vond, met de twee dingen die een sessie echt blokkeren bovenaan:
+// geen agent-CLI en geen uitgaand HTTPS.
+function showProbeReport(p) {
+  const lines = [];
+  if (p.os) lines.push(`OS: ${p.os}`);
+  if (p.claude) lines.push(`agent: ${p.claude}`);
+  else if (p.authOk) lines.push(t("host_no_claude"));
+  if (p.authOk && !p.outbound) lines.push(t("host_no_outbound"));
+  if (p.authOk && (!p.mux || p.mux === "none")) lines.push(t("host_no_mux"));
+  else if (p.mux) lines.push(`persistentie: ${p.mux}`);
+  if (!lines.length) return;
+  els.hfReport.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
+  els.hfReport.classList.remove("hidden");
+}
+
+function uniqueHostId(base) {
+  let id = base || "host", n = 2;
+  while (hosts.some((h) => h.id === id)) id = `${base}-${n++}`;
+  return id;
+}
+
 // Bij een remote host betekent "werkmap" een pad OP DIE MACHINE, niet het lokale
 // projectpad -- daarom een eigen veld, voorgevuld met het standaardpad van de host.
+let lastHostChoice = "";
 async function refreshHostState() {
+  if (els.hostInput.value === HOST_MANAGE) {
+    els.hostInput.value = lastHostChoice; // "beheren" is geen keuze, maar een actie
+    openHostModal();
+    return;
+  }
+  lastHostChoice = els.hostInput.value;
   const h = hostById(els.hostInput.value);
   els.remotePathRow.classList.toggle("hidden", !h);
   if (h && !els.remotePathInput.value.trim()) els.remotePathInput.value = h.default_project || "";
@@ -1824,7 +2011,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); } return; }
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.hostModal.classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   const ctrl = e.ctrlKey && !e.altKey;
   if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); changeFont(1); return; }
@@ -2215,6 +2402,18 @@ window.addEventListener("DOMContentLoaded", () => {
     hostInput: document.querySelector("#host-input"),
     remotePathRow: document.querySelector("#remote-path-row"),
     remotePathInput: document.querySelector("#remote-path-input"),
+    hostModal: document.querySelector("#host-modal"),
+    hostRows: document.querySelector("#host-rows"),
+    hfForm: document.querySelector("#host-form"),
+    hfNickname: document.querySelector("#hf-nickname"),
+    hfHostname: document.querySelector("#hf-hostname"),
+    hfPort: document.querySelector("#hf-port"),
+    hfUser: document.querySelector("#hf-user"),
+    hfKey: document.querySelector("#hf-key"),
+    hfProject: document.querySelector("#hf-project"),
+    hfTest: document.querySelector("#hf-test"),
+    hostStatusMsg: document.querySelector("#hf-status"),
+    hfReport: document.querySelector("#hf-report"),
     helpTip: document.querySelector("#help-tip"),
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
@@ -2229,6 +2428,18 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
   els.commandInput.addEventListener("input", refreshOverrideState);
   els.hostInput.addEventListener("change", refreshHostState);
+  document.querySelector("#host-add").addEventListener("click", openHostForm);
+  document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
+  document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
+  document.querySelector("#host-close").addEventListener("click", () => els.hostModal.classList.add("hidden"));
+  // Sleutelkiezer via het bestaande pick_file-command: de dialog-plugin is niet
+  // vanuit JS aanroepbaar (staat niet in capabilities/default.json).
+  document.querySelector("#hf-key-browse").addEventListener("click", async () => {
+    try {
+      const f = await invoke("pick_file", { startDir: "~/.ssh" });
+      if (f) els.hfKey.value = f;
+    } catch (_) {}
+  });
   // Andere agent op het startformulier -> model-keuze EN modus-opties mee.
   // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).

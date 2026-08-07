@@ -612,6 +612,37 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
 .e-field { display: flex; flex-direction: column; gap: 3px; }
 .e-cap { font-size: 10.5px; color: var(--text-dim); letter-spacing: .2px; }
 .e-cmdwarn { font-size: 10.5px; color: var(--orange); }
+
+/* ---- host-modal (#98) ---- */
+.host-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; max-height: 320px; overflow-y: auto; }
+.host-empty { color: var(--text-dim); font-size: 12.5px; padding: 14px 2px; }
+.host-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px;
+}
+.host-main { flex: 1; min-width: 0; }
+.host-name { font-size: 13px; }
+.host-sub { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Bereikbaarheid: grijs zolang de check loopt, dan groen of rood. */
+.host-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--text-dim); }
+.host-dot.pending { background: var(--text-dim); opacity: .45; }
+.host-dot.up { background: var(--green); }
+.host-dot.down { background: var(--red); }
+.host-test, .host-del {
+  background: none; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 5px; cursor: pointer; padding: 3px 8px; font-size: 12px;
+}
+.host-test:hover, .host-del:hover { color: var(--text); border-color: var(--accent); }
+.host-form { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; display: flex; flex-direction: column; gap: 9px; }
+.host-form-row { display: flex; gap: 9px; }
+.host-form-row .grow { flex: 1; }
+.host-form-row .narrow { width: 90px; flex: 0 0 auto; }
+.host-report {
+  margin-top: 8px; padding: 9px 11px; border-radius: 6px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  font-size: 12px; color: var(--text-dim); display: flex; flex-direction: column; gap: 3px;
+}
+.status-msg.ok { color: var(--green); }
 .e-pathrow { display: flex; gap: 6px; }
 .e-pathrow .e-path { flex: 1; }
 .e-browse {

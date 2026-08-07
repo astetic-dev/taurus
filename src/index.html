@@ -325,6 +325,42 @@
       </div>
     </div>
 
+    <!-- ===== Host-modal: kies of voeg een machine toe (#98) ===== -->
+    <div id="host-modal" class="modal hidden">
+      <div class="modal-box wide">
+        <h2 data-i18n="hosts_title">Machines</h2>
+        <div id="host-rows" class="host-rows"></div>
+        <button id="host-add" class="btn-ghost add" data-i18n="host_add">＋ Machine toevoegen…</button>
+
+        <div id="host-form" class="host-form hidden">
+          <div class="e-field"><span class="e-cap" data-i18n="host_nickname">Naam</span>
+            <input id="hf-nickname" type="text" data-i18n-ph="host_nickname_ph" placeholder="bijv. support01" /></div>
+          <div class="host-form-row">
+            <div class="e-field grow"><span class="e-cap" data-i18n="host_hostname">Hostnaam of IP</span>
+              <input id="hf-hostname" type="text" placeholder="192.168.2.9" /></div>
+            <div class="e-field narrow"><span class="e-cap" data-i18n="host_port">Poort</span>
+              <input id="hf-port" type="number" value="22" min="1" max="65535" /></div>
+          </div>
+          <div class="e-field"><span class="e-cap" data-i18n="host_user">Gebruikersnaam</span>
+            <input id="hf-user" type="text" /></div>
+          <div class="e-field"><span class="e-cap" data-i18n="host_key">SSH-key (leeg = ssh kiest zelf)</span>
+            <div class="e-pathrow"><input id="hf-key" type="text" placeholder="~/.ssh/id_ed25519" /><button id="hf-key-browse" class="e-browse">📁</button></div></div>
+          <div class="e-field"><span class="e-cap" data-i18n="host_default_project">Standaard werkmap op de host</span>
+            <input id="hf-project" type="text" placeholder="C:\Users\arjen  of  /home/arjen/proj" /></div>
+          <div class="modal-actions">
+            <button id="hf-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+            <button id="hf-test" class="btn-primary" data-i18n="host_add_test">Toevoegen &amp; testen</button>
+          </div>
+          <div id="hf-status" class="status-msg"></div>
+          <div id="hf-report" class="host-report hidden"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="host-close" class="btn-ghost" data-i18n="close">Sluiten</button>
+        </div>
+      </div>
+    </div>
+
     <div id="toast" class="toast hidden"></div>
   </body>
 </html>

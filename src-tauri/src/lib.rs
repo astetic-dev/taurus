@@ -274,6 +274,159 @@ fn check_hosts(hosts: Vec<HostRef>) -> Vec<HostStatus> {
     handles.into_iter().filter_map(|h| h.join().ok()).collect()
 }
 
+// Wat "Add & test" over een host te weten komt. Serialize-only, camelCase voor
+// de frontend -- net als SessionState/SttStatus.
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct HostProbe {
+    reachable: bool,
+    auth_ok: bool,
+    os: String,
+    // Beste multiplexer die op de host gevonden is; "none" als er geen is.
+    mux: String,
+    // Versieregel van de agent-CLI, leeg als hij ontbreekt.
+    claude: String,
+    // Uitgaand HTTPS naar api.anthropic.com. Zonder dit kan er geen agent
+    // draaien, hoe goed de rest ook werkt -- dus expliciet meten.
+    outbound: bool,
+    error: String,
+}
+
+// ssh-argumenten tot en met het doel, gedeeld door de launch en de probe.
+// `batch` hoort AAN bij een probe en UIT bij een launch: zonder BatchMode blijft
+// ssh op een wachtwoordprompt staan die niemand beantwoordt, en dan hangt "Add &
+// test" tot de timeout. Bij een echte sessie wil je die prompt juist wel -- daar
+// zit een pty en kun je een passphrase intypen.
+fn ssh_base_args(host: &Host, batch: bool) -> Result<Vec<String>, String> {
+    if host.hostname.trim().is_empty() {
+        return Err("host heeft geen hostname".into());
+    }
+    let mut a: Vec<String> = Vec::new();
+    if host.port != 22 {
+        a.push("-p".into());
+        a.push(host.port.to_string());
+    }
+    if let KeySource::Path(k) = resolve_key(host)? {
+        a.push("-i".into());
+        a.push(k);
+    }
+    a.push("-o".into());
+    a.push("StrictHostKeyChecking=accept-new".into());
+    a.push("-o".into());
+    a.push("ConnectTimeout=10".into());
+    if batch {
+        a.push("-o".into());
+        a.push("BatchMode=yes".into());
+    }
+    a.push(if host.user.trim().is_empty() {
+        host.hostname.trim().to_string()
+    } else {
+        format!("{}@{}", host.user.trim(), host.hostname.trim())
+    });
+    Ok(a)
+}
+
+// Eén ssh-aanroep; geeft (stdout, gelukt).
+fn ssh_run(host: &Host, remote_cmd: &str) -> Result<(String, bool), String> {
+    let mut args = ssh_base_args(host, true)?;
+    args.push(remote_cmd.to_string());
+    let out = std::process::Command::new(ssh_program())
+        .args(&args)
+        .stdin(std::process::Stdio::null()) // anders wacht de remote kant op invoer
+        .output()
+        .map_err(|e| format!("ssh starten mislukte: {}", e))?;
+    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
+    if s.trim().is_empty() {
+        s = String::from_utf8_lossy(&out.stderr).into_owned();
+    }
+    Ok((s, out.status.success()))
+}
+
+// Alles wat we van een host willen weten, in twee ssh-rondes: eerst het OS,
+// daarna een OS-specifieke inventarisatie. Duur genoeg (handshake) om los te
+// staan van de goedkope TCP-check van check_hosts.
+#[tauri::command(async)]
+fn probe_host(host: Host) -> HostProbe {
+    let mut p = HostProbe::default();
+    p.reachable = probe_tcp(host.hostname.trim(), host.port, REACH_TIMEOUT_MS);
+    if !p.reachable {
+        p.error = format!("Geen SSH-server bereikbaar op {}:{}", host.hostname.trim(), host.port);
+        return p;
+    }
+
+    // uname bestaat niet op Windows; dat het faalt is zelf het signaal.
+    match ssh_run(&host, "uname -sm") {
+        Err(e) => {
+            p.error = e;
+            return p;
+        }
+        Ok((out, ok)) if ok && out.to_lowercase().contains("linux") => {
+            p.auth_ok = true;
+            p.os = "linux".into();
+        }
+        Ok((out, _)) => {
+            // Auth-fouten herkennen we aan de ssh-melding; anders is het Windows.
+            let low = out.to_lowercase();
+            if low.contains("permission denied") || low.contains("publickey") {
+                p.error = "Key-auth geweigerd. Let op: voor een account in de Administrators-groep hoort de key in C:\\ProgramData\\ssh\\administrators_authorized_keys, niet in %USERPROFILE%\\.ssh\\authorized_keys.".into();
+                return p;
+            }
+            if low.contains("connection") && low.contains("refused") {
+                p.error = out.trim().to_string();
+                return p;
+            }
+            p.auth_ok = true;
+            p.os = "windows".into();
+        }
+    }
+
+    // Ronde 2: inventarisatie. Op Windows via base64 UTF-16LE, zodat cmd.exe geen
+    // enkel metateken te zien krijgt (dezelfde reden als bij de launch).
+    let (out, _) = if p.os == "linux" {
+        let script = "command -v tmux >/dev/null 2>&1 && echo MUX=tmux || echo MUX=none; \
+                      (claude --version 2>/dev/null || echo '') | head -1 | sed 's/^/CLAUDE=/'; \
+                      curl -sS -o /dev/null -w 'HTTP=%{http_code}' --max-time 10 https://api.anthropic.com/ 2>/dev/null || echo HTTP=000";
+        match ssh_run(&host, script) {
+            Ok(v) => v,
+            Err(e) => {
+                p.error = e;
+                return p;
+            }
+        }
+    } else {
+        let ps = r#"if (Get-Command psmux -EA 0) { 'MUX=psmux' } elseif (Test-Path "$env:USERPROFILE\.taurus\bin\taurus-agent.exe") { 'MUX=taurus-agent' } else { 'MUX=none' }
+$c = Get-Command claude -EA 0
+if ($c) { 'CLAUDE=' + (& claude --version 2>&1 | Select-Object -First 1) } else { 'CLAUDE=' }
+try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -TimeoutSec 10 -UseBasicParsing; 'HTTP=' + $r.StatusCode } catch { 'HTTP=' + [int]$_.Exception.Response.StatusCode }"#;
+        let enc = b64(&utf16le(ps));
+        match ssh_run(&host, &format!("powershell -NoProfile -EncodedCommand {}", enc)) {
+            Ok(v) => v,
+            Err(e) => {
+                p.error = e;
+                return p;
+            }
+        }
+    };
+
+    for line in out.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("MUX=") {
+            p.mux = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("CLAUDE=") {
+            p.claude = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("HTTP=") {
+            // Elke HTTP-status betekent dat er verbinding was; 000 is curl's
+            // "geen antwoord". 401/404 tellen dus als goed.
+            let code: u32 = v.trim().parse().unwrap_or(0);
+            p.outbound = code > 0;
+        }
+    }
+    if p.mux.is_empty() {
+        p.mux = "none".into();
+    }
+    p
+}
+
 // Map-kiezer (bladeren-knop in de project-editor).
 #[tauri::command]
 fn pick_folder(app: AppHandle) -> Option<String> {
@@ -291,6 +444,9 @@ fn pick_folder(app: AppHandle) -> Option<String> {
 #[tauri::command]
 fn pick_file(app: AppHandle, start_dir: String) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
+    // ~ expanderen: de sleutelkiezer vraagt om "~/.ssh", en zonder dit zou
+    // create_dir_all een relatieve map naast de exe aanmaken.
+    let start_dir = expand_home(&start_dir);
     let _ = std::fs::create_dir_all(&start_dir);
     let mut b = app.dialog().file();
     if Path::new(&start_dir).is_dir() {
@@ -1114,31 +1270,12 @@ fn wrap_remote(
     let session = mux_session_name(&host.id, cwd);
     let payload = build_remote_payload(&host.mux, &host.os, &session, cwd, &program, &args)?;
 
-    let mut a: Vec<String> = Vec::new();
     // -t forceert een pty aan de andere kant; zonder pty tekent de agent-TUI niet.
-    a.push("-t".into());
-    if host.port != 22 {
-        a.push("-p".into());
-        a.push(host.port.to_string());
-    }
-    if let KeySource::Path(k) = resolve_key(host)? {
-        a.push("-i".into());
-        a.push(k);
-    }
-    // accept-new accepteert een ONBEKENDE host automatisch, maar weigert een
-    // GEWIJZIGDE key. Dat is het verschil met StrictHostKeyChecking=no, dat een
-    // sleutelwissel stil zou slikken -- in een tool die naar beheer- en
-    // klanthosts gaat is dat precies de bescherming die je niet wilt weggooien.
-    a.push("-o".into());
-    a.push("StrictHostKeyChecking=accept-new".into());
-    a.push("-o".into());
-    a.push("ConnectTimeout=10".into());
-    let target = if host.user.trim().is_empty() {
-        host.hostname.trim().to_string()
-    } else {
-        format!("{}@{}", host.user.trim(), host.hostname.trim())
-    };
-    a.push(target);
+    let mut a = vec!["-t".to_string()];
+    // batch=false: bij een echte sessie MOET een passphrase- of wachtwoordprompt
+    // zichtbaar zijn, want er is een pty om hem in te typen. Alleen de probe
+    // draait met BatchMode.
+    a.extend(ssh_base_args(host, false)?);
     a.push(payload);
     Ok((ssh_program(), a))
 }
@@ -2514,6 +2651,7 @@ pub fn run() {
             get_hosts,
             save_hosts,
             check_hosts,
+            probe_host,
             pick_folder,
             pick_file,
             path_exists,
