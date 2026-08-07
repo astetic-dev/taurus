@@ -427,6 +427,102 @@ try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -Timeo
     p
 }
 
+// scp zit naast ssh in System32; zelfde voorkeur voor het systeempad, want een
+// Git-for-Windows scp gedraagt zich anders rond Windows-paden.
+fn scp_program() -> String {
+    if let Ok(root) = std::env::var("SystemRoot") {
+        let p = std::path::PathBuf::from(&root).join("System32\\OpenSSH\\scp.exe");
+        if p.is_file() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+    "scp.exe".into()
+}
+
+// Voeg een padcomponent toe met de scheidingstekens van de DOEL-machine, niet
+// die van ons. Een backslash in een Linux-pad is een gewoon teken, geen map.
+fn remote_join(os: &str, dir: &str, name: &str) -> String {
+    let d = dir.trim_end_matches(['/', '\\']);
+    if os == "windows" {
+        format!("{}\\{}", d, name)
+    } else {
+        format!("{}/{}", d, name)
+    }
+}
+
+// De DROPZONE op een remote sessie: kopieer het bestand naar <werkmap>/input op
+// de host en geef het pad DAAR terug, zodat de prompt een pad krijgt dat de
+// agent ook echt kan openen.
+#[tauri::command(async)]
+fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<String, String> {
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    let name = Path::new(&src)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("geen bestandsnaam in {}", src))?;
+    let remote_dir = remote_join(&host.os, remote_cwd.trim(), "input");
+
+    // De input-map hoeft nog niet te bestaan; scp maakt hem niet aan.
+    let mkdir = if host.os == "windows" {
+        let ps = format!(
+            "New-Item -ItemType Directory -Force -Path {} | Out-Null",
+            ps_quote(&remote_dir)
+        );
+        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
+    } else {
+        format!("mkdir -p {}", shell_quote_posix(&remote_dir))
+    };
+    let (out, ok) = ssh_run(&host, &mkdir)?;
+    if !ok {
+        return Err(format!("kon {} niet aanmaken op de host:\n{}", remote_dir, out.trim()));
+    }
+
+    // scp gebruikt -P voor de poort waar ssh -p gebruikt; met -p zou scp de
+    // tijdstempels willen behouden en zwijgend op de standaardpoort verbinden.
+    let mut args: Vec<String> = Vec::new();
+    if host.port != 22 {
+        args.push("-P".into());
+        args.push(host.port.to_string());
+    }
+    if let KeySource::Path(k) = resolve_key(&host)? {
+        args.push("-i".into());
+        args.push(k);
+    }
+    args.push("-o".into());
+    args.push("StrictHostKeyChecking=accept-new".into());
+    args.push("-o".into());
+    args.push("BatchMode=yes".into());
+    args.push(src.clone());
+    // NIET quoten achter de dubbele punt. Sinds OpenSSH 9 draait scp standaard
+    // over SFTP, en dan is het pad een letterlijke string in plaats van iets dat
+    // een remote shell nog parseert: quotes komen er dan als tekens aan en scp
+    // meldt `dest open "'C:/...'": No such file or directory`. Zonder quotes
+    // werkt een pad met spaties gewoon -- getest tegen een map "my input".
+    let target_dir = if host.os == "windows" {
+        // De Windows-kant wil forward slashes achter de dubbele punt.
+        remote_dir.replace('\\', "/")
+    } else {
+        remote_dir.clone()
+    };
+    let user_at = if host.user.trim().is_empty() {
+        host.hostname.trim().to_string()
+    } else {
+        format!("{}@{}", host.user.trim(), host.hostname.trim())
+    };
+    args.push(format!("{}:{}/", user_at, target_dir.trim_end_matches('/')));
+
+    let out = std::process::Command::new(scp_program())
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("scp starten mislukte: {}", e))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("scp mislukte: {}", err.trim()));
+    }
+    Ok(remote_join(&host.os, &remote_dir, &name))
+}
+
 // Map-kiezer (bladeren-knop in de project-editor).
 #[tauri::command]
 fn pick_folder(app: AppHandle) -> Option<String> {
@@ -2652,6 +2748,7 @@ pub fn run() {
             save_hosts,
             check_hosts,
             probe_host,
+            scp_to_host,
             pick_folder,
             pick_file,
             path_exists,
@@ -2704,6 +2801,17 @@ mod tests {
             mux: "tmux".into(),
             agent_version: String::new(),
         }
+    }
+
+    #[test]
+    fn remote_join_uses_the_targets_separator_not_ours() {
+        // Een backslash in een Linux-pad is een gewoon teken, geen map -- dus de
+        // scheiding moet van de DOEL-machine komen, niet van dit werkstation.
+        assert_eq!(remote_join("windows", r"C:\proj", "input"), r"C:\proj\input");
+        assert_eq!(remote_join("linux", "/home/a/proj", "input"), "/home/a/proj/input");
+        // Een al aanwezige scheiding aan het eind mag niet verdubbelen.
+        assert_eq!(remote_join("windows", r"C:\proj\", "input"), r"C:\proj\input");
+        assert_eq!(remote_join("linux", "/home/a/proj/", "input"), "/home/a/proj/input");
     }
 
     #[test]

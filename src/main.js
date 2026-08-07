@@ -44,7 +44,10 @@ const I18N = {
     host_no_claude: "⚠ Geen agent-CLI gevonden op deze machine — een sessie zal niet starten.",
     host_no_outbound: "⚠ Geen uitgaand HTTPS naar api.anthropic.com — een agent kan hier niet werken.",
     host_no_mux: "ℹ Geen tmux/psmux: een sessie is niet opnieuw aan te haken.",
-    dropper_remote: "De agent draait op een andere machine — bestanden hierheen slepen zou een pad opleveren dat die agent niet kan openen.",
+    dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
+    dropper_sending: "Bestand overzetten naar de host…",
+    dropper_sent: "Op de host gezet",
+    dropper_paste_local_only: "Plakken uit het klembord werkt alleen bij een sessie op deze computer.",
     launch_command: "Commando-override", command_ph: "leeg = start de gekozen agent",
     command_hint: "Draait dit programma zoals het er staat, in plaats van de agent.",
     command_warn: "⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.",
@@ -157,7 +160,10 @@ const I18N = {
     host_no_claude: "⚠ No agent CLI found on this machine — a session will not start.",
     host_no_outbound: "⚠ No outbound HTTPS to api.anthropic.com — an agent cannot work here.",
     host_no_mux: "ℹ No tmux/psmux: a session cannot be reattached.",
-    dropper_remote: "The agent runs on another machine — dropping files here would produce a path that agent cannot open.",
+    dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
+    dropper_sending: "Copying file to the host…",
+    dropper_sent: "Placed on the host",
+    dropper_paste_local_only: "Pasting from the clipboard only works for a session on this computer.",
     launch_command: "Command override", command_ph: "empty = start the selected agent",
     command_hint: "Runs this program as-is, instead of the agent.",
     command_warn: "⚠ Agent flags do not apply: model, mode and task are not passed.",
@@ -2056,20 +2062,37 @@ function dropperCwd() {
 }
 
 // De DROPZONE zet een bestand in de input-map van de werkmap en plakt dat pad in
-// de prompt. Bij een remote sessie klopt geen van beide: de werkmap staat op de
-// host, dus save_dropped_path zou lokaal naar een niet-bestaand pad schrijven, en
-// "alleen pad" zou een pad van DIT werkstation in een prompt zetten die het niet
-// kan openen -- de agent meldt dan "file not found" en niemand weet waarom.
-// Overzetten hoort met scp te gebeuren; tot die er is, blokkeren we het zichtbaar.
+// de prompt. Bij een remote sessie staat die werkmap op de host, dus lokaal
+// kopieren levert een pad op dat de agent daar niet kan openen -- hij meldt dan
+// "file not found" en niemand legt het verband. Daarom gaat het bestand over met
+// scp en komt het pad OP DE HOST in de prompt.
 function activeSessionIsRemote() {
   const s = sessions.get(current);
   return !!(s && s.hostId);
 }
 function updateDropperForSession() {
   if (!els.fileDropper) return;
-  const remote = activeSessionIsRemote();
-  els.fileDropper.classList.toggle("dropzone-disabled", remote);
-  els.fileDropper.title = remote ? t("dropper_remote") : "";
+  els.fileDropper.classList.toggle("dropzone-remote", activeSessionIsRemote());
+  els.fileDropper.title = activeSessionIsRemote() ? t("dropper_remote_hint") : "";
+}
+
+// Eén bestand naar de host, ongeacht welke zone je raakte: "verplaatsen" zou
+// betekenen dat we het lokale origineel na een netwerkoverdracht weggooien, en
+// dat is een beslissing die je zelf hoort te nemen, niet een sleepgebaar.
+async function dropToRemote(src) {
+  const s = sessions.get(current);
+  if (!s || !s.hostId) return false;
+  toast(t("dropper_sending"), "");
+  try {
+    const dest = await invoke("scp_to_host", { hostId: s.hostId, src, remoteCwd: s.path });
+    insertPathIntoTerminal(dest, true);
+    addDropperEntry(dest);
+    toast(t("dropper_sent"), "ok");
+  } catch (err) {
+    dbg(`scp FAIL: ${err}`);
+    toast(t("dropper_save_failed") + " " + err, "err");
+  }
+  return true;
 }
 
 // Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
@@ -2137,9 +2160,12 @@ function wireFileDropper() {
     if (!mode) return; // buiten de dropper: negeren
     const paths = (e.payload && e.payload.paths) || [];
     if (!paths.length) return;
-    if (activeSessionIsRemote()) { toast(t("dropper_remote"), "err"); return; }
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    if (activeSessionIsRemote()) {
+      for (const src of paths) await dropToRemote(src);
+      return;
+    }
     for (const src of paths) {
       try {
         // Alleen pad: geen bestandsactie, enkel het bestaande pad in de prompt.
@@ -2159,7 +2185,9 @@ function wireFileDropper() {
   });
 
   els.dropperPaste.addEventListener("click", async () => {
-    if (activeSessionIsRemote()) { toast(t("dropper_remote"), "err"); return; }
+    // Klembord-plakken schrijft eerst lokaal (save_clipboard_to_input) en zou
+    // dan nog overgezet moeten worden; die tweetrapsvorm bestaat nog niet.
+    if (activeSessionIsRemote()) { toast(t("dropper_paste_local_only"), "err"); return; }
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
     try {
@@ -2177,9 +2205,15 @@ function wireFileDropper() {
 // Komt het van elders -> vraag Verplaats/Kopieer/Alleen-pad (er is geen drop-positie
 // om op te hittesten, dus een kleine keuze-rij bovenin de dropper).
 async function addFileViaPicker() {
-  if (activeSessionIsRemote()) { toast(t("dropper_remote"), "err"); return; }
   const cwd = dropperCwd();
   if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+  if (activeSessionIsRemote()) {
+    // Bij remote is de input-map niet lokaal te openen: begin in de home-map.
+    let f = null;
+    try { f = await invoke("pick_file", { startDir: "~" }); } catch (_) { return; }
+    if (f) await dropToRemote(f);
+    return;
+  }
   const inputDir = cwd.replace(/\//g, "\\").replace(/\\+$/, "") + "\\input";
   let file = null;
   try { file = await invoke("pick_file", { startDir: inputDir }); } catch (_) { return; }

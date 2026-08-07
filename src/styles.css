@@ -269,8 +269,10 @@ body.reordering, body.reordering * { cursor: grabbing !important; }
 /* Wat bij een remote sessie niet kan, wordt zichtbaar uitgeschakeld i.p.v. stil
    te mislukken: de werkmap staat dan op een andere machine (#98). */
 .ctx-item.disabled { opacity: .4; cursor: not-allowed; pointer-events: none; }
-.dropzone-disabled { opacity: .45; }
-.dropzone-disabled .dz, .dropzone-disabled button { pointer-events: none; }
+/* Remote: de dropzone werkt wel, maar zet bestanden op de andere machine.
+   Subtiel gemarkeerd zodat je ziet dat een drop hier het netwerk op gaat. */
+.dropzone-remote { border-color: var(--accent); }
+.dropzone-remote .dz { border-style: dashed; }
 /* Hostaanduiding op de tab: leesbaar maar ondergeschikt aan de sessietitel. */
 .tab-host {
   font-size: 10px; padding: 1px 5px; margin-right: 6px; border-radius: 3px;
