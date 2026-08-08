@@ -135,6 +135,33 @@ What it costs:
 - the DROPZONE cannot send files to a `via: wsl` host: the scp server runs on
   Windows and cannot write into WSL's ext4 filesystem
 
+## Moving an agent to another machine
+
+Right-click a tab or an agent card → **Move to another machine**. An agent is a
+workplace — a machine plus a folder — so it cannot move without its folder.
+
+Before anything is sent, Taurus measures the working directory and splits it in
+three, because how big it is decides whether you want to wait:
+
+| | |
+|---|---|
+| project files | always included |
+| `input`, `output`, `log`, `logs`, `review` | each with its own size, **on** by default — usually exactly what the agent needs |
+| `.git`, `node_modules`, `target`, `dist`, `.venv`, `__pycache__` | each with its own size, **off** by default — usually the bulk, and rebuilt on the other side in a moment |
+
+Untick what should not travel; the total updates as you go. Each item is copied
+separately rather than with one `scp -r` on the whole tree, which is what makes
+leaving something out possible at all.
+
+**The source folder is not deleted.** "Move" describes the agent; the files are
+copied. Removing a source tree after a network transfer is a different promise,
+and one wrong path makes it unrecoverable. The agent is repointed only after a
+successful copy, so a failure leaves it pointing at a folder that exists.
+
+A non-empty target directory is refused rather than merged into. Bringing an
+agent back to this computer, and moving between two remote hosts, are not
+supported yet.
+
 ## Security notes
 
 - Host keys use `StrictHostKeyChecking=accept-new`: an unknown host is accepted
