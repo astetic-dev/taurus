@@ -1283,6 +1283,29 @@ fn shell_quote_posix(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+// Hoe een POSIX-payload op de host gestart wordt. Twee dingen zitten hierin die
+// allebei uit een echte fout komen:
+//
+// 1. Het script gaat naar een BESTAND en start daarna met exec, niet via een
+//    pipe (`... | sh`). Met een pipe krijgt die shell zijn stdin van de pipe in
+//    plaats van de terminal, en dan weigert tmux met "open terminal failed: not
+//    a terminal". Na de pipeline erft exec de stdin van de buitenste sh -- de
+//    pty van ssh -t.
+// 2. `sh -l`, een LOGIN shell. `ssh host "commando"` draait geen login shell,
+//    dus ~/.profile wordt niet gelezen en ~/.local/bin staat niet op PATH. Een
+//    claude die daar geinstalleerd is, wordt dan niet gevonden: de sessie
+//    eindigt meteen met alleen "[exited]" en niets legt uit waarom. Met -l
+//    krijgt de agent de omgeving die de gebruiker op die machine heeft
+//    (PATH, nvm, pyenv).
+fn posix_launcher(session: &str, inner: &str) -> String {
+    format!(
+        "echo {} | base64 -d > /tmp/{}.sh && exec sh -l /tmp/{}.sh",
+        b64(inner.as_bytes()),
+        session,
+        session
+    )
+}
+
 // PowerShell-quoting: alles tussen enkele quotes, en een enkele quote wordt
 // verdubbeld. Binnen '...' expandeert PowerShell niets, dus $ en ` zijn veilig.
 fn ps_quote(s: &str) -> String {
@@ -1374,19 +1397,27 @@ fn build_remote_payload_via(
     args: &[String],
 ) -> Result<String, String> {
     if via == "wsl" {
-        let inner = build_remote_payload(mux, "linux", session, cwd, program, args)?;
-        // Het script gaat naar een BESTAND en wordt daarna met exec gestart, niet
-        // door een pipe (`... | sh`) gevoerd. Met een pipe krijgt die shell zijn
-        // stdin van de pipe in plaats van de terminal, en dan weigert tmux te
-        // starten met "open terminal failed: not a terminal". Na de pipeline erft
-        // exec de stdin van de buitenste sh, en dat is de pty van ssh -t.
-        return Ok(format!(
-            "wsl -e sh -c \"echo {} | base64 -d > /tmp/{}.sh && exec sh /tmp/{}.sh\"",
-            b64(inner.as_bytes()),
-            session,
-            session
-        ));
+        let inner = build_remote_payload_inner(mux, "linux", session, cwd, program, args)?;
+        return Ok(format!("wsl -e sh -c \"{}\"", posix_launcher(session, &inner)));
     }
+    // Een Linux-host rechtstreeks: dezelfde login-shell-val, dus dezelfde
+    // starter. Windows loopt via PowerShell en heeft dit niet nodig.
+    if os == "linux" {
+        let inner = build_remote_payload_inner(mux, os, session, cwd, program, args)?;
+        return Ok(posix_launcher(session, &inner));
+    }
+    build_remote_payload_inner(mux, os, session, cwd, program, args)
+}
+
+// De kale payload, zonder de starter eromheen.
+fn build_remote_payload_inner(
+    mux: &str,
+    os: &str,
+    session: &str,
+    cwd: &str,
+    program: &str,
+    args: &[String],
+) -> Result<String, String> {
     match mux {
         // Eigen agent: geen shellquoting nodig, en hij bestaat op beide OS'en.
         "taurus-agent" => {
@@ -2936,8 +2967,8 @@ mod tests {
         // payload zit als base64 verpakt, want hij bevat zelf quotes en pipes
         // die cmd.exe er anders uit haalt.
         assert!(
-            payload.contains("> /tmp/") && payload.contains("&& exec sh /tmp/"),
-            "moet via een bestand starten, niet via een pipe -- anders heeft tmux geen tty: {}",
+            payload.contains("> /tmp/") && payload.contains("&& exec sh -l /tmp/"),
+            "moet via een bestand en een LOGIN shell starten -- anders heeft tmux geen tty en staat ~/.local/bin niet op PATH: {}",
             payload
         );
         let inner = payload
@@ -2952,8 +2983,8 @@ mod tests {
         );
         // En het is de tmux-vorm, niet de PowerShell-vorm van een Windows-host.
         let expected = b64(
-            build_remote_payload("tmux", "linux", &mux_session_name(&h.id, "/home/arjen/proj"),
-                                 "/home/arjen/proj", "claude", &["-n".to_string()])
+            build_remote_payload_inner("tmux", "linux", &mux_session_name(&h.id, "/home/arjen/proj"),
+                                       "/home/arjen/proj", "claude", &["-n".to_string()])
                 .unwrap()
                 .as_bytes(),
         );
@@ -3064,12 +3095,26 @@ mod tests {
     #[test]
     fn build_remote_payload_wraps_tmux_with_attach_or_create() {
         let args = vec!["-n".to_string(), "my session".to_string()];
-        let s = build_remote_payload("tmux", "linux", "taurus-h1-p-0", "/home/a/p", "claude", &args)
+        let s = build_remote_payload_inner("tmux", "linux", "taurus-h1-p-0", "/home/a/p", "claude", &args)
             .unwrap();
         assert_eq!(
             s,
             "tmux new-session -A -s 'taurus-h1-p-0' -c '/home/a/p' -- 'claude' '-n' 'my session'"
         );
+    }
+
+    #[test]
+    fn a_posix_launch_uses_a_login_shell() {
+        // `ssh host "cmd"` draait geen login shell, dus ~/.profile blijft
+        // ongelezen en ~/.local/bin staat niet op PATH. Een claude die daar
+        // staat wordt dan niet gevonden en de sessie eindigt meteen met alleen
+        // "[exited]" -- precies wat er tegen een echte host gebeurde.
+        let s = build_remote_payload("tmux", "linux", "sess", "/home/a/p", "claude", &[]).unwrap();
+        assert!(s.contains("exec sh -l /tmp/sess.sh"), "moet een login shell zijn: {}", s);
+        assert!(s.starts_with("echo "), "payload hoort als base64 mee te reizen: {}", s);
+        // Windows loopt via PowerShell en heeft deze starter niet.
+        let w = build_remote_payload("none", "windows", "sess", r"C:\p", "claude", &[]).unwrap();
+        assert!(w.starts_with("powershell -NoProfile -EncodedCommand "));
     }
 
     #[test]
@@ -3101,7 +3146,7 @@ mod tests {
         assert!(build_remote_payload("tmux", "windows", "s", "C:\\p", "claude", &[]).is_err());
         assert!(build_remote_payload("zellij", "linux", "s", "/p", "claude", &[]).is_err());
         // Zonder multiplexer op Linux: kaal, met exec.
-        let s = build_remote_payload("none", "linux", "s", "/p", "claude", &[]).unwrap();
+        let s = build_remote_payload_inner("none", "linux", "s", "/p", "claude", &[]).unwrap();
         assert_eq!(s, "cd '/p' && exec 'claude'");
     }
 
@@ -3159,7 +3204,10 @@ mod tests {
         assert!(!args.iter().any(|a| a.contains("StrictHostKeyChecking=no")));
         // Doel en payload staan achteraan, in die volgorde.
         assert_eq!(args[args.len() - 2], "arjen@support01");
-        assert!(args[args.len() - 1].starts_with("tmux new-session -A -s "));
+        // De payload reist als base64 en start in een login shell (zie
+        // a_posix_launch_uses_a_login_shell voor het waarom).
+        assert!(args[args.len() - 1].starts_with("echo "));
+        assert!(args[args.len() - 1].contains("exec sh -l /tmp/"));
     }
 
     #[test]
