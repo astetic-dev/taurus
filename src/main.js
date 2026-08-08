@@ -27,11 +27,53 @@ const I18N = {
     model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exact model-ID mag ook.",
     model_fable: "nieuwste Fable", model_opus: "nieuwste Opus", model_sonnet: "nieuwste Sonnet",
     model_haiku: "nieuwste Haiku", model_opusplan: "Opus in plan-modus, daarna Sonnet",
+    launch_host: "Draait op", host_local: "Deze computer",
+    remote_workdir: "Werkmap op de host", remote_workdir_ph: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
+    remote_hint: "De agent draait op die machine; deze werkmap geldt daar.",
+    remote_need_path: "Vul een werkmap op de host in.",
+    remote_local_only: "Werkt alleen bij een sessie op deze computer",
+    hosts_title: "Machines", host_manage: "Machines beheren…", host_add: "＋ Machine toevoegen…",
+    host_nickname: "Naam", host_nickname_ph: "bijv. support01",
+    host_hostname: "Hostnaam of IP", host_port: "Poort", host_user: "Gebruikersnaam",
+    host_key: "SSH-key (leeg = ssh kiest zelf)", host_default_project: "Standaard werkmap op de host",
+    host_add_test: "Toevoegen & testen", host_testing: "Verbinden…", host_retest: "Opnieuw testen",
+    host_del: "Verwijderen", close: "Sluiten",
+    host_need_fields: "Naam, hostnaam en gebruikersnaam zijn verplicht.",
+    host_none: "Nog geen machines. Voeg er een toe om een agent elders te draaien.",
+    host_ok: "Verbinding gelukt", host_reachable: "bereikbaar", host_unreachable: "onbereikbaar",
+    host_no_claude: "⚠ Geen agent-CLI gevonden op deze machine — een sessie zal niet starten.",
+    host_no_outbound: "⚠ Geen uitgaand HTTPS naar api.anthropic.com — een agent kan hier niet werken.",
+    host_no_mux: "ℹ Geen tmux/psmux: een sessie is niet opnieuw aan te haken.",
+    host_via: "Waar draait de agent", host_via_direct: "Rechtstreeks op de machine",
+    host_via_wsl: "In WSL (Windows-host, geeft tmux-persistentie)",
+    host_wsl_tip: "💡 WSL op deze machine heeft tmux én een agent-CLI. Kies \"In WSL\" voor sessies die een verbroken verbinding overleven — de agent werkt dan wel in Linux, met Windows-schijven onder /mnt/c.",
+    host_wsl_unusable: "In WSL gekozen, maar WSL op deze machine mist tmux of een agent-CLI. Installeer die daar, of kies \"Rechtstreeks op de machine\".",
+    dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
+    dropper_sending: "Bestand overzetten naar de host…",
+    dropper_sent: "Op de host gezet",
+    dropper_paste_local_only: "Plakken uit het klembord werkt alleen bij een sessie op deze computer.",
     launch_command: "Commando-override", command_ph: "leeg = start de gekozen agent",
     command_hint: "Draait dit programma zoals het er staat, in plaats van de agent.",
     command_warn: "⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.",
     cap_agent: "Agent", cap_model: "Model (leeg = standaard)",
     cap_command: "Commando-override — draait dit programma i.p.v. de agent (optioneel)",
+    row_expand: "Openklappen", row_collapse: "Dichtklappen",
+    agent_command: "Eigen commando…",
+    ctx_move: "⇄ Verplaats naar andere machine…",
+    move_title: "Agent verplaatsen naar een andere machine", move_target: "Doelmachine",
+    move_target_path: "Werkmap op de doelmachine", move_start: "Kopiëren & verplaatsen",
+    move_surveying: "Werkmap doormeten…", move_core: "Projectbestanden (gaan altijd mee)",
+    move_files: "bestanden", move_total: "Wordt overgezet", move_kind_work: "werkmap",
+    move_kind_bulk: "opnieuw op te bouwen", move_copying: "Kopiëren naar de doelmachine…",
+    move_done: "Agent verplaatst", move_need_path: "Vul een werkmap op de doelmachine in.",
+    move_no_path: "Deze agent heeft geen werkmap.", move_no_target: "Voeg eerst een machine toe.",
+    move_target_newer: "Daar staat al een map, en die is RECENTER bijgewerkt ({when}). Wat je aanvinkt vervangt wat daar staat. Weet je het zeker?",
+    move_target_exists_info: "Daar staat al een map (laatst gewijzigd {when}). Wat je aanvinkt vervangt wat daar staat.",
+    move_host_to_host_todo: "Van de ene machine naar de andere kan nog niet — haal hem eerst hierheen.",
+    move_nothing_selected: "Er is niets aangevinkt om over te zetten.",
+    move_keep_source: "De bronmap blijft staan — dit is een kopie.",
+    cap_host: "Draait op", cap_workdir_remote: "Werkmap OP DIE MACHINE",
+    ph_path_remote: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
@@ -122,11 +164,53 @@ const I18N = {
     model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact model ID works too.",
     model_fable: "newest Fable", model_opus: "newest Opus", model_sonnet: "newest Sonnet",
     model_haiku: "newest Haiku", model_opusplan: "Opus in plan mode, Sonnet after",
+    launch_host: "Runs on", host_local: "This computer",
+    remote_workdir: "Working directory on the host", remote_workdir_ph: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
+    remote_hint: "The agent runs on that machine; this working directory applies there.",
+    remote_need_path: "Enter a working directory on the host.",
+    remote_local_only: "Only works for a session on this computer",
+    hosts_title: "Machines", host_manage: "Manage machines…", host_add: "＋ Add machine…",
+    host_nickname: "Name", host_nickname_ph: "e.g. support01",
+    host_hostname: "Hostname or IP", host_port: "Port", host_user: "Username",
+    host_key: "SSH key (empty = let ssh decide)", host_default_project: "Default working directory on the host",
+    host_add_test: "Add & test", host_testing: "Connecting…", host_retest: "Test again",
+    host_del: "Remove", close: "Close",
+    host_need_fields: "Name, hostname and username are required.",
+    host_none: "No machines yet. Add one to run an agent elsewhere.",
+    host_ok: "Connection succeeded", host_reachable: "reachable", host_unreachable: "unreachable",
+    host_no_claude: "⚠ No agent CLI found on this machine — a session will not start.",
+    host_no_outbound: "⚠ No outbound HTTPS to api.anthropic.com — an agent cannot work here.",
+    host_no_mux: "ℹ No tmux/psmux: a session cannot be reattached.",
+    host_via: "Where the agent runs", host_via_direct: "Directly on the machine",
+    host_via_wsl: "In WSL (Windows host, gives tmux persistence)",
+    host_wsl_tip: "💡 WSL on this machine has both tmux and an agent CLI. Pick \"In WSL\" for sessions that survive a dropped connection — the agent then works in Linux, with Windows drives under /mnt/c.",
+    host_wsl_unusable: "You picked In WSL, but WSL on this machine has no tmux or no agent CLI. Install those there, or pick \"Directly on the machine\".",
+    dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
+    dropper_sending: "Copying file to the host…",
+    dropper_sent: "Placed on the host",
+    dropper_paste_local_only: "Pasting from the clipboard only works for a session on this computer.",
     launch_command: "Command override", command_ph: "empty = start the selected agent",
     command_hint: "Runs this program as-is, instead of the agent.",
     command_warn: "⚠ Agent flags do not apply: model, mode and task are not passed.",
     cap_agent: "Agent", cap_model: "Model (empty = default)",
     cap_command: "Command override — runs this program instead of the agent (optional)",
+    row_expand: "Expand", row_collapse: "Collapse",
+    agent_command: "Own command…",
+    ctx_move: "⇄ Move to another machine…",
+    move_title: "Move agent to another machine", move_target: "Target machine",
+    move_target_path: "Working directory on the target machine", move_start: "Copy & move",
+    move_surveying: "Measuring working directory…", move_core: "Project files (always included)",
+    move_files: "files", move_total: "Will be transferred", move_kind_work: "work folder",
+    move_kind_bulk: "rebuildable", move_copying: "Copying to the target machine…",
+    move_done: "Agent moved", move_need_path: "Enter a working directory on the target machine.",
+    move_no_path: "This agent has no working directory.", move_no_target: "Add a machine first.",
+    move_target_newer: "A folder is already there, and it was changed MORE RECENTLY ({when}). What you tick replaces what is there. Are you sure?",
+    move_target_exists_info: "A folder is already there (last changed {when}). What you tick replaces what is there.",
+    move_host_to_host_todo: "Machine to machine is not supported yet — bring it here first.",
+    move_nothing_selected: "Nothing is ticked to transfer.",
+    move_keep_source: "The source folder stays where it is — this is a copy.",
+    cap_host: "Runs on", cap_workdir_remote: "Working directory ON THAT MACHINE",
+    ph_path_remote: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
@@ -555,6 +639,14 @@ function locText(p) {
   if (!d) return t("loc_unknown");
   return (isNetwork(p) ? t("loc_net") : t("loc_local")) + ` (${d.toUpperCase()}:)`;
 }
+// Waar draait deze agent? De machine is een eigenschap van de AGENT, niet iets
+// dat je per keer kiest -- een kaart is een precieze werkplek, en die ligt op
+// een machine net zo goed als in een map.
+function agentLocTag(p) {
+  const h = p.host_id ? hostById(p.host_id) : null;
+  if (h) return { text: `(${h.nickname || h.hostname})`, cls: "remote", title: `${h.user}@${h.hostname}` };
+  return { text: driveTag(p.path), cls: locClass(p.path), title: locText(p.path) };
+}
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -571,9 +663,19 @@ function applyOverrideState(command, fields, warnEl) {
   if (warnEl) warnEl.classList.toggle("hidden", !on);
   return on;
 }
-// Het startformulier: model, modus en taak volgen het override-veld.
+// Het startformulier: de override zit achter de agent-keuze "Eigen commando…",
+// zodat het veld niet altijd in beeld staat voor iets dat zelden gebruikt wordt.
+// Model, modus en taak volgen dan de inhoud van dat veld.
 function refreshOverrideState() {
-  applyOverrideState(els.commandInput.value, [els.modelInput, els.modeInput, els.taskInput], els.commandWarn);
+  const chosen = els.agentInput.value === AGENT_COMMAND;
+  els.commandField.classList.toggle("hidden", !chosen);
+  applyOverrideState(chosen ? els.commandInput.value : "", [els.modelInput, els.modeInput, els.taskInput], els.commandWarn);
+}
+// Welke agent hoort er in het formulier te staan? Een project met een override
+// toont "Eigen commando…", ook al staat er claude/agy in projects.json.
+function agentChoiceFor(p) {
+  if ((p.command || "").trim()) return AGENT_COMMAND;
+  return AGENTS.includes(p.agent) ? p.agent : "claude";
 }
 
 /* ============ herordenen (slepen) ============ */
@@ -663,8 +765,9 @@ function renderProjects() {
     card.className = "project-card";
     card.dataset.idx = String(index);
     card.style.borderLeftColor = p.accent || "#7c9cff";
+    const loc = agentLocTag(p);
     card.innerHTML =
-      `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${locClass(p.path)}">${driveTag(p.path)}</span></div>` +
+      `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${loc.cls}" title="${escapeHtml(loc.title)}">${escapeHtml(loc.text)}</span></div>` +
       `<div class="pc-actions">` +
         `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
         `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
@@ -675,6 +778,9 @@ function renderProjects() {
         `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
       `</div>`;
     card.addEventListener("click", () => { if (suppressNextClick) return; selectProject(p, card); showView("new"); });
+    // Verplaatsen gaat over de AGENT, dus het hoort ook hier te kunnen -- niet
+    // alleen op een draaiende tab.
+    card.addEventListener("contextmenu", (e) => { e.preventDefault(); openMoveModal(p); });
     // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
     card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
     card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
@@ -710,20 +816,413 @@ async function selectProject(p, card) {
   els.locBadge.className = "loc-badge " + locClass(p.path);
   els.titleInput.value = p.title || p.label;
   els.taskInput.value = p.task || "";
-  els.agentInput.value = AGENTS.includes(p.agent) ? p.agent : "claude";
+  els.agentInput.value = agentChoiceFor(p);
   els.modelInput.value = p.model || "";
   updateModelDatalist(els.modelSuggestions, els.agentInput.value);
   fillModeSelect(els.modeInput, els.agentInput.value, p.mode || "default");
   els.commandInput.value = p.command || "";
   refreshOverrideState();
   els.status.textContent = "";
-  const ok = await invoke("path_exists", { path: p.path });
-  els.warn.classList.toggle("hidden", ok);
-  let hasMd = false;
-  try { hasMd = await invoke("has_claude_md", { path: p.path }); } catch (_) {}
-  els.claudeWarn.classList.toggle("hidden", hasMd);
+  await refreshHostState(); // doet de lokale pad-checks, of slaat ze over bij remote
 }
 async function loadProjects() { projects = await invoke("get_projects"); renderProjects(); }
+
+/* ============ remote hosts (#98) ============ */
+// De machines waarop een tab een agent kan draaien. Leeg = alleen lokaal, en dan
+// gedraagt de app zich exact zoals voorheen.
+let hosts = [];
+async function loadHosts() {
+  try { hosts = await invoke("get_hosts"); } catch (_) { hosts = []; }
+  fillHostSelect();
+}
+function hostById(id) { return hosts.find((h) => h.id === id) || null; }
+// De hostlijst is veranderd: de agentkaarten tonen hun machine, en een open
+// editor moet de nieuwe keuzes tonen.
+function fillHostSelect() {
+  renderProjects();
+  if (els.editorModal && !els.editorModal.classList.contains("hidden")) renderEditor();
+}
+/* ---- host-modal: kiezen, toevoegen, testen ---- */
+let hostStatus = {}; // id -> {reachable, ms}, gevuld door check_hosts
+
+function openHostModal() {
+  els.hfForm.classList.add("hidden");
+  els.hostStatusMsg.textContent = "";
+  els.hfReport.classList.add("hidden");
+  renderHostRows();
+  els.hostModal.classList.remove("hidden");
+  refreshHostReachability();
+}
+// De dots vullen zich ná de eerste render: check_hosts doet alle hosts naast
+// elkaar, dus de modal is meteen zichtbaar i.p.v. te wachten op de traagste.
+async function refreshHostReachability() {
+  if (!hosts.length) return;
+  try {
+    const list = await invoke("check_hosts", { hosts: hosts.map((h) => ({ id: h.id, hostname: h.hostname, port: h.port || 22 })) });
+    // Alleen overschrijven wat de check daadwerkelijk teruggaf. De hele map
+    // wissen liet een net handmatig geteste host weer op grijs staan, en bij een
+    // mislukte check verdween ALLE status -- dan lijkt niets meer gemeten.
+    for (const s of list) hostStatus[s.id] = s;
+  } catch (e) {
+    els.hostStatusMsg.textContent = "✗ " + e;
+    els.hostStatusMsg.className = "status-msg err";
+  }
+  renderHostRows();
+}
+function renderHostRows() {
+  if (!hosts.length) {
+    els.hostRows.innerHTML = `<div class="host-empty">${escapeHtml(t("host_none"))}</div>`;
+    return;
+  }
+  els.hostRows.innerHTML = "";
+  hosts.forEach((h, i) => {
+    const st = hostStatus[h.id];
+    const cls = !st ? "pending" : st.testing ? "pending" : st.reachable ? "up" : "down";
+    const label = !st ? "…" : st.testing ? t("host_testing") : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
+    const row = document.createElement("div");
+    row.className = "host-row";
+    row.innerHTML = `
+      <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(h.nickname || h.hostname)}</div>
+        <div class="host-sub">${escapeHtml((h.user ? h.user + "@" : "") + h.hostname + (h.port && h.port !== 22 ? ":" + h.port : ""))}
+          · ${escapeHtml(h.os || "?")} · ${escapeHtml(h.mux || "none")}</div>
+      </div>
+      <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
+      <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
+    row.querySelector(".host-test").addEventListener("click", () => testExistingHost(i));
+    row.querySelector(".host-del").addEventListener("click", async () => {
+      hosts.splice(i, 1);
+      await invoke("save_hosts", { hosts });
+      fillHostSelect();
+      renderHostRows();
+    });
+    els.hostRows.appendChild(row);
+  });
+}
+
+function openHostForm() {
+  els.hfNickname.value = ""; els.hfHostname.value = ""; els.hfPort.value = "22";
+  els.hfUser.value = ""; els.hfKey.value = ""; els.hfProject.value = ""; els.hfVia.value = "";
+  els.hostStatusMsg.textContent = ""; els.hostStatusMsg.className = "status-msg";
+  els.hfReport.classList.add("hidden");
+  els.hfForm.classList.remove("hidden");
+  els.hfNickname.focus();
+}
+
+// "Toevoegen & testen": de host wordt pas opgeslagen als de probe lukt, zodat
+// hosts.json geen half-werkende entries verzamelt. De probe vult os en mux zelf
+// in -- dat zijn eigenschappen van de machine, niet iets om met de hand te typen.
+async function addAndTestHost() {
+  const nickname = els.hfNickname.value.trim();
+  const hostname = els.hfHostname.value.trim();
+  const user = els.hfUser.value.trim();
+  if (!nickname || !hostname || !user) {
+    els.hostStatusMsg.textContent = t("host_need_fields");
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  const host = {
+    id: uniqueHostId(slugify(nickname)),
+    nickname, hostname, user,
+    port: parseInt(els.hfPort.value, 10) || 22,
+    key_path: els.hfKey.value.trim(),
+    default_project: els.hfProject.value.trim(),
+    via: els.hfVia.value || "",
+    os: "", mux: "", agent_version: "",
+  };
+  els.hostStatusMsg.textContent = t("host_testing");
+  els.hostStatusMsg.className = "status-msg";
+  els.hfReport.classList.add("hidden");
+  els.hfTest.disabled = true;
+  let p;
+  try { p = await invoke("probe_host", { host }); }
+  catch (e) { p = { reachable: false, error: String(e) }; }
+  finally { els.hfTest.disabled = false; }
+
+  if (!p.reachable || !p.authOk) {
+    els.hostStatusMsg.textContent = "✗ " + (p.error || t("host_unreachable"));
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  // Kies je WSL, dan moet daar ook echt tmux EN een agent-CLI in zitten. Anders
+  // zou de host opgeslagen worden en pas bij de eerste sessie stukgaan, met een
+  // foutmelding uit een shell drie lagen diep.
+  if (host.via === "wsl" && !p.wslUsable) {
+    els.hostStatusMsg.textContent = "✗ " + t("host_wsl_unusable");
+    els.hostStatusMsg.className = "status-msg err";
+    showProbeReport(p);
+    return;
+  }
+  host.os = p.os;
+  // Via WSL is de multiplexer die van WSL (tmux), niet die van Windows.
+  host.mux = host.via === "wsl" ? "tmux" : (p.mux || "none");
+  hosts.push(host);
+  await invoke("save_hosts", { hosts });
+  fillHostSelect();
+  renderHostRows();
+  els.hostStatusMsg.textContent = "✓ " + t("host_ok");
+  els.hostStatusMsg.className = "status-msg ok";
+  showProbeReport(p);
+  els.hfForm.classList.add("hidden");
+}
+
+// Bestaande host opnieuw meten (bv. nadat er tmux is geïnstalleerd).
+async function testExistingHost(i) {
+  const h = hosts[i];
+  els.hostStatusMsg.textContent = `${h.nickname}: ${t("host_testing")}`;
+  els.hostStatusMsg.className = "status-msg";
+  // Meteen zichtbaar dat er iets gebeurt: de probe doet twee ssh-rondes en dat
+  // duurt seconden, waarin de rij er anders onveranderd bij staat.
+  hostStatus[h.id] = { id: h.id, reachable: false, ms: 0, testing: true };
+  renderHostRows();
+  let p;
+  try { p = await invoke("probe_host", { host: h }); }
+  catch (e) { p = { reachable: false, error: String(e) }; }
+  if (p.reachable && p.authOk) {
+    hosts[i] = { ...h, os: p.os, mux: p.mux || "none" };
+    await invoke("save_hosts", { hosts });
+    fillHostSelect();
+    els.hostStatusMsg.textContent = `${h.nickname}: ✓ ${t("host_ok")}`;
+    els.hostStatusMsg.className = "status-msg ok";
+  } else {
+    els.hostStatusMsg.textContent = `${h.nickname}: ✗ ${p.error || t("host_unreachable")}`;
+    els.hostStatusMsg.className = "status-msg err";
+  }
+  showProbeReport(p);
+  // Bereikbaar EN ingelogd: alleen dan is de host echt bruikbaar. Alleen een
+  // open poort met geweigerde key is geen groen bolletje waard.
+  hostStatus[h.id] = { id: h.id, reachable: !!(p.reachable && p.authOk), ms: 0 };
+  renderHostRows();
+}
+
+// Wat de probe vond, met de twee dingen die een sessie echt blokkeren bovenaan:
+// geen agent-CLI en geen uitgaand HTTPS.
+function showProbeReport(p) {
+  const lines = [];
+  if (p.os) lines.push(`OS: ${p.os}`);
+  if (p.claude) lines.push(`agent: ${p.claude}`);
+  else if (p.authOk) lines.push(t("host_no_claude"));
+  if (p.authOk && !p.outbound) lines.push(t("host_no_outbound"));
+  if (p.authOk && (!p.mux || p.mux === "none")) lines.push(t("host_no_mux"));
+  else if (p.mux) lines.push(`persistentie: ${p.mux}`);
+  // Windows zonder multiplexer maar mét een bruikbare WSL: dat is de enige route
+  // naar heraanhaken op die machine zonder iets te installeren.
+  if (p.wslUsable && (!p.mux || p.mux === "none")) lines.push(t("host_wsl_tip"));
+  if (!lines.length) return;
+  els.hfReport.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
+  els.hfReport.classList.remove("hidden");
+}
+
+/* ---- agent naar een andere machine verplaatsen (#102) ---- */
+// Welke agent verplaatsen we, en waar staat hij nu? Een tab en een sidebarkaart
+// verwijzen allebei naar hetzelfde project, dus dit werkt vanaf beide.
+let movePlan = null;
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  const u = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
+}
+
+async function openMoveModal(project) {
+  if (!project || !project.path) { toast(t("move_no_path"), "err"); return; }
+  movePlan = { project, skip: new Set(), survey: null, target: null };
+  // Doelen: alles behalve waar hij nu al staat. "Deze computer" hoort erbij als
+  // de agent elders draait -- terughalen is net zo goed een richting.
+  const opts = [{ id: "", label: t("host_local") }, ...hosts.map((h) => ({ id: h.id, label: h.nickname || h.hostname }))]
+    .filter((o) => o.id !== (project.host_id || ""));
+  if (!opts.length) { toast(t("move_no_target"), "err"); return; }
+  els.mvTarget.innerHTML = opts.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`).join("");
+  els.mvPath.value = suggestTargetPath(project, opts[0].id);
+  els.mvStatus.textContent = "";
+  els.mvWarn.classList.add("hidden");
+  els.mvSurvey.innerHTML = `<div class="move-busy">${escapeHtml(t("move_surveying"))}</div>`;
+  els.moveModal.classList.remove("hidden");
+  await refreshMoveSurvey();
+}
+
+// Meet de BRON (waar de agent nu staat) en het DOEL, zodat we kunnen zeggen
+// welke kant recenter is bijgewerkt voordat er iets overschreven wordt.
+async function refreshMoveSurvey() {
+  if (!movePlan) return;
+  const { project } = movePlan;
+  const targetId = els.mvTarget.value;
+  const targetPath = els.mvPath.value.trim();
+  els.mvSurvey.innerHTML = `<div class="move-busy">${escapeHtml(t("move_surveying"))}</div>`;
+
+  const surveySrc = project.host_id
+    ? invoke("survey_remote_workspace", { hostId: project.host_id, path: project.path })
+    : invoke("survey_workspace", { path: project.path });
+  const surveyDst = targetPath
+    ? (targetId
+        ? invoke("survey_remote_workspace", { hostId: targetId, path: targetPath })
+        : invoke("survey_workspace", { path: targetPath }))
+    : Promise.resolve(null);
+
+  let src, dst;
+  try { [src, dst] = await Promise.all([surveySrc, surveyDst]); }
+  catch (e) { src = { error: String(e) }; dst = null; }
+  movePlan.survey = src;
+  movePlan.target = dst;
+  renderMoveSurvey();
+}
+
+// De bulk-mappen staan standaard UIT: ze zijn meestal het leeuwendeel van de
+// omvang en aan de andere kant zo weer opgebouwd.
+function renderMoveSurvey() {
+  const s = movePlan && movePlan.survey;
+  if (!s) return;
+  if (s.error) {
+    els.mvSurvey.innerHTML = `<div class="move-note err">${escapeHtml(s.error)}</div>`;
+    return;
+  }
+  const rows = [];
+  rows.push(`<div class="move-line"><span>${escapeHtml(t("move_core"))}</span><span>${fmtBytes(s.coreBytes)} · ${s.coreFiles} ${escapeHtml(t("move_files"))}</span></div>`);
+  const group = (list, kind) => list.map((d) => {
+    const off = movePlan.skip.has(d.name.toLowerCase());
+    return `<label class="move-line pick"><span><input type="checkbox" data-dir="${escapeHtml(d.name)}"${off ? "" : " checked"} /> ${escapeHtml(d.name)}<span class="move-kind">${escapeHtml(kind)}</span></span>` +
+           `<span>${fmtBytes(d.bytes)} · ${d.files} ${escapeHtml(t("move_files"))}</span></label>`;
+  }).join("");
+  if (s.work.length) rows.push(group(s.work, t("move_kind_work")));
+  if (s.bulk.length) rows.push(group(s.bulk, t("move_kind_bulk")));
+
+  let total = s.coreBytes;
+  for (const d of [...s.work, ...s.bulk]) if (!movePlan.skip.has(d.name.toLowerCase())) total += d.bytes;
+  rows.push(`<div class="move-line total"><span>${escapeHtml(t("move_total"))}</span><span>${fmtBytes(total)}</span></div>`);
+
+  rows.push(`<div class="move-line"><span class="move-kind">${escapeHtml(t("move_keep_source"))}</span><span></span></div>`);
+  els.mvSurvey.innerHTML = rows.join("");
+  renderTargetWarning();
+  els.mvSurvey.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.addEventListener("change", (e) => {
+      const key = e.target.dataset.dir.toLowerCase();
+      if (e.target.checked) movePlan.skip.delete(key); else movePlan.skip.add(key);
+      renderMoveSurvey();
+    });
+  });
+}
+
+// Staat er aan de andere kant al iets, en is dat NIEUWER? Dan is dat het enige
+// wat je echt wilt weten voordat je overschrijft. Weigeren is te bot -- soms is
+// het doel juist de verouderde kopie die je wilt bijwerken. Dus: de feiten, en
+// jij beslist.
+function renderTargetWarning() {
+  const dst = movePlan && movePlan.target;
+  const src = movePlan && movePlan.survey;
+  if (!dst || !dst.exists) { els.mvWarn.classList.add("hidden"); return; }
+
+  const dstFiles = dst.coreFiles + [...dst.work, ...dst.bulk].reduce((n, d) => n + d.files, 0);
+  if (!dstFiles) { els.mvWarn.classList.add("hidden"); return; }
+
+  const newer = src && dst.newest > src.newest;
+  const when = dst.newest ? new Date(dst.newest * 1000).toLocaleString() : "?";
+  els.mvWarn.innerHTML = newer
+    ? `⚠ ${escapeHtml(t("move_target_newer").replace("{when}", when))}`
+    : `ℹ ${escapeHtml(t("move_target_exists_info").replace("{when}", when))}`;
+  els.mvWarn.className = newer ? "command-warn" : "hint";
+  els.mvWarn.classList.remove("hidden");
+}
+
+// Een pad op de andere machine raden uit de mapnaam: beter dan een leeg veld,
+// en de gebruiker ziet meteen waar het heen zou gaan.
+function suggestTargetPath(project, targetHostId) {
+  const leaf = (project.path || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "workspace";
+  const h = hostById(targetHostId);
+  if (!h) return `C:\\Users\\${(navigator.userAgent, "")}`.replace(/\\+$/, "") || leaf;
+  const base = (h.default_project || "").replace(/[\\/]+$/, "");
+  if (!base) return effectiveWindows(h) ? `C:\\${leaf}` : `/home/${h.user || "user"}/${leaf}`;
+  return effectiveWindows(h) ? `${base}\\${leaf}` : `${base}/${leaf}`;
+}
+function effectiveWindows(h) { return h && h.os === "windows" && h.via !== "wsl"; }
+
+async function runMove() {
+  if (!movePlan) return;
+  const target = els.mvTarget.value;
+  const path = els.mvPath.value.trim();
+  const src = movePlan.project;
+  if (!path) { els.mvStatus.textContent = t("move_need_path"); els.mvStatus.className = "status-msg err"; return; }
+  if (src.host_id && target) {
+    els.mvStatus.textContent = t("move_host_to_host_todo");
+    els.mvStatus.className = "status-msg err";
+    return;
+  }
+
+  els.mvGo.disabled = true;
+  els.mvStatus.className = "status-msg";
+  els.mvStatus.textContent = t("move_copying");
+  try {
+    let res;
+    if (target) {
+      // Deze computer -> host.
+      res = await invoke("push_workspace", {
+        hostId: target, localPath: src.path, remotePath: path,
+        skip: [...movePlan.skip],
+      });
+    } else {
+      // Host -> deze computer. De lijst moet EXPLICIET zijn: scp kan aan de
+      // andere kant geen map uitlezen, en een wildcard zou juist ook meenemen
+      // wat je hebt uitgevinkt.
+      const s = movePlan.survey || { core: [], work: [], bulk: [] };
+      const optional = [...s.work, ...s.bulk]
+        .map((d) => d.name)
+        .filter((n) => !movePlan.skip.has(n.toLowerCase()));
+      const items = [...(s.core || []), ...optional];
+      if (!items.length) throw new Error(t("move_nothing_selected"));
+      res = await invoke("pull_workspace", {
+        hostId: src.host_id, remotePath: src.path, localPath: path, items,
+      });
+    }
+    // Pas ná een geslaagde kopie de agent omzetten -- anders wijst hij naar een
+    // map die er niet staat.
+    const next = projects.map((p) => (p.id === movePlan.project.id ? { ...p, host_id: target, path } : p));
+    await invoke("save_projects", { projects: next });
+    projects = next;
+    if (selected && selected.id === movePlan.project.id) selected = projects.find((p) => p.id === movePlan.project.id);
+    renderProjects();
+    els.moveModal.classList.add("hidden");
+    toast(`${t("move_done")} — ${res}`, "ok");
+  } catch (e) {
+    els.mvStatus.textContent = "✗ " + e;
+    els.mvStatus.className = "status-msg err";
+  } finally {
+    els.mvGo.disabled = false;
+  }
+}
+
+function uniqueHostId(base) {
+  let id = base || "host", n = 2;
+  while (hosts.some((h) => h.id === id)) id = `${base}-${n++}`;
+  return id;
+}
+
+// Bij een remote host betekent "werkmap" een pad OP DIE MACHINE, niet het lokale
+// projectpad -- daarom een eigen veld, voorgevuld met het standaardpad van de host.
+// "Map niet bereikbaar" en "Geen CLAUDE.md" zijn checks op DEZE machine. Draait
+// de agent elders, dan gaat het om een pad daar en zouden ze altijd vals alarm
+// slaan -- dus overslaan.
+async function refreshHostState() {
+  const remote = !!(selected && selected.host_id);
+  if (remote || !selected || !selected.path) {
+    els.warn.classList.add("hidden");
+    els.claudeWarn.classList.add("hidden");
+    return;
+  }
+  await checkLocalPath(selected.path);
+}
+
+// De twee lokale controles op de gekozen werkmap, apart zodat zowel het kiezen
+// van een project als het terugschakelen naar "deze computer" ze kan herhalen.
+async function checkLocalPath(path) {
+  let ok = false;
+  try { ok = await invoke("path_exists", { path }); } catch (_) {}
+  els.warn.classList.toggle("hidden", ok);
+  let hasMd = false;
+  try { hasMd = await invoke("has_claude_md", { path }); } catch (_) {}
+  els.claudeWarn.classList.toggle("hidden", hasMd);
+}
 
 // Open de OS-mapkiezer en start een ad-hoc launch in de gekozen map: vul het
 // startformulier voor die map (niet opgeslagen als project). Optimaal heeft de
@@ -751,8 +1250,12 @@ function renderTabs() {
     tab.style.setProperty("--tab-accent", s.accent || "#7c9cff");
     const live = settings.tabStatus && s.status && !s.exited;
     const shown = live ? `✶ ${s.status}…` : s.title;
-    tab.innerHTML = `<span class="tab-dot"></span><span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
-    tab.title = s.title;
+    // Bij tien agents over vier machines moet je op de tab kunnen zien waar er
+    // een draait -- zonder dat een lokale tab er anders uit gaat zien.
+    const host = s.hostId ? hostById(s.hostId) : null;
+    const badge = host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "";
+    tab.innerHTML = `<span class="tab-dot"></span>${badge}<span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
+    tab.title = host ? `${s.title} — ${host.nickname || host.hostname}` : s.title;
     tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
     tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
@@ -788,13 +1291,14 @@ function showView(target) {
     const s = sessions.get(target);
     if (s) { s.awaiting = false; refitTerm(s); s.term.focus(); }
   }
+  updateDropperForSession(); // DROPZONE geldt per sessie: remote kan niet
   renderTabs();
 }
 
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -889,6 +1393,8 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
+    // Leeg = lokaal. Bij een remote sessie geldt `path` op DIE machine.
+    hostId: hostId || "",
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
@@ -950,7 +1456,10 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   // split-paneel). Daarom reconstrueren we eerst de volledige LOGISCHE regel
   // (eerste rij + alle isWrapped-vervolgrijen) en matchen we daarop; anders zou
   // de bevraagde rij alleen een staartfragment zien -> verkeerd (relatief) pad.
-  if (term.registerLinkProvider) {
+  // Niet bij een remote sessie: de preview leest het bestand met read_file op DIT
+  // werkstation, en het pad dat de agent noemt bestaat op de host. Een klikbaar
+  // ogende link die niets doet is misleidender dan geen link.
+  if (term.registerLinkProvider && !hostId) {
     term.registerLinkProvider({
       provideLinks(y, cb) {
         const buf = term.buffer.active;
@@ -1011,13 +1520,23 @@ async function startSession() {
   const id = "s" + (++seq);
   const uuid = crypto.randomUUID();
   const mode = els.modeInput.value || "default";
-  const command = els.commandInput.value.trim();
-  const agent = els.agentInput.value || "claude";
+  // "Eigen commando…" is een UI-keuze, geen agent: de agent blijft claude als
+  // terugval (de backend gebruikt hem toch niet zolang er een override staat).
+  const isCmd = els.agentInput.value === AGENT_COMMAND;
+  const command = isCmd ? els.commandInput.value.trim() : "";
+  const agent = isCmd ? "claude" : (els.agentInput.value || "claude");
   const model = els.modelInput.value.trim();
+  // De machine hoort bij de AGENT, niet bij deze keer starten: standaard lokaal,
+  // en remote alleen als de agent zo is ingericht in "Agents beheren".
+  const hostId = selected.host_id || "";
+  if (hostId && !path) {
+    els.status.textContent = t("remote_need_path"); els.status.className = "status-msg err";
+    return;
+  }
 
-  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model });
+  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId });
   try {
-    await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), cols: session.term.cols, rows: session.term.rows });
+    await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -1043,9 +1562,10 @@ async function addAgentFromForm() {
     task: els.taskInput.value.trim(),
     accent: selected.accent || "#7c9cff",
     mode: els.modeInput.value || "default",
-    agent: els.agentInput.value || "claude",
+    agent: els.agentInput.value === AGENT_COMMAND ? "claude" : (els.agentInput.value || "claude"),
     model: els.modelInput.value.trim(),
-    command: els.commandInput.value.trim(),
+    command: els.agentInput.value === AGENT_COMMAND ? els.commandInput.value.trim() : "",
+    host_id: selected.host_id || "", // machine hoort bij de agent, niet bij deze start
   };
   const next = projects.filter((p) => p.id !== entry.id);
   next.push(entry);
@@ -1068,7 +1588,7 @@ function persistSessionsToDisk() {
   if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
   const list = [...sessions.values()]
     .filter((s) => !s.command)
-    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "" }));
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "" }));
   invoke("save_sessions", { sessions: list }).catch(() => {});
 }
 
@@ -1087,9 +1607,17 @@ async function restoreSessions() {
   for (const meta of saved) {
     const uuid = meta.uuid;
     if (!uuid) continue;
-    let st = { exists: false, ageSecs: 0 };
-    try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
-    if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
+    // Het transcript van een REMOTE sessie staat op de host, niet hier -- die
+    // check zou hem altijd overslaan. Draait er een multiplexer, dan haakt de
+    // herstart bovendien gewoon aan de nog levende sessie aan; zo niet, dan
+    // vindt claude --resume het transcript daar zelf.
+    if (!meta.host_id) {
+      let st = { exists: false, ageSecs: 0 };
+      try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
+      if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
+    } else if (!hostById(meta.host_id)) {
+      continue; // host is inmiddels verwijderd
+    }
 
     const id = "s" + (++seq);
     const session = spawnTerminal({
@@ -1097,6 +1625,7 @@ async function restoreSessions() {
       title: meta.title || "agent", accent: meta.accent || "#7c9cff",
       mode: meta.mode || "default", command: "",
       agent: meta.agent || "claude", model: meta.model || "",
+      hostId: meta.host_id || "",
     });
     session.el.classList.add("hidden");
     session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
@@ -1105,6 +1634,7 @@ async function restoreSessions() {
         id, gen: session.gen, path: meta.path, title: session.title, sessionId: uuid,
         mode: session.mode, fullPaths: settings.fullPaths, command: "",
         agent: session.agent, model: resolveModelArg(session.agent, session.model),
+        hostId: session.hostId || "",
         cols: session.term.cols, rows: session.term.rows,
       });
     } catch (_) {
@@ -1437,7 +1967,7 @@ async function restartSession(id) {
   s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
   if (current !== id) showView(id); else renderTabs();
   try {
-    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
+    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), hostId: s.hostId || "", cols: s.term.cols, rows: s.term.rows });
   } catch (e) { s.term.write(`\r\n\x1b[31m[${t("restart_failed")}: ${e}]\x1b[0m\r\n`); }
 }
 
@@ -1449,22 +1979,38 @@ function openTabMenu(x, y, id) {
   if (!s) return;
   const m = document.createElement("div");
   m.className = "ctx-menu";
+  // Preview en Verkenner lezen de werkmap van DIT werkstation. Bij een remote
+  // sessie staat die map op de host: Verkenner zou niets of de verkeerde map
+  // openen en de preview blijft leeg. Uitgrijzen i.p.v. stil laten mislukken.
+  const off = s.hostId ? " disabled" : "";
+  const why = s.hostId ? ` title="${escapeHtml(t("remote_local_only"))}"` : "";
   m.innerHTML = `
     <div class="ctx-item" data-act="restart">${t("ctx_restart")}</div>
-    <div class="ctx-item" data-act="preview">${t("ctx_preview")}</div>
+    <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
     <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
-    <div class="ctx-item" data-act="explorer">${t("ctx_explorer")}</div>
+    <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
+    <div class="ctx-item" data-act="move">${t("ctx_move")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
   m.querySelector('[data-act="restart"]').addEventListener("click", () => restartSession(id));
-  m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
   m.querySelector('[data-act="speak"]').addEventListener("click", () => {
     closeTabMenu();
     const sel = s.term.getSelection();
     if (sel) speak(sel, true); // force: uitspreken is hier expliciet gevraagd
   });
-  m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
+  // Verplaatsen werkt op de AGENT achter deze tab; de sessie zelf verhuist niet
+  // mee, die draait waar hij draait tot je hem opnieuw start.
+  m.querySelector('[data-act="move"]').addEventListener("click", () => {
+    closeTabMenu();
+    const p = projects.find((x) => x.path === s.path && (x.host_id || "") === (s.hostId || ""))
+      || { id: "", label: s.title, path: s.path, host_id: s.hostId || "" };
+    openMoveModal(p);
+  });
+  if (!s.hostId) {
+    m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
+    m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
+  }
   document.body.appendChild(m);
   const r = m.getBoundingClientRect();
   if (r.right > window.innerWidth) m.style.left = (window.innerWidth - r.width - 6) + "px";
@@ -1626,10 +2172,12 @@ function saveSettingsFromForm() {
 /* ============ project-editor ============ */
 let editRows = [];
 function slugify(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project"; }
-function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "" }; }
+function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "", host_id: "" }; }
 function openEditor() {
   editRows = projects.map((p) => ({ ...p }));
-  if (editRows.length === 0) editRows.push(blankRow());
+  editorOpen = new Set();
+  // Eén enkele (lege) agent hoeft niet ingeklapt: dan is er niets te overzien.
+  if (editRows.length === 0) { editRows.push(blankRow()); editorOpen.add(0); }
   renderEditor();
   els.editorStatus.textContent = "";
   els.editorModal.classList.remove("hidden");
@@ -1638,42 +2186,97 @@ function openEditor() {
 function openEditorAdd() {
   openEditor();
   editRows.push(blankRow());
+  editorOpen.add(editRows.length - 1); // verse rij open: die ga je meteen invullen
   renderEditor();
 }
+// Welke rijen staan open. Een Set van INDEXEN houdt stand over een re-render
+// (die de hele lijst opnieuw opbouwt), waar een klasse op het element dat niet
+// zou doen.
+let editorOpen = new Set();
+// Pseudo-agent: "voer mijn eigen commando uit". Staat niet in projects.json --
+// daar blijft het `command`-veld de waarheid, en de UI leidt de keuze eruit af.
+const AGENT_COMMAND = "__command";
+
 function renderEditor() {
   els.editorRows.innerHTML = "";
   editRows.forEach((r, i) => {
+    const open = editorOpen.has(i);
+    // Een override VERVANGT de agent, dus hij hoort in de agent-keuze thuis in
+    // plaats van als extra veld dat altijd zichtbaar is. Het veld verschijnt
+    // alleen bij die keuze; de bestaande waarde in projects.json bepaalt of de
+    // rij er al mee begint.
+    const hasOverride = !!(r.command || "").trim();
+    // Remote: dan is de werkmap een pad OP DIE MACHINE, dus geen lokale
+    // bladerknop -- die zou een pad opleveren dat daar niet bestaat.
+    const isRemoteRow = !!r.host_id;
     const row = document.createElement("div");
-    row.className = "erow";
+    row.className = "erow" + (open ? " open" : "");
+    // Ingeklapt toont een rij precies wat hem identificeert: kleur, label, pad.
+    // Uitgeklapt komen de negen velden erbij -- die samen zo'n 350px hoog waren,
+    // waardoor er maar twee agents tegelijk op het scherm pasten.
     row.innerHTML = `
-      <input class="e-color" type="color" value="${r.accent || "#7c9cff"}" />
+      <div class="ehead">
+        <input class="e-color" type="color" value="${r.accent || "#7c9cff"}" />
+        <button class="e-toggle" aria-expanded="${open}" title="${escapeHtml(t(open ? "row_collapse" : "row_expand"))}">${open ? "▾" : "▸"}</button>
+        <div class="ehead-main">
+          <div class="ehead-label">${escapeHtml(r.label || t("ph_label"))}</div>
+          <div class="ehead-path">${escapeHtml(r.path || "—")}</div>
+        </div>
+        <button class="e-del" title="${escapeHtml(t("host_del"))}">🗑</button>
+      </div>
       <div class="e-fields">
+        <div class="e-grid">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_button"))}</span>
           <input class="e-label" type="text" placeholder="${escapeHtml(t("ph_label"))}" value="${escapeHtml(r.label)}" /></div>
-        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_workdir"))}</span>
-          <div class="e-pathrow"><input class="e-path" type="text" placeholder="${escapeHtml(t("ph_path"))}" value="${escapeHtml(r.path)}" /><button class="e-browse">📁</button></div></div>
+        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_host"))}</span>
+          <select class="e-host">
+            <option value="">${escapeHtml(t("host_local"))}</option>
+            ${hosts.map((h) => `<option value="${escapeHtml(h.id)}"${r.host_id === h.id ? " selected" : ""}>${escapeHtml(h.nickname || h.hostname)}</option>`).join("")}
+          </select></div>
+        </div>
+        <div class="e-field"><span class="e-cap">${escapeHtml(isRemoteRow ? t("cap_workdir_remote") : t("cap_workdir"))}</span>
+          <div class="e-pathrow"><input class="e-path" type="text" placeholder="${escapeHtml(isRemoteRow ? t("ph_path_remote") : t("ph_path"))}" value="${escapeHtml(r.path)}" />${isRemoteRow ? "" : `<button class="e-browse">📁</button>`}</div></div>
+        <div class="e-grid">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_tabtitle"))}</span>
           <input class="e-title" type="text" placeholder="${escapeHtml(t("ph_title"))}" value="${escapeHtml(r.title || "")}" /></div>
-        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_task"))}</span>
-          <input class="e-task" type="text" placeholder="${escapeHtml(t("ph_task"))}" value="${escapeHtml(r.task || "")}" /></div>
+        </div>
+        <div class="e-field e-taskfield"><span class="e-cap">${escapeHtml(t("cap_task"))}</span>
+          <textarea class="e-task" rows="4" placeholder="${escapeHtml(t("ph_task"))}">${escapeHtml(r.task || "")}</textarea></div>
+        <div class="e-grid e-grid3">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_agent"))}</span>
           <select class="e-agent">
-            <option value="claude"${(r.agent || "claude") === "claude" ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
-            <option value="agy"${r.agent === "agy" ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>
+            <option value="claude"${(!hasOverride && (r.agent || "claude") === "claude") ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
+            <option value="agy"${(!hasOverride && r.agent === "agy") ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>
+            <option value="${AGENT_COMMAND}"${hasOverride ? " selected" : ""}>${escapeHtml(t("agent_command"))}</option>
           </select></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_model"))}</span>
           <input class="e-model" type="text" list="dl-emodel-${i}" autocomplete="off" placeholder="${escapeHtml(t("model_ph"))}" value="${escapeHtml(r.model || "")}" />
           <datalist id="dl-emodel-${i}">${modelSuggestionsFor(r.agent).map((s) => `<option value="${escapeHtml(suggestionValue(s))}"${typeof s !== "string" && s.key ? ` label="${escapeHtml(t(s.key))}"` : ""}></option>`).join("")}</datalist></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("launch_mode"))}</span>
           <select class="e-mode">${modesFor(r.agent).map((o) => `<option value="${o.value}"${clampMode(r.agent, r.mode || "default") === o.value ? " selected" : ""}>${escapeHtml(t(o.key))}</option>`).join("")}</select></div>
-        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_command"))}</span>
+        </div>
+        <div class="e-field e-cmdfield${hasOverride ? "" : " hidden"}"><span class="e-cap">${escapeHtml(t("cap_command"))}</span>
           <input class="e-command" type="text" placeholder="${escapeHtml(t("command_ph"))}" value="${escapeHtml(r.command || "")}" />
-          <span class="e-cmdwarn hidden">${escapeHtml(t("command_warn"))}</span></div>
-      </div>
-      <button class="e-del">🗑</button>`;
+          <span class="e-cmdwarn${hasOverride ? "" : " hidden"}">${escapeHtml(t("command_warn"))}</span></div>
+      </div>`;
+    // Uitklappen: alleen deze rij, de andere blijven zoals ze staan.
+    const toggle = () => {
+      if (editorOpen.has(i)) editorOpen.delete(i); else editorOpen.add(i);
+      renderEditor();
+    };
+    row.querySelector(".e-toggle").addEventListener("click", toggle);
+    row.querySelector(".ehead-main").addEventListener("click", toggle);
+    // De kop toont label en pad; die moeten meelopen terwijl je typt, anders
+    // klopt de ingeklapte rij niet meer met wat erin staat.
     row.querySelector(".e-color").addEventListener("input", (e) => (editRows[i].accent = e.target.value));
-    row.querySelector(".e-label").addEventListener("input", (e) => (editRows[i].label = e.target.value));
-    row.querySelector(".e-path").addEventListener("input", (e) => (editRows[i].path = e.target.value));
+    row.querySelector(".e-label").addEventListener("input", (e) => {
+      editRows[i].label = e.target.value;
+      row.querySelector(".ehead-label").textContent = e.target.value || t("ph_label");
+    });
+    row.querySelector(".e-path").addEventListener("input", (e) => {
+      editRows[i].path = e.target.value;
+      row.querySelector(".ehead-path").textContent = e.target.value || "—";
+    });
     row.querySelector(".e-title").addEventListener("input", (e) => (editRows[i].title = e.target.value));
     row.querySelector(".e-task").addEventListener("input", (e) => (editRows[i].task = e.target.value));
     row.querySelector(".e-mode").addEventListener("change", (e) => (editRows[i].mode = e.target.value));
@@ -1682,13 +2285,40 @@ function renderEditor() {
     // meeveranderen; de modus wordt geclampt (claude "plan" bestaat niet voor
     // agy) en het model gewist (een model van de vorige agent is niet geldig).
     row.querySelector(".e-agent").addEventListener("change", (e) => {
-      editRows[i].agent = e.target.value;
-      editRows[i].mode = clampMode(e.target.value, editRows[i].mode || "default");
-      editRows[i].model = "";
+      if (e.target.value === AGENT_COMMAND) {
+        // Agent blijft staan als terugvalwaarde; de backend negeert hem toch
+        // zolang er een override is. Een placeholder zodat het veld niet leeg
+        // opent en de rij meteen als override herkenbaar is.
+        editRows[i].command = editRows[i].command || "cmd.exe";
+      } else {
+        editRows[i].agent = e.target.value;
+        editRows[i].command = "";
+        editRows[i].mode = clampMode(e.target.value, editRows[i].mode || "default");
+        editRows[i].model = "";
+      }
       renderEditor();
     });
-    row.querySelector(".e-browse").addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
-    row.querySelector(".e-del").addEventListener("click", () => { editRows.splice(i, 1); renderEditor(); });
+    // Van machine wisselen maakt het bestaande pad betekenisloos: een lokaal
+    // pad bestaat niet op de host en omgekeerd. Leegmaken is eerlijker dan een
+    // pad laten staan dat straks stil naar de verkeerde map wijst.
+    row.querySelector(".e-host").addEventListener("change", (e) => {
+      if ((editRows[i].host_id || "") === e.target.value) return;
+      editRows[i].host_id = e.target.value;
+      const h = hostById(e.target.value);
+      editRows[i].path = h ? (h.default_project || "") : "";
+      renderEditor();
+    });
+    const browse = row.querySelector(".e-browse");
+    if (browse) browse.addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
+    row.querySelector(".e-del").addEventListener("click", () => {
+      editRows.splice(i, 1);
+      // editorOpen bevat INDEXEN, en die schuiven op bij een splice: zonder dit
+      // klapt na het verwijderen een andere rij open dan je open had staan.
+      editorOpen = new Set(
+        [...editorOpen].filter((n) => n !== i).map((n) => (n > i ? n - 1 : n))
+      );
+      renderEditor();
+    });
     // Override-veld (#93): schakelt model, modus en taak van DEZE rij uit, want
     // die worden bij een override niet meegestuurd. Geen re-render -- dat zou de
     // cursor uit het veld halen bij elke toetsaanslag.
@@ -1698,7 +2328,7 @@ function renderEditor() {
       editRows[i].command = e.target.value;
       applyOverrideState(e.target.value, overrideFields, cmdWarn);
     });
-    applyOverrideState(r.command, overrideFields, cmdWarn);
+    if (hasOverride) applyOverrideState(r.command, overrideFields, cmdWarn);
     els.editorRows.appendChild(row);
   });
   // Vraag de CLI-lijst op voor de agents in deze editor; levert dat een nieuwe
@@ -1711,7 +2341,7 @@ function renderEditor() {
 async function saveEditor() {
   const cleaned = editRows
     .filter((r) => r.label.trim() && r.path.trim())
-    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: (r.command || "").trim() }));
+    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: (r.command || "").trim(), host_id: r.host_id || "" }));
   if (cleaned.length === 0) { els.editorStatus.textContent = t("err_need_project"); els.editorStatus.className = "status-msg err"; return; }
   try { await invoke("save_projects", { projects: cleaned }); projects = cleaned; renderProjects(); els.editorModal.classList.add("hidden"); }
   catch (e) { els.editorStatus.textContent = "✗ " + e; els.editorStatus.className = "status-msg err"; }
@@ -1738,7 +2368,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); } return; }
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.hostModal.classList.add("hidden"); els.moveModal.classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   const ctrl = e.ctrlKey && !e.altKey;
   if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); changeFont(1); return; }
@@ -1780,6 +2410,40 @@ function dropperCwd() {
   if (s && s.path) return s.path;
   if (selected && selected.path) return selected.path;
   return null;
+}
+
+// De DROPZONE zet een bestand in de input-map van de werkmap en plakt dat pad in
+// de prompt. Bij een remote sessie staat die werkmap op de host, dus lokaal
+// kopieren levert een pad op dat de agent daar niet kan openen -- hij meldt dan
+// "file not found" en niemand legt het verband. Daarom gaat het bestand over met
+// scp en komt het pad OP DE HOST in de prompt.
+function activeSessionIsRemote() {
+  const s = sessions.get(current);
+  return !!(s && s.hostId);
+}
+function updateDropperForSession() {
+  if (!els.fileDropper) return;
+  els.fileDropper.classList.toggle("dropzone-remote", activeSessionIsRemote());
+  els.fileDropper.title = activeSessionIsRemote() ? t("dropper_remote_hint") : "";
+}
+
+// Eén bestand naar de host, ongeacht welke zone je raakte: "verplaatsen" zou
+// betekenen dat we het lokale origineel na een netwerkoverdracht weggooien, en
+// dat is een beslissing die je zelf hoort te nemen, niet een sleepgebaar.
+async function dropToRemote(src) {
+  const s = sessions.get(current);
+  if (!s || !s.hostId) return false;
+  toast(t("dropper_sending"), "");
+  try {
+    const dest = await invoke("scp_to_host", { hostId: s.hostId, src, remoteCwd: s.path });
+    insertPathIntoTerminal(dest, true);
+    addDropperEntry(dest);
+    toast(t("dropper_sent"), "ok");
+  } catch (err) {
+    dbg(`scp FAIL: ${err}`);
+    toast(t("dropper_save_failed") + " " + err, "err");
+  }
+  return true;
 }
 
 // Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
@@ -1849,6 +2513,10 @@ function wireFileDropper() {
     if (!paths.length) return;
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    if (activeSessionIsRemote()) {
+      for (const src of paths) await dropToRemote(src);
+      return;
+    }
     for (const src of paths) {
       try {
         // Alleen pad: geen bestandsactie, enkel het bestaande pad in de prompt.
@@ -1868,6 +2536,9 @@ function wireFileDropper() {
   });
 
   els.dropperPaste.addEventListener("click", async () => {
+    // Klembord-plakken schrijft eerst lokaal (save_clipboard_to_input) en zou
+    // dan nog overgezet moeten worden; die tweetrapsvorm bestaat nog niet.
+    if (activeSessionIsRemote()) { toast(t("dropper_paste_local_only"), "err"); return; }
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
     try {
@@ -1887,6 +2558,13 @@ function wireFileDropper() {
 async function addFileViaPicker() {
   const cwd = dropperCwd();
   if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+  if (activeSessionIsRemote()) {
+    // Bij remote is de input-map niet lokaal te openen: begin in de home-map.
+    let f = null;
+    try { f = await invoke("pick_file", { startDir: "~" }); } catch (_) { return; }
+    if (f) await dropToRemote(f);
+    return;
+  }
   const inputDir = cwd.replace(/\//g, "\\").replace(/\\+$/, "") + "\\input";
   let file = null;
   try { file = await invoke("pick_file", { startDir: inputDir }); } catch (_) { return; }
@@ -2106,6 +2784,27 @@ window.addEventListener("DOMContentLoaded", () => {
     modelSuggestions: document.querySelector("#model-suggestions"),
     commandInput: document.querySelector("#command-input"),
     commandWarn: document.querySelector("#command-warn"),
+    commandField: document.querySelector("#command-field"),
+    moveModal: document.querySelector("#move-modal"),
+    mvTarget: document.querySelector("#mv-target"),
+    mvPath: document.querySelector("#mv-path"),
+    mvSurvey: document.querySelector("#mv-survey"),
+    mvWarn: document.querySelector("#mv-warn"),
+    mvStatus: document.querySelector("#mv-status"),
+    mvGo: document.querySelector("#mv-go"),
+    hostModal: document.querySelector("#host-modal"),
+    hostRows: document.querySelector("#host-rows"),
+    hfForm: document.querySelector("#host-form"),
+    hfNickname: document.querySelector("#hf-nickname"),
+    hfHostname: document.querySelector("#hf-hostname"),
+    hfPort: document.querySelector("#hf-port"),
+    hfUser: document.querySelector("#hf-user"),
+    hfKey: document.querySelector("#hf-key"),
+    hfProject: document.querySelector("#hf-project"),
+    hfVia: document.querySelector("#hf-via"),
+    hfTest: document.querySelector("#hf-test"),
+    hostStatusMsg: document.querySelector("#hf-status"),
+    hfReport: document.querySelector("#hf-report"),
     helpTip: document.querySelector("#help-tip"),
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
@@ -2119,10 +2818,44 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
   els.commandInput.addEventListener("input", refreshOverrideState);
+  // Twee ingangen: naast de agentlijst (waar je bent als je een machine wilt
+  // toevoegen) en in de agents-editor (waar je bent als een agent er een nodig
+  // heeft). Alleen die tweede plek bleek onvindbaar.
+  document.querySelector("#mv-cancel").addEventListener("click", () => els.moveModal.classList.add("hidden"));
+  document.querySelector("#mv-go").addEventListener("click", runMove);
+  // Van doel wisselen: het voorgestelde pad hoort bij die machine, niet bij de vorige.
+  els.mvTarget.addEventListener("change", () => {
+    if (!movePlan) return;
+    els.mvPath.value = suggestTargetPath(movePlan.project, els.mvTarget.value);
+    refreshMoveSurvey();
+  });
+  // Pad wijzigen betekent een ander doel: opnieuw meten, maar pas als je even
+  // stopt met typen -- anders gaat er een ssh-ronde per toetsaanslag heen.
+  let mvPathTimer = null;
+  els.mvPath.addEventListener("input", () => {
+    clearTimeout(mvPathTimer);
+    mvPathTimer = setTimeout(refreshMoveSurvey, 600);
+  });
+  document.querySelector("#hosts-btn").addEventListener("click", openHostModal);
+  document.querySelector("#editor-hosts").addEventListener("click", openHostModal);
+  document.querySelector("#host-add").addEventListener("click", openHostForm);
+  document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
+  document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
+  document.querySelector("#host-close").addEventListener("click", () => els.hostModal.classList.add("hidden"));
+  // Sleutelkiezer via het bestaande pick_file-command: de dialog-plugin is niet
+  // vanuit JS aanroepbaar (staat niet in capabilities/default.json).
+  document.querySelector("#hf-key-browse").addEventListener("click", async () => {
+    try {
+      const f = await invoke("pick_file", { startDir: "~/.ssh" });
+      if (f) els.hfKey.value = f;
+    } catch (_) {}
+  });
   // Andere agent op het startformulier -> model-keuze EN modus-opties mee.
   // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
   els.agentInput.addEventListener("change", () => {
+    refreshOverrideState();
+    if (els.agentInput.value === AGENT_COMMAND) return; // geen model/modus bij een eigen commando
     els.modelInput.value = "";
     updateModelDatalist(els.modelSuggestions, els.agentInput.value);
     fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value);
@@ -2187,7 +2920,8 @@ window.addEventListener("DOMContentLoaded", () => {
   applyBranding();
   renderTabs();
   loadProjects();
-  restoreSessions();
+  // Hosts eerst: restoreSessions moet een opgeslagen host_id kunnen opzoeken.
+  loadHosts().then(restoreSessions);
 
   // Toon de app-versie discreet onderin de sidebar.
   invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});

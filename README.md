@@ -8,7 +8,11 @@ A small Tauri desktop app that runs and manages multiple **Claude Code** agents 
 **terminal tabs in one window** — with voice, a file DROPZONE and an inline
 HTML/Markdown viewer built in.
 
-_▶ Watch: [features tour](https://www.youtube.com/watch?v=TAyZlhlvigw) ·
+Since 0.5.0 a tab can also run its agent on **another machine** over SSH — your
+folders stay where they are and the agent goes to them.
+
+_▶ Watch: [remote agents](https://youtu.be/_Q_6gRCFEYc) ·
+[features tour](https://www.youtube.com/watch?v=TAyZlhlvigw) ·
 [original explainer](https://youtu.be/ofswaJBX39k) ·
 [15-second teaser](https://youtu.be/7WDtN5giKSk)._
 
@@ -180,6 +184,31 @@ Edit them with the in-app **Agents** editor, or by hand. Format:
   quotes around a program path or argument that contains spaces.
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
+
+## Remote hosts
+
+**▶ [Watch the explainer](https://youtu.be/_Q_6gRCFEYc)** — 60 seconds: adding a
+machine, working on it, and moving an agent's folder structure across.
+
+A tab can run its agent on **another machine** over SSH instead of locally: the
+work happens where the data and the access are, and the tab still shows the
+agent's own TUI. Hosts live in `%APPDATA%\Taurus\hosts.json` and appear in the
+launch form under **Runs on**.
+
+Add a machine once from the 🖥 button beside the Agents heading: one connection
+test reports which OS it runs, whether an agent CLI is installed, whether the
+box can reach `api.anthropic.com` at all, and whether a session there survives a
+dropped connection. An agent then carries its machine like it carries its
+folder, and its tab shows a badge for where it runs.
+
+Right-click a tab or an agent card to **move an agent to another machine**,
+folder and all — with a survey of what is about to be copied, so a 512 MB
+`node_modules` does not travel unless you say so.
+
+Setup is two prompts — one for an agent on your workstation, one for an agent on
+the target machine — in **[REMOTE-HOSTS.md](REMOTE-HOSTS.md)**, along with the
+`hosts.json` format, what session persistence you get per host, and the security
+notes worth reading before pointing an agent at a machine you do not own.
 
 ## Branding (white-label)
 
