@@ -188,6 +188,16 @@ work happens where the data and the access are, and the tab still shows the
 agent's own TUI. Hosts live in `%APPDATA%\Taurus\hosts.json` and appear in the
 launch form under **Runs on**.
 
+Add a machine once from the 🖥 button beside the Agents heading: one connection
+test reports which OS it runs, whether an agent CLI is installed, whether the
+box can reach `api.anthropic.com` at all, and whether a session there survives a
+dropped connection. An agent then carries its machine like it carries its
+folder, and its tab shows a badge for where it runs.
+
+Right-click a tab or an agent card to **move an agent to another machine**,
+folder and all — with a survey of what is about to be copied, so a 512 MB
+`node_modules` does not travel unless you say so.
+
 Setup is two prompts — one for an agent on your workstation, one for an agent on
 the target machine — in **[REMOTE-HOSTS.md](REMOTE-HOSTS.md)**, along with the
 `hosts.json` format, what session persistence you get per host, and the security

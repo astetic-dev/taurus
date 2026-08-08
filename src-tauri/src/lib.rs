@@ -32,6 +32,11 @@ struct Project {
     // Model voor de agent (vrije tekst). Leeg = de eigen default van de agent.
     #[serde(default)]
     model: String,
+    // Op welke machine draait deze agent; leeg = deze computer. Hoort bij de
+    // AGENT en niet bij het starten: een kaart is een precieze werkplek, en dan
+    // is `path` een pad op DIE machine (#98).
+    #[serde(default)]
+    host_id: String,
 }
 
 // Lege defaults: een verse installatie start zonder projecten. De gebruiker
@@ -568,6 +573,413 @@ fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<Strin
     Ok(remote_join(&host.os, &remote_dir, &name))
 }
 
+// ---------- werkmap verplaatsen tussen machines (#102) ----------
+
+// Mappen die werk bevatten in plaats van broncode. Ze worden apart geteld zodat
+// je per stuk kunt kiezen of ze meegaan -- een output-map van 4 GB wil je zelden
+// meesturen, een input-map met net aangeleverde bestanden juist wel.
+const WORK_DIRS: [&str; 5] = ["input", "output", "log", "logs", "review"];
+// Mappen die groot en reproduceerbaar zijn. Standaard uit: ze zijn meestal het
+// leeuwendeel van de omvang en aan de andere kant zo weer opgebouwd.
+const BULK_DIRS: [&str; 6] = [".git", "node_modules", "target", "dist", ".venv", "__pycache__"];
+
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct DirEntrySize {
+    name: String,
+    bytes: u64,
+    files: u64,
+}
+
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSurvey {
+    // De rest: alles buiten de apart genoemde mappen. Dat gaat altijd mee.
+    core_bytes: u64,
+    core_files: u64,
+    // Dezelfde items als losse namen. Nodig om terug te halen: scp kan aan de
+    // andere kant geen map uitlezen, dus de lijst moet expliciet zijn -- een
+    // wildcard zou juist ook meenemen wat je hebt uitgevinkt.
+    core: Vec<String>,
+    work: Vec<DirEntrySize>,
+    bulk: Vec<DirEntrySize>,
+    // Bestaat de map, en wanneer is er voor het laatst iets in gewijzigd
+    // (unix-seconden, 0 = onbekend)? Daarmee kan de UI zeggen welke kant de
+    // nieuwste versie heeft in plaats van botweg te weigeren.
+    exists: bool,
+    newest: u64,
+    error: String,
+}
+
+// De nieuwste wijziging in een boom, als unix-seconden.
+fn newest_mtime(path: &Path) -> u64 {
+    let mut newest = 0u64;
+    let rd = match std::fs::read_dir(path) {
+        Ok(r) => r,
+        Err(_) => return 0,
+    };
+    for e in rd.flatten() {
+        let meta = match std::fs::symlink_metadata(e.path()) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_symlink() {
+            continue;
+        }
+        let t = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        newest = newest.max(t);
+        if meta.is_dir() {
+            newest = newest.max(newest_mtime(&e.path()));
+        }
+    }
+    newest
+}
+
+// Tel een map recursief. Symlinks worden niet gevolgd: een lus zou hier anders
+// oneindig doorlopen, en een gevolgde link telt bestanden dubbel.
+fn dir_size(path: &Path) -> (u64, u64) {
+    let mut bytes = 0u64;
+    let mut files = 0u64;
+    let rd = match std::fs::read_dir(path) {
+        Ok(r) => r,
+        Err(_) => return (0, 0),
+    };
+    for e in rd.flatten() {
+        let meta = match std::fs::symlink_metadata(e.path()) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            let (b, f) = dir_size(&e.path());
+            bytes += b;
+            files += f;
+        } else {
+            bytes += meta.len();
+            files += 1;
+        }
+    }
+    (bytes, files)
+}
+
+// Wat zit er in deze werkmap, en hoe groot is het? Vóór het overzetten, zodat
+// een wachttijd van tien minuten geen verrassing is.
+#[tauri::command(async)]
+fn survey_workspace(path: String) -> WorkspaceSurvey {
+    let mut s = WorkspaceSurvey::default();
+    let root = Path::new(&path);
+    if !root.is_dir() {
+        // Geen fout: een nog niet bestaande doelmap is het normale geval bij een
+        // eerste overzetting. De UI onderscheidt dat aan `exists`.
+        return s;
+    }
+    s.exists = true;
+    s.newest = newest_mtime(root);
+    let named: Vec<&str> = WORK_DIRS.iter().chain(BULK_DIRS.iter()).copied().collect();
+    let rd = match std::fs::read_dir(root) {
+        Ok(r) => r,
+        Err(e) => {
+            s.error = e.to_string();
+            return s;
+        }
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let meta = match std::fs::symlink_metadata(e.path()) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            let lower = name.to_lowercase();
+            let (bytes, files) = dir_size(&e.path());
+            if named.iter().any(|n| *n == lower) {
+                let entry = DirEntrySize { name: name.clone(), bytes, files };
+                if WORK_DIRS.contains(&lower.as_str()) {
+                    s.work.push(entry);
+                } else {
+                    s.bulk.push(entry);
+                }
+            } else {
+                s.core_bytes += bytes;
+                s.core_files += files;
+                s.core.push(name);
+            }
+        } else {
+            s.core_bytes += meta.len();
+            s.core_files += 1;
+            s.core.push(name);
+        }
+    }
+    s.work.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    s.bulk.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    s
+}
+
+// Dezelfde meting als survey_workspace, maar op een host. Nodig voor twee
+// dingen: terughalen naar deze computer (dan is de host de BRON), en kunnen
+// zeggen welke kant recenter is bijgewerkt voordat er iets overschreven wordt.
+//
+// Het script schrijft regels `T|naam|bytes|files|mtime`; dat parseert eenvoudig
+// en overleeft een motd of andere ruis op de verbinding.
+#[tauri::command(async)]
+fn survey_remote_workspace(host_id: String, path: String) -> WorkspaceSurvey {
+    let mut s = WorkspaceSurvey::default();
+    let host = match lookup_host(&host_id) {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            s.error = format!("onbekende host: {}", host_id);
+            return s;
+        }
+        Err(e) => {
+            s.error = e;
+            return s;
+        }
+    };
+
+    let cmd = if effective_os(&host) == "windows" {
+        let ps = format!(
+            r#"$r = {p}
+if (-not (Test-Path $r)) {{ 'MISSING'; exit }}
+'EXISTS'
+Get-ChildItem $r -Force -EA 0 | ForEach-Object {{
+  if ($_.PSIsContainer) {{
+    $f = Get-ChildItem $_.FullName -Recurse -File -Force -EA 0
+    $b = ($f | Measure-Object -Property Length -Sum).Sum
+    $n = ($f | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum
+    $t = if ($n) {{ [int][double]::Parse((Get-Date $n -UFormat %s)) }} else {{ 0 }}
+    'D|' + $_.Name + '|' + [int64]$b + '|' + $f.Count + '|' + $t
+  }} else {{
+    $t = [int][double]::Parse((Get-Date $_.LastWriteTimeUtc -UFormat %s))
+    'F|' + $_.Name + '|' + $_.Length + '|1|' + $t
+  }}
+}}"#,
+            p = ps_quote(&path)
+        );
+        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
+    } else {
+        let inner = format!(
+            r#"r={p}
+[ -d "$r" ] || {{ echo MISSING; exit 0; }}
+echo EXISTS
+for e in "$r"/* "$r"/.*; do
+  b=$(basename "$e")
+  [ "$b" = "." ] || [ "$b" = ".." ] || [ ! -e "$e" ] || {{
+    if [ -d "$e" ]; then
+      sz=$(du -sb "$e" 2>/dev/null | cut -f1)
+      n=$(find "$e" -type f 2>/dev/null | wc -l)
+      t=$(find "$e" -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)
+      echo "D|$b|${{sz:-0}}|${{n:-0}}|${{t:-0}}"
+    else
+      sz=$(stat -c%s "$e" 2>/dev/null)
+      t=$(stat -c%Y "$e" 2>/dev/null)
+      echo "F|$b|${{sz:-0}}|1|${{t:-0}}"
+    fi
+  }}
+done"#,
+            p = shell_quote_posix(&path)
+        );
+        if host.via == "wsl" {
+            format!("wsl -e sh -c \"echo {} | base64 -d | sh\"", b64(inner.as_bytes()))
+        } else {
+            format!("echo {} | base64 -d | sh", b64(inner.as_bytes()))
+        }
+    };
+
+    let (out, _) = match ssh_run(&host, &cmd) {
+        Ok(v) => v,
+        Err(e) => {
+            s.error = e;
+            return s;
+        }
+    };
+    if !out.contains("EXISTS") {
+        return s; // bestaat nog niet -- geen fout
+    }
+    s.exists = true;
+    for line in out.lines() {
+        let p: Vec<&str> = line.trim().split('|').collect();
+        if p.len() != 5 || (p[0] != "D" && p[0] != "F") {
+            continue;
+        }
+        let name = p[1].to_string();
+        let bytes: u64 = p[2].parse().unwrap_or(0);
+        let files: u64 = p[3].parse().unwrap_or(0);
+        let mtime: u64 = p[4].parse().unwrap_or(0);
+        s.newest = s.newest.max(mtime);
+        let lower = name.to_lowercase();
+        if p[0] == "D" && WORK_DIRS.contains(&lower.as_str()) {
+            s.work.push(DirEntrySize { name, bytes, files });
+        } else if p[0] == "D" && BULK_DIRS.contains(&lower.as_str()) {
+            s.bulk.push(DirEntrySize { name, bytes, files });
+        } else {
+            s.core_bytes += bytes;
+            s.core_files += files;
+            s.core.push(name);
+        }
+    }
+    s.work.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    s.bulk.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    s
+}
+
+// Zet de werkmap over naar een host. `skip` bevat de mapnamen die niet meegaan.
+// Kopieert; de bron blijft staan -- zie #102 voor waarom dat een bewuste keuze is.
+#[tauri::command(async)]
+fn push_workspace(
+    host_id: String,
+    local_path: String,
+    remote_path: String,
+    skip: Vec<String>,
+) -> Result<String, String> {
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    if host.via == "wsl" {
+        return Err(
+            "Overzetten naar een agent in WSL kan nog niet: de scp-server draait op Windows en komt niet in het bestandssysteem van WSL.".into(),
+        );
+    }
+    let src = Path::new(&local_path);
+    if !src.is_dir() {
+        return Err(format!("Map bestaat niet:\n{}", local_path));
+    }
+
+    // Doelmap aanmaken; scp -r maakt hem zelf niet aan.
+    let mkdir = if host.os == "windows" {
+        let ps = format!(
+            "New-Item -ItemType Directory -Force -Path {} | Out-Null",
+            ps_quote(&remote_path)
+        );
+        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
+    } else {
+        format!("mkdir -p {}", shell_quote_posix(&remote_path))
+    };
+    let (out, ok) = ssh_run(&host, &mkdir)?;
+    if !ok {
+        return Err(format!("kon {} niet aanmaken:\n{}", remote_path, out.trim()));
+    }
+
+    // Per top-level item apart, zodat overslaan mogelijk is. scp -r op de hele
+    // map zou alles meenemen, inclusief een node_modules van een halve gigabyte.
+    let skip_lower: Vec<String> = skip.iter().map(|s| s.to_lowercase()).collect();
+    let mut sent = 0u32;
+    let mut skipped = 0u32;
+    let rd = std::fs::read_dir(src).map_err(|e| e.to_string())?;
+    let target_dir = if host.os == "windows" {
+        remote_path.replace('\\', "/")
+    } else {
+        remote_path.clone()
+    };
+    let user_at = host_target(&host);
+
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if skip_lower.contains(&name.to_lowercase()) {
+            skipped += 1;
+            continue;
+        }
+        let mut args = scp_base_args(&host)?;
+        args.push(e.path().to_string_lossy().into_owned());
+        // Niet quoten achter de dubbele punt: scp loopt sinds OpenSSH 9 over
+        // SFTP, en dan is het pad letterlijk (zie scp_to_host).
+        args.push(format!("{}:{}/", user_at, target_dir.trim_end_matches('/')));
+
+        let out = std::process::Command::new(scp_program())
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|err| format!("scp starten mislukte: {}", err))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("overzetten van '{}' mislukte:\n{}", name, err.trim()));
+        }
+        sent += 1;
+    }
+    Ok(format!("{} overgezet, {} overgeslagen", sent, skipped))
+}
+
+// Gedeelde scp-opties voor beide richtingen.
+fn scp_base_args(host: &Host) -> Result<Vec<String>, String> {
+    let mut a: Vec<String> = vec!["-r".into()];
+    if host.port != 22 {
+        // scp gebruikt -P waar ssh -p gebruikt; -p zou hier "behoud tijdstempels"
+        // betekenen en stil op de standaardpoort verbinden.
+        a.push("-P".into());
+        a.push(host.port.to_string());
+    }
+    if let KeySource::Path(k) = resolve_key(host)? {
+        a.push("-i".into());
+        a.push(k);
+    }
+    a.push("-o".into());
+    a.push("StrictHostKeyChecking=accept-new".into());
+    a.push("-o".into());
+    a.push("BatchMode=yes".into());
+    Ok(a)
+}
+
+fn host_target(host: &Host) -> String {
+    if host.user.trim().is_empty() {
+        host.hostname.trim().to_string()
+    } else {
+        format!("{}@{}", host.user.trim(), host.hostname.trim())
+    }
+}
+
+// Haal de werkmap van een host terug naar deze computer. Spiegelbeeld van
+// push_workspace; bestaande bestanden worden overschreven, want de aangevinkte
+// kant is de bron van waarheid.
+#[tauri::command(async)]
+fn pull_workspace(
+    host_id: String,
+    remote_path: String,
+    local_path: String,
+    items: Vec<String>,
+) -> Result<String, String> {
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    if host.via == "wsl" {
+        return Err(
+            "Terughalen uit WSL kan nog niet: de scp-server draait op Windows en komt niet in het bestandssysteem van WSL.".into(),
+        );
+    }
+    std::fs::create_dir_all(&local_path)
+        .map_err(|e| format!("kon {} niet aanmaken:\n{}", local_path, e))?;
+
+    let remote_base = if host.os == "windows" {
+        remote_path.replace('\\', "/")
+    } else {
+        remote_path.clone()
+    };
+    let user_at = host_target(&host);
+    let mut got = 0u32;
+    for name in &items {
+        let mut args = scp_base_args(&host)?;
+        // Niet quoten achter de dubbele punt: scp loopt sinds OpenSSH 9 over
+        // SFTP en behandelt het pad letterlijk.
+        args.push(format!("{}:{}/{}", user_at, remote_base.trim_end_matches('/'), name));
+        args.push(local_path.clone());
+        let out = std::process::Command::new(scp_program())
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|e| format!("scp starten mislukte: {}", e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("ophalen van '{}' mislukte:\n{}", name, err.trim()));
+        }
+        got += 1;
+    }
+    Ok(format!("{} opgehaald", got))
+}
+
 // Map-kiezer (bladeren-knop in de project-editor).
 #[tauri::command]
 fn pick_folder(app: AppHandle) -> Option<String> {
@@ -971,8 +1383,18 @@ fn start_pty(
     }
     cmd.cwd(path);
     // Erf de omgeving van het werkstation (PATH, USERPROFILE, APPDATA ...) zodat
-    // claude zijn config/credentials vindt.
+    // claude zijn config/credentials vindt -- maar niet de variabelen waarmee een
+    // agent zijn EIGEN sessie beschrijft (#101).
+    let from_agent = std::env::var("CLAUDECODE").is_ok();
     for (k, v) in std::env::vars() {
+        if inherits_session_marker(&k, from_agent) {
+            // LET OP: overslaan is hier niet genoeg. CommandBuilder::new() vult
+            // zichzelf met get_base_env(), dus de variabele staat er al in en
+            // blijft staan als we hem alleen niet opnieuw zetten. Hij moet er
+            // expliciet uit.
+            cmd.env_remove(&k);
+            continue;
+        }
         cmd.env(k, v);
     }
 
@@ -1028,6 +1450,26 @@ fn start_pty(
         },
     );
     Ok(())
+}
+
+// Beschrijft deze variabele de sessie van de agent die TAURUS startte? Zo ja,
+// hoort hij niet mee naar een nieuwe agent: die is geen kindsessie maar een
+// zelfstandige sessie. Erven we ze toch, dan zet claude zijn transcript uit
+// ("inherited CLAUDE_CODE_CHILD_SESSION marker") en werkt --resume niet meer --
+// zonder dat iets uitlegt waarom (#101).
+//
+// NO_COLOR alleen weglaten als de omgeving van een agent komt: los is het een
+// legitieme voorkeur van de gebruiker, maar naast CLAUDECODE is het gezet voor
+// een subproces van een agent, en Taurus levert juist een kleurenterminal.
+fn inherits_session_marker(key: &str, from_agent: bool) -> bool {
+    matches!(
+        key,
+        "CLAUDECODE"
+            | "CLAUDE_CODE_CHILD_SESSION"
+            | "CLAUDE_CODE_SESSION_ID"
+            | "CLAUDE_CODE_ENTRYPOINT"
+            | "CLAUDE_PID"
+    ) || (from_agent && key == "NO_COLOR")
 }
 
 fn norm_title(title: &str) -> String {
@@ -1248,6 +1690,29 @@ fn shell_quote_posix(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+// Hoe een POSIX-payload op de host gestart wordt. Twee dingen zitten hierin die
+// allebei uit een echte fout komen:
+//
+// 1. Het script gaat naar een BESTAND en start daarna met exec, niet via een
+//    pipe (`... | sh`). Met een pipe krijgt die shell zijn stdin van de pipe in
+//    plaats van de terminal, en dan weigert tmux met "open terminal failed: not
+//    a terminal". Na de pipeline erft exec de stdin van de buitenste sh -- de
+//    pty van ssh -t.
+// 2. `sh -l`, een LOGIN shell. `ssh host "commando"` draait geen login shell,
+//    dus ~/.profile wordt niet gelezen en ~/.local/bin staat niet op PATH. Een
+//    claude die daar geinstalleerd is, wordt dan niet gevonden: de sessie
+//    eindigt meteen met alleen "[exited]" en niets legt uit waarom. Met -l
+//    krijgt de agent de omgeving die de gebruiker op die machine heeft
+//    (PATH, nvm, pyenv).
+fn posix_launcher(session: &str, inner: &str) -> String {
+    format!(
+        "echo {} | base64 -d > /tmp/{}.sh && exec sh -l /tmp/{}.sh",
+        b64(inner.as_bytes()),
+        session,
+        session
+    )
+}
+
 // PowerShell-quoting: alles tussen enkele quotes, en een enkele quote wordt
 // verdubbeld. Binnen '...' expandeert PowerShell niets, dus $ en ` zijn veilig.
 fn ps_quote(s: &str) -> String {
@@ -1339,19 +1804,27 @@ fn build_remote_payload_via(
     args: &[String],
 ) -> Result<String, String> {
     if via == "wsl" {
-        let inner = build_remote_payload(mux, "linux", session, cwd, program, args)?;
-        // Het script gaat naar een BESTAND en wordt daarna met exec gestart, niet
-        // door een pipe (`... | sh`) gevoerd. Met een pipe krijgt die shell zijn
-        // stdin van de pipe in plaats van de terminal, en dan weigert tmux te
-        // starten met "open terminal failed: not a terminal". Na de pipeline erft
-        // exec de stdin van de buitenste sh, en dat is de pty van ssh -t.
-        return Ok(format!(
-            "wsl -e sh -c \"echo {} | base64 -d > /tmp/{}.sh && exec sh /tmp/{}.sh\"",
-            b64(inner.as_bytes()),
-            session,
-            session
-        ));
+        let inner = build_remote_payload_inner(mux, "linux", session, cwd, program, args)?;
+        return Ok(format!("wsl -e sh -c \"{}\"", posix_launcher(session, &inner)));
     }
+    // Een Linux-host rechtstreeks: dezelfde login-shell-val, dus dezelfde
+    // starter. Windows loopt via PowerShell en heeft dit niet nodig.
+    if os == "linux" {
+        let inner = build_remote_payload_inner(mux, os, session, cwd, program, args)?;
+        return Ok(posix_launcher(session, &inner));
+    }
+    build_remote_payload_inner(mux, os, session, cwd, program, args)
+}
+
+// De kale payload, zonder de starter eromheen.
+fn build_remote_payload_inner(
+    mux: &str,
+    os: &str,
+    session: &str,
+    cwd: &str,
+    program: &str,
+    args: &[String],
+) -> Result<String, String> {
     match mux {
         // Eigen agent: geen shellquoting nodig, en hij bestaat op beide OS'en.
         "taurus-agent" => {
@@ -2831,6 +3304,10 @@ pub fn run() {
             check_hosts,
             probe_host,
             scp_to_host,
+            survey_workspace,
+            survey_remote_workspace,
+            push_workspace,
+            pull_workspace,
             pick_folder,
             pick_file,
             path_exists,
@@ -2901,8 +3378,8 @@ mod tests {
         // payload zit als base64 verpakt, want hij bevat zelf quotes en pipes
         // die cmd.exe er anders uit haalt.
         assert!(
-            payload.contains("> /tmp/") && payload.contains("&& exec sh /tmp/"),
-            "moet via een bestand starten, niet via een pipe -- anders heeft tmux geen tty: {}",
+            payload.contains("> /tmp/") && payload.contains("&& exec sh -l /tmp/"),
+            "moet via een bestand en een LOGIN shell starten -- anders heeft tmux geen tty en staat ~/.local/bin niet op PATH: {}",
             payload
         );
         let inner = payload
@@ -2917,8 +3394,8 @@ mod tests {
         );
         // En het is de tmux-vorm, niet de PowerShell-vorm van een Windows-host.
         let expected = b64(
-            build_remote_payload("tmux", "linux", &mux_session_name(&h.id, "/home/arjen/proj"),
-                                 "/home/arjen/proj", "claude", &["-n".to_string()])
+            build_remote_payload_inner("tmux", "linux", &mux_session_name(&h.id, "/home/arjen/proj"),
+                                       "/home/arjen/proj", "claude", &["-n".to_string()])
                 .unwrap()
                 .as_bytes(),
         );
@@ -2932,6 +3409,114 @@ mod tests {
         h.os = "windows".into();
         h.via = "wsl".into();
         assert_eq!(remote_agent_program("claude", effective_os(&h)), "claude");
+    }
+
+    #[test]
+    fn removing_a_marker_actually_takes_it_out_of_the_command() {
+        // De valkuil die de eerste poging tot deze fix liet mislukken:
+        // CommandBuilder::new() vult zichzelf met de HELE omgeving
+        // (get_base_env), dus een marker alleen NIET opnieuw zetten laat de
+        // geerfde waarde gewoon staan. Alleen env_remove haalt hem eruit.
+        std::env::set_var("TAURUS_TEST_MARKER_KEEP", "yes");
+        let mut cmd = CommandBuilder::new("cmd.exe");
+        assert!(
+            cmd.get_env("TAURUS_TEST_MARKER_KEEP").is_some(),
+            "de builder hoort de omgeving te erven"
+        );
+        cmd.env_remove("TAURUS_TEST_MARKER_KEEP");
+        assert!(cmd.get_env("TAURUS_TEST_MARKER_KEEP").is_none());
+        std::env::remove_var("TAURUS_TEST_MARKER_KEEP");
+    }
+
+    #[test]
+    fn session_markers_do_not_leak_into_a_new_agent() {
+        // Deze beschrijven de sessie van de agent die Taurus startte; erven zou
+        // de nieuwe agent tot kindsessie maken en zijn transcript uitzetten.
+        for k in [
+            "CLAUDECODE",
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CLAUDE_PID",
+        ] {
+            assert!(inherits_session_marker(k, true), "{} moet gefilterd worden", k);
+            assert!(inherits_session_marker(k, false), "{} ook zonder CLAUDECODE", k);
+        }
+        // Wat de agent WEL nodig heeft blijft staan.
+        for k in ["PATH", "USERPROFILE", "APPDATA", "HOME", "CLAUDE_CODE_GIT_BASH_PATH"] {
+            assert!(!inherits_session_marker(k, true), "{} mag niet verdwijnen", k);
+        }
+        // NO_COLOR: alleen weg als de omgeving van een agent komt.
+        assert!(inherits_session_marker("NO_COLOR", true));
+        assert!(!inherits_session_marker("NO_COLOR", false), "los is het een gebruikersvoorkeur");
+    }
+
+    #[test]
+    fn survey_separates_work_and_bulk_from_the_rest() {
+        let dir = std::env::temp_dir().join(format!("taurus-survey-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("input")).unwrap();
+        std::fs::create_dir_all(dir.join("node_modules").join("pkg")).unwrap();
+        std::fs::write(dir.join("README.md"), "x".repeat(10)).unwrap();
+        std::fs::write(dir.join("src").join("a.rs"), "y".repeat(20)).unwrap();
+        std::fs::write(dir.join("input").join("data.csv"), "z".repeat(50)).unwrap();
+        std::fs::write(dir.join("node_modules").join("pkg").join("i.js"), "q".repeat(100)).unwrap();
+
+        let s = survey_workspace(dir.to_string_lossy().into_owned());
+        assert_eq!(s.error, "");
+        // De kern is alles buiten de apart genoemde mappen: README + src.
+        assert_eq!(s.core_bytes, 30);
+        assert_eq!(s.core_files, 2);
+        let work: Vec<_> = s.work.iter().map(|w| (w.name.as_str(), w.bytes)).collect();
+        assert_eq!(work, vec![("input", 50)]);
+        let bulk: Vec<_> = s.bulk.iter().map(|b| (b.name.as_str(), b.bytes)).collect();
+        assert_eq!(bulk, vec![("node_modules", 100)]);
+        // De kern moet ook als LOSSE namen komen: terughalen stuurt een expliciete
+        // lijst aan scp, want een wildcard zou het uitgevinkte alsnog meenemen.
+        let mut core = s.core.clone();
+        core.sort();
+        assert_eq!(core, vec!["README.md".to_string(), "src".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn survey_distinguishes_a_missing_directory_from_an_empty_one() {
+        // Een doelmap die nog niet bestaat is het NORMALE geval bij een eerste
+        // overzetting, dus geen fout. Maar hij moet wel te onderscheiden zijn
+        // van een lege map: anders kan de UI niet zeggen of er iets overschreven
+        // gaat worden.
+        let missing = survey_workspace(r"C:\taurus-does-not-exist-1234".into());
+        assert!(!missing.exists);
+        assert_eq!(missing.error, "");
+        assert_eq!(missing.newest, 0);
+
+        let dir = std::env::temp_dir().join(format!("taurus-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let empty = survey_workspace(dir.to_string_lossy().into_owned());
+        assert!(empty.exists, "een lege map bestaat wel");
+        assert_eq!(empty.core_files, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn survey_reports_the_newest_change_in_the_tree() {
+        // Hiermee kan de UI zeggen WELKE kant recenter is in plaats van botweg te
+        // weigeren als het doel al bestaat.
+        let dir = std::env::temp_dir().join(format!("taurus-mtime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("deep.txt"), "x").unwrap();
+        let s = survey_workspace(dir.to_string_lossy().into_owned());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(s.newest > 0, "moet een tijdstempel vinden");
+        // Een bestand dat we net schreven ligt hooguit een paar seconden terug --
+        // en het moet uit de SUBmap komen, niet alleen van de root.
+        assert!(now - s.newest < 120, "onverwacht oude mtime: {} vs {}", s.newest, now);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2989,12 +3574,26 @@ mod tests {
     #[test]
     fn build_remote_payload_wraps_tmux_with_attach_or_create() {
         let args = vec!["-n".to_string(), "my session".to_string()];
-        let s = build_remote_payload("tmux", "linux", "taurus-h1-p-0", "/home/a/p", "claude", &args)
+        let s = build_remote_payload_inner("tmux", "linux", "taurus-h1-p-0", "/home/a/p", "claude", &args)
             .unwrap();
         assert_eq!(
             s,
             "tmux new-session -A -s 'taurus-h1-p-0' -c '/home/a/p' -- 'claude' '-n' 'my session'"
         );
+    }
+
+    #[test]
+    fn a_posix_launch_uses_a_login_shell() {
+        // `ssh host "cmd"` draait geen login shell, dus ~/.profile blijft
+        // ongelezen en ~/.local/bin staat niet op PATH. Een claude die daar
+        // staat wordt dan niet gevonden en de sessie eindigt meteen met alleen
+        // "[exited]" -- precies wat er tegen een echte host gebeurde.
+        let s = build_remote_payload("tmux", "linux", "sess", "/home/a/p", "claude", &[]).unwrap();
+        assert!(s.contains("exec sh -l /tmp/sess.sh"), "moet een login shell zijn: {}", s);
+        assert!(s.starts_with("echo "), "payload hoort als base64 mee te reizen: {}", s);
+        // Windows loopt via PowerShell en heeft deze starter niet.
+        let w = build_remote_payload("none", "windows", "sess", r"C:\p", "claude", &[]).unwrap();
+        assert!(w.starts_with("powershell -NoProfile -EncodedCommand "));
     }
 
     #[test]
@@ -3026,7 +3625,7 @@ mod tests {
         assert!(build_remote_payload("tmux", "windows", "s", "C:\\p", "claude", &[]).is_err());
         assert!(build_remote_payload("zellij", "linux", "s", "/p", "claude", &[]).is_err());
         // Zonder multiplexer op Linux: kaal, met exec.
-        let s = build_remote_payload("none", "linux", "s", "/p", "claude", &[]).unwrap();
+        let s = build_remote_payload_inner("none", "linux", "s", "/p", "claude", &[]).unwrap();
         assert_eq!(s, "cd '/p' && exec 'claude'");
     }
 
@@ -3084,7 +3683,10 @@ mod tests {
         assert!(!args.iter().any(|a| a.contains("StrictHostKeyChecking=no")));
         // Doel en payload staan achteraan, in die volgorde.
         assert_eq!(args[args.len() - 2], "arjen@support01");
-        assert!(args[args.len() - 1].starts_with("tmux new-session -A -s "));
+        // De payload reist als base64 en start in een login shell (zie
+        // a_posix_launch_uses_a_login_shell voor het waarom).
+        assert!(args[args.len() - 1].starts_with("echo "));
+        assert!(args[args.len() - 1].contains("exec sh -l /tmp/"));
     }
 
     #[test]
