@@ -859,9 +859,14 @@ async function refreshHostReachability() {
   if (!hosts.length) return;
   try {
     const list = await invoke("check_hosts", { hosts: hosts.map((h) => ({ id: h.id, hostname: h.hostname, port: h.port || 22 })) });
-    hostStatus = {};
+    // Alleen overschrijven wat de check daadwerkelijk teruggaf. De hele map
+    // wissen liet een net handmatig geteste host weer op grijs staan, en bij een
+    // mislukte check verdween ALLE status -- dan lijkt niets meer gemeten.
     for (const s of list) hostStatus[s.id] = s;
-  } catch (_) { hostStatus = {}; }
+  } catch (e) {
+    els.hostStatusMsg.textContent = "✗ " + e;
+    els.hostStatusMsg.className = "status-msg err";
+  }
   renderHostRows();
 }
 function renderHostRows() {
@@ -872,8 +877,8 @@ function renderHostRows() {
   els.hostRows.innerHTML = "";
   hosts.forEach((h, i) => {
     const st = hostStatus[h.id];
-    const cls = !st ? "pending" : st.reachable ? "up" : "down";
-    const label = !st ? "…" : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
+    const cls = !st ? "pending" : st.testing ? "pending" : st.reachable ? "up" : "down";
+    const label = !st ? "…" : st.testing ? t("host_testing") : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
     const row = document.createElement("div");
     row.className = "host-row";
     row.innerHTML = `
@@ -967,6 +972,10 @@ async function testExistingHost(i) {
   const h = hosts[i];
   els.hostStatusMsg.textContent = `${h.nickname}: ${t("host_testing")}`;
   els.hostStatusMsg.className = "status-msg";
+  // Meteen zichtbaar dat er iets gebeurt: de probe doet twee ssh-rondes en dat
+  // duurt seconden, waarin de rij er anders onveranderd bij staat.
+  hostStatus[h.id] = { id: h.id, reachable: false, ms: 0, testing: true };
+  renderHostRows();
   let p;
   try { p = await invoke("probe_host", { host: h }); }
   catch (e) { p = { reachable: false, error: String(e) }; }
@@ -981,7 +990,9 @@ async function testExistingHost(i) {
     els.hostStatusMsg.className = "status-msg err";
   }
   showProbeReport(p);
-  hostStatus[h.id] = { id: h.id, reachable: !!p.reachable, ms: 0 };
+  // Bereikbaar EN ingelogd: alleen dan is de host echt bruikbaar. Alleen een
+  // open poort met geweigerde key is geen groen bolletje waard.
+  hostStatus[h.id] = { id: h.id, reachable: !!(p.reachable && p.authOk), ms: 0 };
   renderHostRows();
 }
 

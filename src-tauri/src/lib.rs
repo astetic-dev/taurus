@@ -351,13 +351,26 @@ fn ssh_base_args(host: &Host, batch: bool) -> Result<Vec<String>, String> {
     Ok(a)
 }
 
+// Een achtergrondproces (ssh/scp) zonder consolevenster. Zonder deze vlag flitst
+// er bij elke probe een zwart venster op -- en "Opnieuw testen" opende er twee,
+// een per ssh-ronde. Dezelfde vlag die ps_encoded al gebruikt.
+fn quiet_command(program: &str) -> std::process::Command {
+    let mut c = std::process::Command::new(program);
+    c.stdin(std::process::Stdio::null()); // anders wacht de remote kant op invoer
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    c
+}
+
 // Eén ssh-aanroep; geeft (stdout, gelukt).
 fn ssh_run(host: &Host, remote_cmd: &str) -> Result<(String, bool), String> {
     let mut args = ssh_base_args(host, true)?;
     args.push(remote_cmd.to_string());
-    let out = std::process::Command::new(ssh_program())
+    let out = quiet_command(&ssh_program())
         .args(&args)
-        .stdin(std::process::Stdio::null()) // anders wacht de remote kant op invoer
         .output()
         .map_err(|e| format!("ssh starten mislukte: {}", e))?;
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -561,9 +574,8 @@ fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<Strin
     };
     args.push(format!("{}:{}/", user_at, target_dir.trim_end_matches('/')));
 
-    let out = std::process::Command::new(scp_program())
+    let out = quiet_command(&scp_program())
         .args(&args)
-        .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| format!("scp starten mislukte: {}", e))?;
     if !out.status.success() {
@@ -892,9 +904,8 @@ fn push_workspace(
         // SFTP, en dan is het pad letterlijk (zie scp_to_host).
         args.push(format!("{}:{}/", user_at, target_dir.trim_end_matches('/')));
 
-        let out = std::process::Command::new(scp_program())
+        let out = quiet_command(&scp_program())
             .args(&args)
-            .stdin(std::process::Stdio::null())
             .output()
             .map_err(|err| format!("scp starten mislukte: {}", err))?;
         if !out.status.success() {
@@ -966,9 +977,8 @@ fn pull_workspace(
         // SFTP en behandelt het pad letterlijk.
         args.push(format!("{}:{}/{}", user_at, remote_base.trim_end_matches('/'), name));
         args.push(local_path.clone());
-        let out = std::process::Command::new(scp_program())
+        let out = quiet_command(&scp_program())
             .args(&args)
-            .stdin(std::process::Stdio::null())
             .output()
             .map_err(|e| format!("scp starten mislukte: {}", e))?;
         if !out.status.success() {
