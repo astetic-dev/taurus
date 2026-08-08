@@ -8,7 +8,11 @@ A small Tauri desktop app that runs and manages multiple **Claude Code** agents 
 **terminal tabs in one window** — with voice, a file DROPZONE and an inline
 HTML/Markdown viewer built in.
 
-_▶ Watch: [features tour](https://www.youtube.com/watch?v=TAyZlhlvigw) ·
+Since 0.5.0 a tab can also run its agent on **another machine** over SSH — your
+folders stay where they are and the agent goes to them.
+
+_▶ Watch: [remote agents](https://youtu.be/_Q_6gRCFEYc) ·
+[features tour](https://www.youtube.com/watch?v=TAyZlhlvigw) ·
 [original explainer](https://youtu.be/ofswaJBX39k) ·
 [15-second teaser](https://youtu.be/7WDtN5giKSk)._
 
@@ -182,6 +186,9 @@ Edit them with the in-app **Agents** editor, or by hand. Format:
   (language, font, toggles) are kept in the WebView2 local storage.
 
 ## Remote hosts
+
+**▶ [Watch the explainer](https://youtu.be/_Q_6gRCFEYc)** — 60 seconds: adding a
+machine, working on it, and moving an agent's folder structure across.
 
 A tab can run its agent on **another machine** over SSH instead of locally: the
 work happens where the data and the access are, and the tab still shows the
