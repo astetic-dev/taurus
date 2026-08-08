@@ -154,6 +154,12 @@
                   <option value="auto" data-i18n="mode_auto">Auto (accepteert acties)</option>
                 </select>
               </div>
+              <div class="field">
+                <label for="command-input"><span data-i18n="launch_command">Commando-override</span> <span class="opt" data-i18n="optional">(optioneel)</span></label>
+                <input id="command-input" type="text" autocomplete="off" data-i18n-ph="command_ph" placeholder="leeg = start de gekozen agent" />
+                <div class="hint" data-i18n="command_hint">Draait dit programma zoals het er staat, in plaats van de agent.</div>
+                <div id="command-warn" class="command-warn hidden" data-i18n="command_warn">⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.</div>
+              </div>
               <div class="launch-actions">
                 <button id="launch-btn" class="launch-btn" data-i18n="start_agent">▶ Start agent</button>
                 <button id="add-agent-btn" class="add-agent-btn" data-i18n="add_agent">＋ Agent toevoegen</button>
