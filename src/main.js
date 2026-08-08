@@ -59,6 +59,18 @@ const I18N = {
     cap_command: "Commando-override — draait dit programma i.p.v. de agent (optioneel)",
     row_expand: "Openklappen", row_collapse: "Dichtklappen",
     agent_command: "Eigen commando…",
+    ctx_move: "⇄ Verplaats naar andere machine…",
+    move_title: "Agent verplaatsen naar een andere machine", move_target: "Doelmachine",
+    move_target_path: "Werkmap op de doelmachine", move_start: "Kopiëren & verplaatsen",
+    move_surveying: "Werkmap doormeten…", move_core: "Projectbestanden (gaan altijd mee)",
+    move_files: "bestanden", move_total: "Wordt overgezet", move_kind_work: "werkmap",
+    move_kind_bulk: "opnieuw op te bouwen", move_copying: "Kopiëren naar de doelmachine…",
+    move_done: "Agent verplaatst", move_need_path: "Vul een werkmap op de doelmachine in.",
+    move_no_path: "Deze agent heeft geen werkmap.", move_no_target: "Voeg eerst een machine toe.",
+    move_target_exists: "Op de doelmachine staat daar al een map met inhoud. Kies een ander pad.",
+    move_remote_source: "Deze agent draait al elders. Doormeten van een map op afstand kan nog niet; het overzetten zelf ook niet.",
+    move_to_local_todo: "Terughalen naar deze computer kan nog niet.",
+    move_keep_source: "De bronmap blijft staan — dit is een kopie.",
     cap_host: "Draait op", cap_workdir_remote: "Werkmap OP DIE MACHINE",
     ph_path_remote: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
@@ -183,6 +195,18 @@ const I18N = {
     cap_command: "Command override — runs this program instead of the agent (optional)",
     row_expand: "Expand", row_collapse: "Collapse",
     agent_command: "Own command…",
+    ctx_move: "⇄ Move to another machine…",
+    move_title: "Move agent to another machine", move_target: "Target machine",
+    move_target_path: "Working directory on the target machine", move_start: "Copy & move",
+    move_surveying: "Measuring working directory…", move_core: "Project files (always included)",
+    move_files: "files", move_total: "Will be transferred", move_kind_work: "work folder",
+    move_kind_bulk: "rebuildable", move_copying: "Copying to the target machine…",
+    move_done: "Agent moved", move_need_path: "Enter a working directory on the target machine.",
+    move_no_path: "This agent has no working directory.", move_no_target: "Add a machine first.",
+    move_target_exists: "That path on the target machine already holds a non-empty folder. Pick another path.",
+    move_remote_source: "This agent already runs elsewhere. Measuring a remote folder is not supported yet, nor is transferring from one.",
+    move_to_local_todo: "Bringing an agent back to this computer is not supported yet.",
+    move_keep_source: "The source folder stays where it is — this is a copy.",
     cap_host: "Runs on", cap_workdir_remote: "Working directory ON THAT MACHINE",
     ph_path_remote: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
@@ -752,6 +776,9 @@ function renderProjects() {
         `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
       `</div>`;
     card.addEventListener("click", () => { if (suppressNextClick) return; selectProject(p, card); showView("new"); });
+    // Verplaatsen gaat over de AGENT, dus het hoort ook hier te kunnen -- niet
+    // alleen op een draaiende tab.
+    card.addEventListener("contextmenu", (e) => { e.preventDefault(); openMoveModal(p); });
     // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
     card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
     card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
@@ -972,6 +999,133 @@ function showProbeReport(p) {
   if (!lines.length) return;
   els.hfReport.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
   els.hfReport.classList.remove("hidden");
+}
+
+/* ---- agent naar een andere machine verplaatsen (#102) ---- */
+// Welke agent verplaatsen we, en waar staat hij nu? Een tab en een sidebarkaart
+// verwijzen allebei naar hetzelfde project, dus dit werkt vanaf beide.
+let movePlan = null;
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  const u = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
+}
+
+async function openMoveModal(project) {
+  if (!project || !project.path) { toast(t("move_no_path"), "err"); return; }
+  movePlan = { project, skip: new Set(), survey: null };
+  // Doelen: alles behalve waar hij nu al staat.
+  const opts = [{ id: "", label: t("host_local") }, ...hosts.map((h) => ({ id: h.id, label: h.nickname || h.hostname }))]
+    .filter((o) => o.id !== (project.host_id || ""));
+  if (!opts.length) { toast(t("move_no_target"), "err"); return; }
+  els.mvTarget.innerHTML = opts.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`).join("");
+  els.mvPath.value = suggestTargetPath(project, opts[0].id);
+  els.mvStatus.textContent = "";
+  els.mvWarn.classList.add("hidden");
+  els.mvSurvey.innerHTML = `<div class="move-busy">${escapeHtml(t("move_surveying"))}</div>`;
+  els.moveModal.classList.remove("hidden");
+
+  // Alleen een lokale bron kan gemeten worden; een remote bron zou een eigen
+  // survey over ssh vragen en dat kan deze versie nog niet.
+  if (project.host_id) {
+    els.mvSurvey.innerHTML = `<div class="move-note">${escapeHtml(t("move_remote_source"))}</div>`;
+    return;
+  }
+  let s;
+  try { s = await invoke("survey_workspace", { path: project.path }); }
+  catch (e) { s = { error: String(e) }; }
+  movePlan.survey = s;
+  renderMoveSurvey();
+}
+
+// De bulk-mappen staan standaard UIT: ze zijn meestal het leeuwendeel van de
+// omvang en aan de andere kant zo weer opgebouwd.
+function renderMoveSurvey() {
+  const s = movePlan && movePlan.survey;
+  if (!s) return;
+  if (s.error) {
+    els.mvSurvey.innerHTML = `<div class="move-note err">${escapeHtml(s.error)}</div>`;
+    return;
+  }
+  const rows = [];
+  rows.push(`<div class="move-line"><span>${escapeHtml(t("move_core"))}</span><span>${fmtBytes(s.coreBytes)} · ${s.coreFiles} ${escapeHtml(t("move_files"))}</span></div>`);
+  const group = (list, kind) => list.map((d) => {
+    const off = movePlan.skip.has(d.name.toLowerCase());
+    return `<label class="move-line pick"><span><input type="checkbox" data-dir="${escapeHtml(d.name)}"${off ? "" : " checked"} /> ${escapeHtml(d.name)}<span class="move-kind">${escapeHtml(kind)}</span></span>` +
+           `<span>${fmtBytes(d.bytes)} · ${d.files} ${escapeHtml(t("move_files"))}</span></label>`;
+  }).join("");
+  if (s.work.length) rows.push(group(s.work, t("move_kind_work")));
+  if (s.bulk.length) rows.push(group(s.bulk, t("move_kind_bulk")));
+
+  let total = s.coreBytes;
+  for (const d of [...s.work, ...s.bulk]) if (!movePlan.skip.has(d.name.toLowerCase())) total += d.bytes;
+  rows.push(`<div class="move-line total"><span>${escapeHtml(t("move_total"))}</span><span>${fmtBytes(total)}</span></div>`);
+
+  rows.push(`<div class="move-line"><span class="move-kind">${escapeHtml(t("move_keep_source"))}</span><span></span></div>`);
+  els.mvSurvey.innerHTML = rows.join("");
+  els.mvSurvey.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.addEventListener("change", (e) => {
+      const key = e.target.dataset.dir.toLowerCase();
+      if (e.target.checked) movePlan.skip.delete(key); else movePlan.skip.add(key);
+      renderMoveSurvey();
+    });
+  });
+}
+
+// Een pad op de andere machine raden uit de mapnaam: beter dan een leeg veld,
+// en de gebruiker ziet meteen waar het heen zou gaan.
+function suggestTargetPath(project, targetHostId) {
+  const leaf = (project.path || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "workspace";
+  const h = hostById(targetHostId);
+  if (!h) return `C:\\Users\\${(navigator.userAgent, "")}`.replace(/\\+$/, "") || leaf;
+  const base = (h.default_project || "").replace(/[\\/]+$/, "");
+  if (!base) return effectiveWindows(h) ? `C:\\${leaf}` : `/home/${h.user || "user"}/${leaf}`;
+  return effectiveWindows(h) ? `${base}\\${leaf}` : `${base}/${leaf}`;
+}
+function effectiveWindows(h) { return h && h.os === "windows" && h.via !== "wsl"; }
+
+async function runMove() {
+  if (!movePlan) return;
+  const target = els.mvTarget.value;
+  const path = els.mvPath.value.trim();
+  if (!path) { els.mvStatus.textContent = t("move_need_path"); els.mvStatus.className = "status-msg err"; return; }
+  if (!target) { els.mvStatus.textContent = t("move_to_local_todo"); els.mvStatus.className = "status-msg err"; return; }
+
+  els.mvGo.disabled = true;
+  els.mvStatus.className = "status-msg";
+  try {
+    // Eerst kijken of daar al iets staat: overschrijven is geen verrassing die
+    // je bij een netwerkactie wilt hebben.
+    const state = await invoke("remote_dir_state", { hostId: target, path });
+    if (state === "NONEMPTY") {
+      els.mvStatus.textContent = t("move_target_exists");
+      els.mvStatus.className = "status-msg err";
+      els.mvGo.disabled = false;
+      return;
+    }
+    els.mvStatus.textContent = t("move_copying");
+    const res = await invoke("push_workspace", {
+      hostId: target, localPath: movePlan.project.path, remotePath: path,
+      skip: [...movePlan.skip],
+    });
+    // Pas ná een geslaagde kopie de agent omzetten -- anders wijst hij naar een
+    // map die er niet staat.
+    const next = projects.map((p) => (p.id === movePlan.project.id ? { ...p, host_id: target, path } : p));
+    await invoke("save_projects", { projects: next });
+    projects = next;
+    if (selected && selected.id === movePlan.project.id) selected = projects.find((p) => p.id === movePlan.project.id);
+    renderProjects();
+    els.moveModal.classList.add("hidden");
+    toast(`${t("move_done")} — ${res}`, "ok");
+  } catch (e) {
+    els.mvStatus.textContent = "✗ " + e;
+    els.mvStatus.className = "status-msg err";
+  } finally {
+    els.mvGo.disabled = false;
+  }
 }
 
 function uniqueHostId(base) {
@@ -1771,6 +1925,7 @@ function openTabMenu(x, y, id) {
     <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
     <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
     <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
+    <div class="ctx-item" data-act="move">${t("ctx_move")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
   m.querySelector('[data-act="restart"]').addEventListener("click", () => restartSession(id));
@@ -1780,6 +1935,14 @@ function openTabMenu(x, y, id) {
     if (sel) speak(sel, true); // force: uitspreken is hier expliciet gevraagd
   });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
+  // Verplaatsen werkt op de AGENT achter deze tab; de sessie zelf verhuist niet
+  // mee, die draait waar hij draait tot je hem opnieuw start.
+  m.querySelector('[data-act="move"]').addEventListener("click", () => {
+    closeTabMenu();
+    const p = projects.find((x) => x.path === s.path && (x.host_id || "") === (s.hostId || ""))
+      || { id: "", label: s.title, path: s.path, host_id: s.hostId || "" };
+    openMoveModal(p);
+  });
   if (!s.hostId) {
     m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
     m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
@@ -2141,7 +2304,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.hostModal.classList.add("hidden"); } return; }
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.hostModal.classList.add("hidden"); els.moveModal.classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   const ctrl = e.ctrlKey && !e.altKey;
   if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); changeFont(1); return; }
@@ -2558,6 +2721,13 @@ window.addEventListener("DOMContentLoaded", () => {
     commandInput: document.querySelector("#command-input"),
     commandWarn: document.querySelector("#command-warn"),
     commandField: document.querySelector("#command-field"),
+    moveModal: document.querySelector("#move-modal"),
+    mvTarget: document.querySelector("#mv-target"),
+    mvPath: document.querySelector("#mv-path"),
+    mvSurvey: document.querySelector("#mv-survey"),
+    mvWarn: document.querySelector("#mv-warn"),
+    mvStatus: document.querySelector("#mv-status"),
+    mvGo: document.querySelector("#mv-go"),
     hostModal: document.querySelector("#host-modal"),
     hostRows: document.querySelector("#host-rows"),
     hfForm: document.querySelector("#host-form"),
@@ -2587,6 +2757,12 @@ window.addEventListener("DOMContentLoaded", () => {
   // Twee ingangen: naast de agentlijst (waar je bent als je een machine wilt
   // toevoegen) en in de agents-editor (waar je bent als een agent er een nodig
   // heeft). Alleen die tweede plek bleek onvindbaar.
+  document.querySelector("#mv-cancel").addEventListener("click", () => els.moveModal.classList.add("hidden"));
+  document.querySelector("#mv-go").addEventListener("click", runMove);
+  // Van doel wisselen: het voorgestelde pad hoort bij die machine, niet bij de vorige.
+  els.mvTarget.addEventListener("change", () => {
+    if (movePlan) els.mvPath.value = suggestTargetPath(movePlan.project, els.mvTarget.value);
+  });
   document.querySelector("#hosts-btn").addEventListener("click", openHostModal);
   document.querySelector("#editor-hosts").addEventListener("click", openHostModal);
   document.querySelector("#host-add").addEventListener("click", openHostForm);

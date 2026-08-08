@@ -358,6 +358,28 @@
       </div>
     </div>
 
+    <!-- ===== Verplaats-modal: agent naar een andere machine (#102) ===== -->
+    <div id="move-modal" class="modal hidden">
+      <div class="modal-box wide">
+        <h2 data-i18n="move_title">Agent verplaatsen naar een andere machine</h2>
+        <div class="e-field">
+          <span class="e-cap" data-i18n="move_target">Doelmachine</span>
+          <select id="mv-target"></select>
+        </div>
+        <div class="e-field">
+          <span class="e-cap" data-i18n="move_target_path">Werkmap op de doelmachine</span>
+          <input id="mv-path" type="text" autocomplete="off" />
+        </div>
+        <div id="mv-survey" class="move-survey"></div>
+        <div id="mv-warn" class="command-warn hidden"></div>
+        <div class="modal-actions">
+          <button id="mv-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+          <button id="mv-go" class="btn-primary" data-i18n="move_start">Kopiëren &amp; verplaatsen</button>
+        </div>
+        <div id="mv-status" class="status-msg"></div>
+      </div>
+    </div>
+
     <div id="toast" class="toast hidden"></div>
   </body>
 </html>

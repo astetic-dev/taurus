@@ -573,6 +573,236 @@ fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<Strin
     Ok(remote_join(&host.os, &remote_dir, &name))
 }
 
+// ---------- werkmap verplaatsen tussen machines (#102) ----------
+
+// Mappen die werk bevatten in plaats van broncode. Ze worden apart geteld zodat
+// je per stuk kunt kiezen of ze meegaan -- een output-map van 4 GB wil je zelden
+// meesturen, een input-map met net aangeleverde bestanden juist wel.
+const WORK_DIRS: [&str; 5] = ["input", "output", "log", "logs", "review"];
+// Mappen die groot en reproduceerbaar zijn. Standaard uit: ze zijn meestal het
+// leeuwendeel van de omvang en aan de andere kant zo weer opgebouwd.
+const BULK_DIRS: [&str; 6] = [".git", "node_modules", "target", "dist", ".venv", "__pycache__"];
+
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct DirEntrySize {
+    name: String,
+    bytes: u64,
+    files: u64,
+}
+
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSurvey {
+    // De rest: alles buiten de apart genoemde mappen. Dat gaat altijd mee.
+    core_bytes: u64,
+    core_files: u64,
+    work: Vec<DirEntrySize>,
+    bulk: Vec<DirEntrySize>,
+    error: String,
+}
+
+// Tel een map recursief. Symlinks worden niet gevolgd: een lus zou hier anders
+// oneindig doorlopen, en een gevolgde link telt bestanden dubbel.
+fn dir_size(path: &Path) -> (u64, u64) {
+    let mut bytes = 0u64;
+    let mut files = 0u64;
+    let rd = match std::fs::read_dir(path) {
+        Ok(r) => r,
+        Err(_) => return (0, 0),
+    };
+    for e in rd.flatten() {
+        let meta = match std::fs::symlink_metadata(e.path()) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            let (b, f) = dir_size(&e.path());
+            bytes += b;
+            files += f;
+        } else {
+            bytes += meta.len();
+            files += 1;
+        }
+    }
+    (bytes, files)
+}
+
+// Wat zit er in deze werkmap, en hoe groot is het? Vóór het overzetten, zodat
+// een wachttijd van tien minuten geen verrassing is.
+#[tauri::command(async)]
+fn survey_workspace(path: String) -> WorkspaceSurvey {
+    let mut s = WorkspaceSurvey::default();
+    let root = Path::new(&path);
+    if !root.is_dir() {
+        s.error = format!("Map bestaat niet:\n{}", path);
+        return s;
+    }
+    let named: Vec<&str> = WORK_DIRS.iter().chain(BULK_DIRS.iter()).copied().collect();
+    let rd = match std::fs::read_dir(root) {
+        Ok(r) => r,
+        Err(e) => {
+            s.error = e.to_string();
+            return s;
+        }
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let meta = match std::fs::symlink_metadata(e.path()) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            let lower = name.to_lowercase();
+            let (bytes, files) = dir_size(&e.path());
+            if named.iter().any(|n| *n == lower) {
+                let entry = DirEntrySize { name: name.clone(), bytes, files };
+                if WORK_DIRS.contains(&lower.as_str()) {
+                    s.work.push(entry);
+                } else {
+                    s.bulk.push(entry);
+                }
+            } else {
+                s.core_bytes += bytes;
+                s.core_files += files;
+            }
+        } else {
+            s.core_bytes += meta.len();
+            s.core_files += 1;
+        }
+    }
+    s.work.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    s.bulk.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    s
+}
+
+// Bestaat de doelmap al op de host, en zit er iets in? Overschrijven van een
+// bestaande map is het soort verrassing dat je niet wilt bij een netwerkactie.
+#[tauri::command(async)]
+fn remote_dir_state(host_id: String, path: String) -> Result<String, String> {
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    let cmd = if effective_os(&host) == "windows" {
+        let ps = format!(
+            "if (Test-Path {p}) {{ if ((Get-ChildItem {p} -Force | Measure-Object).Count -gt 0) {{ 'NONEMPTY' }} else {{ 'EMPTY' }} }} else {{ 'MISSING' }}",
+            p = ps_quote(&path)
+        );
+        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
+    } else {
+        let inner = format!(
+            "if [ -d {p} ]; then if [ -n \"$(ls -A {p} 2>/dev/null)\" ]; then echo NONEMPTY; else echo EMPTY; fi; else echo MISSING; fi",
+            p = shell_quote_posix(&path)
+        );
+        if host.via == "wsl" {
+            format!("wsl -e sh -c \"echo {} | base64 -d | sh\"", b64(inner.as_bytes()))
+        } else {
+            inner
+        }
+    };
+    let (out, _) = ssh_run(&host, &cmd)?;
+    for token in ["NONEMPTY", "EMPTY", "MISSING"] {
+        if out.contains(token) {
+            return Ok(token.to_string());
+        }
+    }
+    Err(format!("onverwacht antwoord van de host:\n{}", out.trim()))
+}
+
+// Zet de werkmap over naar een host. `skip` bevat de mapnamen die niet meegaan.
+// Kopieert; de bron blijft staan -- zie #102 voor waarom dat een bewuste keuze is.
+#[tauri::command(async)]
+fn push_workspace(
+    host_id: String,
+    local_path: String,
+    remote_path: String,
+    skip: Vec<String>,
+) -> Result<String, String> {
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    if host.via == "wsl" {
+        return Err(
+            "Overzetten naar een agent in WSL kan nog niet: de scp-server draait op Windows en komt niet in het bestandssysteem van WSL.".into(),
+        );
+    }
+    let src = Path::new(&local_path);
+    if !src.is_dir() {
+        return Err(format!("Map bestaat niet:\n{}", local_path));
+    }
+
+    // Doelmap aanmaken; scp -r maakt hem zelf niet aan.
+    let mkdir = if host.os == "windows" {
+        let ps = format!(
+            "New-Item -ItemType Directory -Force -Path {} | Out-Null",
+            ps_quote(&remote_path)
+        );
+        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
+    } else {
+        format!("mkdir -p {}", shell_quote_posix(&remote_path))
+    };
+    let (out, ok) = ssh_run(&host, &mkdir)?;
+    if !ok {
+        return Err(format!("kon {} niet aanmaken:\n{}", remote_path, out.trim()));
+    }
+
+    // Per top-level item apart, zodat overslaan mogelijk is. scp -r op de hele
+    // map zou alles meenemen, inclusief een node_modules van een halve gigabyte.
+    let skip_lower: Vec<String> = skip.iter().map(|s| s.to_lowercase()).collect();
+    let mut sent = 0u32;
+    let mut skipped = 0u32;
+    let rd = std::fs::read_dir(src).map_err(|e| e.to_string())?;
+    let target_dir = if host.os == "windows" {
+        remote_path.replace('\\', "/")
+    } else {
+        remote_path.clone()
+    };
+    let user_at = if host.user.trim().is_empty() {
+        host.hostname.trim().to_string()
+    } else {
+        format!("{}@{}", host.user.trim(), host.hostname.trim())
+    };
+
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if skip_lower.contains(&name.to_lowercase()) {
+            skipped += 1;
+            continue;
+        }
+        let mut args: Vec<String> = vec!["-r".into()];
+        if host.port != 22 {
+            args.push("-P".into());
+            args.push(host.port.to_string());
+        }
+        if let KeySource::Path(k) = resolve_key(&host)? {
+            args.push("-i".into());
+            args.push(k);
+        }
+        args.push("-o".into());
+        args.push("StrictHostKeyChecking=accept-new".into());
+        args.push("-o".into());
+        args.push("BatchMode=yes".into());
+        args.push(e.path().to_string_lossy().into_owned());
+        // Niet quoten achter de dubbele punt: scp loopt sinds OpenSSH 9 over
+        // SFTP, en dan is het pad letterlijk (zie scp_to_host).
+        args.push(format!("{}:{}/", user_at, target_dir.trim_end_matches('/')));
+
+        let out = std::process::Command::new(scp_program())
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|err| format!("scp starten mislukte: {}", err))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("overzetten van '{}' mislukte:\n{}", name, err.trim()));
+        }
+        sent += 1;
+    }
+    Ok(format!("{} overgezet, {} overgeslagen", sent, skipped))
+}
+
 // Map-kiezer (bladeren-knop in de project-editor).
 #[tauri::command]
 fn pick_folder(app: AppHandle) -> Option<String> {
@@ -2897,6 +3127,9 @@ pub fn run() {
             check_hosts,
             probe_host,
             scp_to_host,
+            survey_workspace,
+            remote_dir_state,
+            push_workspace,
             pick_folder,
             pick_file,
             path_exists,
@@ -3038,6 +3271,39 @@ mod tests {
         // NO_COLOR: alleen weg als de omgeving van een agent komt.
         assert!(inherits_session_marker("NO_COLOR", true));
         assert!(!inherits_session_marker("NO_COLOR", false), "los is het een gebruikersvoorkeur");
+    }
+
+    #[test]
+    fn survey_separates_work_and_bulk_from_the_rest() {
+        let dir = std::env::temp_dir().join(format!("taurus-survey-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("input")).unwrap();
+        std::fs::create_dir_all(dir.join("node_modules").join("pkg")).unwrap();
+        std::fs::write(dir.join("README.md"), "x".repeat(10)).unwrap();
+        std::fs::write(dir.join("src").join("a.rs"), "y".repeat(20)).unwrap();
+        std::fs::write(dir.join("input").join("data.csv"), "z".repeat(50)).unwrap();
+        std::fs::write(dir.join("node_modules").join("pkg").join("i.js"), "q".repeat(100)).unwrap();
+
+        let s = survey_workspace(dir.to_string_lossy().into_owned());
+        assert_eq!(s.error, "");
+        // De kern is alles buiten de apart genoemde mappen: README + src.
+        assert_eq!(s.core_bytes, 30);
+        assert_eq!(s.core_files, 2);
+        let work: Vec<_> = s.work.iter().map(|w| (w.name.as_str(), w.bytes)).collect();
+        assert_eq!(work, vec![("input", 50)]);
+        let bulk: Vec<_> = s.bulk.iter().map(|b| (b.name.as_str(), b.bytes)).collect();
+        assert_eq!(bulk, vec![("node_modules", 100)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn survey_reports_a_missing_directory_instead_of_zero() {
+        // Nul bytes en "map bestaat niet" zien er in de UI hetzelfde uit als de
+        // fout niet apart komt -- en dan lijkt een verkeerd pad een lege map.
+        let s = survey_workspace(r"C:\taurus-does-not-exist-1234".into());
+        assert!(!s.error.is_empty());
+        assert_eq!(s.core_files, 0);
     }
 
     #[test]

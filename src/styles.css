@@ -313,6 +313,20 @@ input, textarea, select {
   resize: vertical;
 }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+/* De webview kleurt ingevulde velden lichtblauw als hij ze voor autofill
+   aanziet -- in een donker thema worden die dan spierwit tussen de rest. Er is
+   geen property om die achtergrond te zetten, vandaar de inset-shadow-truc; de
+   lange transition houdt hem weg als de webview hem later alsnog probeert. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-card) inset;
+  caret-color: var(--text);
+  transition: background-color 9999s ease-out 0s;
+}
 /* De taak is het veld waar een heel verhaal in gaat voordat de agent start --
    dat verdient ruimte, zeker nu de andere rijen ingeklapt staan. */
 .e-task { min-height: 88px; resize: vertical; font-family: inherit; }
@@ -651,6 +665,25 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .e-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .e-cap { font-size: 10.5px; color: var(--text-dim); letter-spacing: .2px; }
 .e-cmdwarn { font-size: 10.5px; color: var(--orange); }
+
+/* ---- verplaats-modal (#102) ---- */
+#move-modal { z-index: 110; }
+.move-survey {
+  margin: 12px 0; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-card); font-size: 12.5px; max-height: 240px; overflow-y: auto;
+}
+.move-line {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  padding: 7px 11px; border-bottom: 1px solid var(--border); color: var(--text-dim);
+}
+.move-line:last-child { border-bottom: none; }
+.move-line.pick { cursor: pointer; }
+.move-line.pick:hover { color: var(--text); }
+.move-line input[type=checkbox] { width: auto; margin-right: 7px; vertical-align: middle; }
+.move-line.total { color: var(--text); border-top: 1px solid var(--border); font-weight: 600; }
+.move-kind { font-size: 10.5px; color: var(--text-dim); margin-left: 7px; opacity: .8; }
+.move-busy, .move-note { padding: 12px; color: var(--text-dim); }
+.move-note.err { color: var(--red); }
 
 /* ---- host-modal (#98) ---- */
 /* Kan bovenop de agents-editor geopend worden (een agent heeft een machine
