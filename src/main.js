@@ -67,9 +67,10 @@ const I18N = {
     move_kind_bulk: "opnieuw op te bouwen", move_copying: "Kopiëren naar de doelmachine…",
     move_done: "Agent verplaatst", move_need_path: "Vul een werkmap op de doelmachine in.",
     move_no_path: "Deze agent heeft geen werkmap.", move_no_target: "Voeg eerst een machine toe.",
-    move_target_exists: "Op de doelmachine staat daar al een map met inhoud. Kies een ander pad.",
-    move_remote_source: "Deze agent draait al elders. Doormeten van een map op afstand kan nog niet; het overzetten zelf ook niet.",
-    move_to_local_todo: "Terughalen naar deze computer kan nog niet.",
+    move_target_newer: "Daar staat al een map, en die is RECENTER bijgewerkt ({when}). Wat je aanvinkt vervangt wat daar staat. Weet je het zeker?",
+    move_target_exists_info: "Daar staat al een map (laatst gewijzigd {when}). Wat je aanvinkt vervangt wat daar staat.",
+    move_host_to_host_todo: "Van de ene machine naar de andere kan nog niet — haal hem eerst hierheen.",
+    move_nothing_selected: "Er is niets aangevinkt om over te zetten.",
     move_keep_source: "De bronmap blijft staan — dit is een kopie.",
     cap_host: "Draait op", cap_workdir_remote: "Werkmap OP DIE MACHINE",
     ph_path_remote: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
@@ -203,9 +204,10 @@ const I18N = {
     move_kind_bulk: "rebuildable", move_copying: "Copying to the target machine…",
     move_done: "Agent moved", move_need_path: "Enter a working directory on the target machine.",
     move_no_path: "This agent has no working directory.", move_no_target: "Add a machine first.",
-    move_target_exists: "That path on the target machine already holds a non-empty folder. Pick another path.",
-    move_remote_source: "This agent already runs elsewhere. Measuring a remote folder is not supported yet, nor is transferring from one.",
-    move_to_local_todo: "Bringing an agent back to this computer is not supported yet.",
+    move_target_newer: "A folder is already there, and it was changed MORE RECENTLY ({when}). What you tick replaces what is there. Are you sure?",
+    move_target_exists_info: "A folder is already there (last changed {when}). What you tick replaces what is there.",
+    move_host_to_host_todo: "Machine to machine is not supported yet — bring it here first.",
+    move_nothing_selected: "Nothing is ticked to transfer.",
     move_keep_source: "The source folder stays where it is — this is a copy.",
     cap_host: "Runs on", cap_workdir_remote: "Working directory ON THAT MACHINE",
     ph_path_remote: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
@@ -1016,8 +1018,9 @@ function fmtBytes(n) {
 
 async function openMoveModal(project) {
   if (!project || !project.path) { toast(t("move_no_path"), "err"); return; }
-  movePlan = { project, skip: new Set(), survey: null };
-  // Doelen: alles behalve waar hij nu al staat.
+  movePlan = { project, skip: new Set(), survey: null, target: null };
+  // Doelen: alles behalve waar hij nu al staat. "Deze computer" hoort erbij als
+  // de agent elders draait -- terughalen is net zo goed een richting.
   const opts = [{ id: "", label: t("host_local") }, ...hosts.map((h) => ({ id: h.id, label: h.nickname || h.hostname }))]
     .filter((o) => o.id !== (project.host_id || ""));
   if (!opts.length) { toast(t("move_no_target"), "err"); return; }
@@ -1027,17 +1030,32 @@ async function openMoveModal(project) {
   els.mvWarn.classList.add("hidden");
   els.mvSurvey.innerHTML = `<div class="move-busy">${escapeHtml(t("move_surveying"))}</div>`;
   els.moveModal.classList.remove("hidden");
+  await refreshMoveSurvey();
+}
 
-  // Alleen een lokale bron kan gemeten worden; een remote bron zou een eigen
-  // survey over ssh vragen en dat kan deze versie nog niet.
-  if (project.host_id) {
-    els.mvSurvey.innerHTML = `<div class="move-note">${escapeHtml(t("move_remote_source"))}</div>`;
-    return;
-  }
-  let s;
-  try { s = await invoke("survey_workspace", { path: project.path }); }
-  catch (e) { s = { error: String(e) }; }
-  movePlan.survey = s;
+// Meet de BRON (waar de agent nu staat) en het DOEL, zodat we kunnen zeggen
+// welke kant recenter is bijgewerkt voordat er iets overschreven wordt.
+async function refreshMoveSurvey() {
+  if (!movePlan) return;
+  const { project } = movePlan;
+  const targetId = els.mvTarget.value;
+  const targetPath = els.mvPath.value.trim();
+  els.mvSurvey.innerHTML = `<div class="move-busy">${escapeHtml(t("move_surveying"))}</div>`;
+
+  const surveySrc = project.host_id
+    ? invoke("survey_remote_workspace", { hostId: project.host_id, path: project.path })
+    : invoke("survey_workspace", { path: project.path });
+  const surveyDst = targetPath
+    ? (targetId
+        ? invoke("survey_remote_workspace", { hostId: targetId, path: targetPath })
+        : invoke("survey_workspace", { path: targetPath }))
+    : Promise.resolve(null);
+
+  let src, dst;
+  try { [src, dst] = await Promise.all([surveySrc, surveyDst]); }
+  catch (e) { src = { error: String(e) }; dst = null; }
+  movePlan.survey = src;
+  movePlan.target = dst;
   renderMoveSurvey();
 }
 
@@ -1066,6 +1084,7 @@ function renderMoveSurvey() {
 
   rows.push(`<div class="move-line"><span class="move-kind">${escapeHtml(t("move_keep_source"))}</span><span></span></div>`);
   els.mvSurvey.innerHTML = rows.join("");
+  renderTargetWarning();
   els.mvSurvey.querySelectorAll("input[type=checkbox]").forEach((cb) => {
     cb.addEventListener("change", (e) => {
       const key = e.target.dataset.dir.toLowerCase();
@@ -1073,6 +1092,27 @@ function renderMoveSurvey() {
       renderMoveSurvey();
     });
   });
+}
+
+// Staat er aan de andere kant al iets, en is dat NIEUWER? Dan is dat het enige
+// wat je echt wilt weten voordat je overschrijft. Weigeren is te bot -- soms is
+// het doel juist de verouderde kopie die je wilt bijwerken. Dus: de feiten, en
+// jij beslist.
+function renderTargetWarning() {
+  const dst = movePlan && movePlan.target;
+  const src = movePlan && movePlan.survey;
+  if (!dst || !dst.exists) { els.mvWarn.classList.add("hidden"); return; }
+
+  const dstFiles = dst.coreFiles + [...dst.work, ...dst.bulk].reduce((n, d) => n + d.files, 0);
+  if (!dstFiles) { els.mvWarn.classList.add("hidden"); return; }
+
+  const newer = src && dst.newest > src.newest;
+  const when = dst.newest ? new Date(dst.newest * 1000).toLocaleString() : "?";
+  els.mvWarn.innerHTML = newer
+    ? `⚠ ${escapeHtml(t("move_target_newer").replace("{when}", when))}`
+    : `ℹ ${escapeHtml(t("move_target_exists_info").replace("{when}", when))}`;
+  els.mvWarn.className = newer ? "command-warn" : "hint";
+  els.mvWarn.classList.remove("hidden");
 }
 
 // Een pad op de andere machine raden uit de mapnaam: beter dan een leeg veld,
@@ -1091,26 +1131,39 @@ async function runMove() {
   if (!movePlan) return;
   const target = els.mvTarget.value;
   const path = els.mvPath.value.trim();
+  const src = movePlan.project;
   if (!path) { els.mvStatus.textContent = t("move_need_path"); els.mvStatus.className = "status-msg err"; return; }
-  if (!target) { els.mvStatus.textContent = t("move_to_local_todo"); els.mvStatus.className = "status-msg err"; return; }
+  if (src.host_id && target) {
+    els.mvStatus.textContent = t("move_host_to_host_todo");
+    els.mvStatus.className = "status-msg err";
+    return;
+  }
 
   els.mvGo.disabled = true;
   els.mvStatus.className = "status-msg";
+  els.mvStatus.textContent = t("move_copying");
   try {
-    // Eerst kijken of daar al iets staat: overschrijven is geen verrassing die
-    // je bij een netwerkactie wilt hebben.
-    const state = await invoke("remote_dir_state", { hostId: target, path });
-    if (state === "NONEMPTY") {
-      els.mvStatus.textContent = t("move_target_exists");
-      els.mvStatus.className = "status-msg err";
-      els.mvGo.disabled = false;
-      return;
+    let res;
+    if (target) {
+      // Deze computer -> host.
+      res = await invoke("push_workspace", {
+        hostId: target, localPath: src.path, remotePath: path,
+        skip: [...movePlan.skip],
+      });
+    } else {
+      // Host -> deze computer. De lijst moet EXPLICIET zijn: scp kan aan de
+      // andere kant geen map uitlezen, en een wildcard zou juist ook meenemen
+      // wat je hebt uitgevinkt.
+      const s = movePlan.survey || { core: [], work: [], bulk: [] };
+      const optional = [...s.work, ...s.bulk]
+        .map((d) => d.name)
+        .filter((n) => !movePlan.skip.has(n.toLowerCase()));
+      const items = [...(s.core || []), ...optional];
+      if (!items.length) throw new Error(t("move_nothing_selected"));
+      res = await invoke("pull_workspace", {
+        hostId: src.host_id, remotePath: src.path, localPath: path, items,
+      });
     }
-    els.mvStatus.textContent = t("move_copying");
-    const res = await invoke("push_workspace", {
-      hostId: target, localPath: movePlan.project.path, remotePath: path,
-      skip: [...movePlan.skip],
-    });
     // Pas ná een geslaagde kopie de agent omzetten -- anders wijst hij naar een
     // map die er niet staat.
     const next = projects.map((p) => (p.id === movePlan.project.id ? { ...p, host_id: target, path } : p));
@@ -2761,7 +2814,16 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#mv-go").addEventListener("click", runMove);
   // Van doel wisselen: het voorgestelde pad hoort bij die machine, niet bij de vorige.
   els.mvTarget.addEventListener("change", () => {
-    if (movePlan) els.mvPath.value = suggestTargetPath(movePlan.project, els.mvTarget.value);
+    if (!movePlan) return;
+    els.mvPath.value = suggestTargetPath(movePlan.project, els.mvTarget.value);
+    refreshMoveSurvey();
+  });
+  // Pad wijzigen betekent een ander doel: opnieuw meten, maar pas als je even
+  // stopt met typen -- anders gaat er een ssh-ronde per toetsaanslag heen.
+  let mvPathTimer = null;
+  els.mvPath.addEventListener("input", () => {
+    clearTimeout(mvPathTimer);
+    mvPathTimer = setTimeout(refreshMoveSurvey, 600);
   });
   document.querySelector("#hosts-btn").addEventListener("click", openHostModal);
   document.querySelector("#editor-hosts").addEventListener("click", openHostModal);

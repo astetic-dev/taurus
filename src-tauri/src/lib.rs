@@ -597,9 +597,47 @@ struct WorkspaceSurvey {
     // De rest: alles buiten de apart genoemde mappen. Dat gaat altijd mee.
     core_bytes: u64,
     core_files: u64,
+    // Dezelfde items als losse namen. Nodig om terug te halen: scp kan aan de
+    // andere kant geen map uitlezen, dus de lijst moet expliciet zijn -- een
+    // wildcard zou juist ook meenemen wat je hebt uitgevinkt.
+    core: Vec<String>,
     work: Vec<DirEntrySize>,
     bulk: Vec<DirEntrySize>,
+    // Bestaat de map, en wanneer is er voor het laatst iets in gewijzigd
+    // (unix-seconden, 0 = onbekend)? Daarmee kan de UI zeggen welke kant de
+    // nieuwste versie heeft in plaats van botweg te weigeren.
+    exists: bool,
+    newest: u64,
     error: String,
+}
+
+// De nieuwste wijziging in een boom, als unix-seconden.
+fn newest_mtime(path: &Path) -> u64 {
+    let mut newest = 0u64;
+    let rd = match std::fs::read_dir(path) {
+        Ok(r) => r,
+        Err(_) => return 0,
+    };
+    for e in rd.flatten() {
+        let meta = match std::fs::symlink_metadata(e.path()) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_symlink() {
+            continue;
+        }
+        let t = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        newest = newest.max(t);
+        if meta.is_dir() {
+            newest = newest.max(newest_mtime(&e.path()));
+        }
+    }
+    newest
 }
 
 // Tel een map recursief. Symlinks worden niet gevolgd: een lus zou hier anders
@@ -638,9 +676,12 @@ fn survey_workspace(path: String) -> WorkspaceSurvey {
     let mut s = WorkspaceSurvey::default();
     let root = Path::new(&path);
     if !root.is_dir() {
-        s.error = format!("Map bestaat niet:\n{}", path);
+        // Geen fout: een nog niet bestaande doelmap is het normale geval bij een
+        // eerste overzetting. De UI onderscheidt dat aan `exists`.
         return s;
     }
+    s.exists = true;
+    s.newest = newest_mtime(root);
     let named: Vec<&str> = WORK_DIRS.iter().chain(BULK_DIRS.iter()).copied().collect();
     let rd = match std::fs::read_dir(root) {
         Ok(r) => r,
@@ -671,10 +712,12 @@ fn survey_workspace(path: String) -> WorkspaceSurvey {
             } else {
                 s.core_bytes += bytes;
                 s.core_files += files;
+                s.core.push(name);
             }
         } else {
             s.core_bytes += meta.len();
             s.core_files += 1;
+            s.core.push(name);
         }
     }
     s.work.sort_by(|a, b| b.bytes.cmp(&a.bytes));
@@ -682,35 +725,111 @@ fn survey_workspace(path: String) -> WorkspaceSurvey {
     s
 }
 
-// Bestaat de doelmap al op de host, en zit er iets in? Overschrijven van een
-// bestaande map is het soort verrassing dat je niet wilt bij een netwerkactie.
+// Dezelfde meting als survey_workspace, maar op een host. Nodig voor twee
+// dingen: terughalen naar deze computer (dan is de host de BRON), en kunnen
+// zeggen welke kant recenter is bijgewerkt voordat er iets overschreven wordt.
+//
+// Het script schrijft regels `T|naam|bytes|files|mtime`; dat parseert eenvoudig
+// en overleeft een motd of andere ruis op de verbinding.
 #[tauri::command(async)]
-fn remote_dir_state(host_id: String, path: String) -> Result<String, String> {
-    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+fn survey_remote_workspace(host_id: String, path: String) -> WorkspaceSurvey {
+    let mut s = WorkspaceSurvey::default();
+    let host = match lookup_host(&host_id) {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            s.error = format!("onbekende host: {}", host_id);
+            return s;
+        }
+        Err(e) => {
+            s.error = e;
+            return s;
+        }
+    };
+
     let cmd = if effective_os(&host) == "windows" {
         let ps = format!(
-            "if (Test-Path {p}) {{ if ((Get-ChildItem {p} -Force | Measure-Object).Count -gt 0) {{ 'NONEMPTY' }} else {{ 'EMPTY' }} }} else {{ 'MISSING' }}",
+            r#"$r = {p}
+if (-not (Test-Path $r)) {{ 'MISSING'; exit }}
+'EXISTS'
+Get-ChildItem $r -Force -EA 0 | ForEach-Object {{
+  if ($_.PSIsContainer) {{
+    $f = Get-ChildItem $_.FullName -Recurse -File -Force -EA 0
+    $b = ($f | Measure-Object -Property Length -Sum).Sum
+    $n = ($f | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum
+    $t = if ($n) {{ [int][double]::Parse((Get-Date $n -UFormat %s)) }} else {{ 0 }}
+    'D|' + $_.Name + '|' + [int64]$b + '|' + $f.Count + '|' + $t
+  }} else {{
+    $t = [int][double]::Parse((Get-Date $_.LastWriteTimeUtc -UFormat %s))
+    'F|' + $_.Name + '|' + $_.Length + '|1|' + $t
+  }}
+}}"#,
             p = ps_quote(&path)
         );
         format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
     } else {
         let inner = format!(
-            "if [ -d {p} ]; then if [ -n \"$(ls -A {p} 2>/dev/null)\" ]; then echo NONEMPTY; else echo EMPTY; fi; else echo MISSING; fi",
+            r#"r={p}
+[ -d "$r" ] || {{ echo MISSING; exit 0; }}
+echo EXISTS
+for e in "$r"/* "$r"/.*; do
+  b=$(basename "$e")
+  [ "$b" = "." ] || [ "$b" = ".." ] || [ ! -e "$e" ] || {{
+    if [ -d "$e" ]; then
+      sz=$(du -sb "$e" 2>/dev/null | cut -f1)
+      n=$(find "$e" -type f 2>/dev/null | wc -l)
+      t=$(find "$e" -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)
+      echo "D|$b|${{sz:-0}}|${{n:-0}}|${{t:-0}}"
+    else
+      sz=$(stat -c%s "$e" 2>/dev/null)
+      t=$(stat -c%Y "$e" 2>/dev/null)
+      echo "F|$b|${{sz:-0}}|1|${{t:-0}}"
+    fi
+  }}
+done"#,
             p = shell_quote_posix(&path)
         );
         if host.via == "wsl" {
             format!("wsl -e sh -c \"echo {} | base64 -d | sh\"", b64(inner.as_bytes()))
         } else {
-            inner
+            format!("echo {} | base64 -d | sh", b64(inner.as_bytes()))
         }
     };
-    let (out, _) = ssh_run(&host, &cmd)?;
-    for token in ["NONEMPTY", "EMPTY", "MISSING"] {
-        if out.contains(token) {
-            return Ok(token.to_string());
+
+    let (out, _) = match ssh_run(&host, &cmd) {
+        Ok(v) => v,
+        Err(e) => {
+            s.error = e;
+            return s;
+        }
+    };
+    if !out.contains("EXISTS") {
+        return s; // bestaat nog niet -- geen fout
+    }
+    s.exists = true;
+    for line in out.lines() {
+        let p: Vec<&str> = line.trim().split('|').collect();
+        if p.len() != 5 || (p[0] != "D" && p[0] != "F") {
+            continue;
+        }
+        let name = p[1].to_string();
+        let bytes: u64 = p[2].parse().unwrap_or(0);
+        let files: u64 = p[3].parse().unwrap_or(0);
+        let mtime: u64 = p[4].parse().unwrap_or(0);
+        s.newest = s.newest.max(mtime);
+        let lower = name.to_lowercase();
+        if p[0] == "D" && WORK_DIRS.contains(&lower.as_str()) {
+            s.work.push(DirEntrySize { name, bytes, files });
+        } else if p[0] == "D" && BULK_DIRS.contains(&lower.as_str()) {
+            s.bulk.push(DirEntrySize { name, bytes, files });
+        } else {
+            s.core_bytes += bytes;
+            s.core_files += files;
+            s.core.push(name);
         }
     }
-    Err(format!("onverwacht antwoord van de host:\n{}", out.trim()))
+    s.work.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    s.bulk.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    s
 }
 
 // Zet de werkmap over naar een host. `skip` bevat de mapnamen die niet meegaan.
@@ -759,11 +878,7 @@ fn push_workspace(
     } else {
         remote_path.clone()
     };
-    let user_at = if host.user.trim().is_empty() {
-        host.hostname.trim().to_string()
-    } else {
-        format!("{}@{}", host.user.trim(), host.hostname.trim())
-    };
+    let user_at = host_target(&host);
 
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
@@ -771,19 +886,7 @@ fn push_workspace(
             skipped += 1;
             continue;
         }
-        let mut args: Vec<String> = vec!["-r".into()];
-        if host.port != 22 {
-            args.push("-P".into());
-            args.push(host.port.to_string());
-        }
-        if let KeySource::Path(k) = resolve_key(&host)? {
-            args.push("-i".into());
-            args.push(k);
-        }
-        args.push("-o".into());
-        args.push("StrictHostKeyChecking=accept-new".into());
-        args.push("-o".into());
-        args.push("BatchMode=yes".into());
+        let mut args = scp_base_args(&host)?;
         args.push(e.path().to_string_lossy().into_owned());
         // Niet quoten achter de dubbele punt: scp loopt sinds OpenSSH 9 over
         // SFTP, en dan is het pad letterlijk (zie scp_to_host).
@@ -801,6 +904,80 @@ fn push_workspace(
         sent += 1;
     }
     Ok(format!("{} overgezet, {} overgeslagen", sent, skipped))
+}
+
+// Gedeelde scp-opties voor beide richtingen.
+fn scp_base_args(host: &Host) -> Result<Vec<String>, String> {
+    let mut a: Vec<String> = vec!["-r".into()];
+    if host.port != 22 {
+        // scp gebruikt -P waar ssh -p gebruikt; -p zou hier "behoud tijdstempels"
+        // betekenen en stil op de standaardpoort verbinden.
+        a.push("-P".into());
+        a.push(host.port.to_string());
+    }
+    if let KeySource::Path(k) = resolve_key(host)? {
+        a.push("-i".into());
+        a.push(k);
+    }
+    a.push("-o".into());
+    a.push("StrictHostKeyChecking=accept-new".into());
+    a.push("-o".into());
+    a.push("BatchMode=yes".into());
+    Ok(a)
+}
+
+fn host_target(host: &Host) -> String {
+    if host.user.trim().is_empty() {
+        host.hostname.trim().to_string()
+    } else {
+        format!("{}@{}", host.user.trim(), host.hostname.trim())
+    }
+}
+
+// Haal de werkmap van een host terug naar deze computer. Spiegelbeeld van
+// push_workspace; bestaande bestanden worden overschreven, want de aangevinkte
+// kant is de bron van waarheid.
+#[tauri::command(async)]
+fn pull_workspace(
+    host_id: String,
+    remote_path: String,
+    local_path: String,
+    items: Vec<String>,
+) -> Result<String, String> {
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    if host.via == "wsl" {
+        return Err(
+            "Terughalen uit WSL kan nog niet: de scp-server draait op Windows en komt niet in het bestandssysteem van WSL.".into(),
+        );
+    }
+    std::fs::create_dir_all(&local_path)
+        .map_err(|e| format!("kon {} niet aanmaken:\n{}", local_path, e))?;
+
+    let remote_base = if host.os == "windows" {
+        remote_path.replace('\\', "/")
+    } else {
+        remote_path.clone()
+    };
+    let user_at = host_target(&host);
+    let mut got = 0u32;
+    for name in &items {
+        let mut args = scp_base_args(&host)?;
+        // Niet quoten achter de dubbele punt: scp loopt sinds OpenSSH 9 over
+        // SFTP en behandelt het pad letterlijk.
+        args.push(format!("{}:{}/{}", user_at, remote_base.trim_end_matches('/'), name));
+        args.push(local_path.clone());
+        let out = std::process::Command::new(scp_program())
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|e| format!("scp starten mislukte: {}", e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("ophalen van '{}' mislukte:\n{}", name, err.trim()));
+        }
+        got += 1;
+    }
+    Ok(format!("{} opgehaald", got))
 }
 
 // Map-kiezer (bladeren-knop in de project-editor).
@@ -3128,8 +3305,9 @@ pub fn run() {
             probe_host,
             scp_to_host,
             survey_workspace,
-            remote_dir_state,
+            survey_remote_workspace,
             push_workspace,
+            pull_workspace,
             pick_folder,
             pick_file,
             path_exists,
@@ -3294,16 +3472,51 @@ mod tests {
         assert_eq!(work, vec![("input", 50)]);
         let bulk: Vec<_> = s.bulk.iter().map(|b| (b.name.as_str(), b.bytes)).collect();
         assert_eq!(bulk, vec![("node_modules", 100)]);
+        // De kern moet ook als LOSSE namen komen: terughalen stuurt een expliciete
+        // lijst aan scp, want een wildcard zou het uitgevinkte alsnog meenemen.
+        let mut core = s.core.clone();
+        core.sort();
+        assert_eq!(core, vec!["README.md".to_string(), "src".to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn survey_reports_a_missing_directory_instead_of_zero() {
-        // Nul bytes en "map bestaat niet" zien er in de UI hetzelfde uit als de
-        // fout niet apart komt -- en dan lijkt een verkeerd pad een lege map.
-        let s = survey_workspace(r"C:\taurus-does-not-exist-1234".into());
-        assert!(!s.error.is_empty());
-        assert_eq!(s.core_files, 0);
+    fn survey_distinguishes_a_missing_directory_from_an_empty_one() {
+        // Een doelmap die nog niet bestaat is het NORMALE geval bij een eerste
+        // overzetting, dus geen fout. Maar hij moet wel te onderscheiden zijn
+        // van een lege map: anders kan de UI niet zeggen of er iets overschreven
+        // gaat worden.
+        let missing = survey_workspace(r"C:\taurus-does-not-exist-1234".into());
+        assert!(!missing.exists);
+        assert_eq!(missing.error, "");
+        assert_eq!(missing.newest, 0);
+
+        let dir = std::env::temp_dir().join(format!("taurus-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let empty = survey_workspace(dir.to_string_lossy().into_owned());
+        assert!(empty.exists, "een lege map bestaat wel");
+        assert_eq!(empty.core_files, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn survey_reports_the_newest_change_in_the_tree() {
+        // Hiermee kan de UI zeggen WELKE kant recenter is in plaats van botweg te
+        // weigeren als het doel al bestaat.
+        let dir = std::env::temp_dir().join(format!("taurus-mtime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("deep.txt"), "x").unwrap();
+        let s = survey_workspace(dir.to_string_lossy().into_owned());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(s.newest > 0, "moet een tijdstempel vinden");
+        // Een bestand dat we net schreven ligt hooguit een paar seconden terug --
+        // en het moet uit de SUBmap komen, niet alleen van de root.
+        assert!(now - s.newest < 120, "onverwacht oude mtime: {} vs {}", s.newest, now);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
