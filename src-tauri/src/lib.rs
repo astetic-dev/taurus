@@ -1790,17 +1790,6 @@ fn agent_payload_b64(cwd: &str, program: &str, args: &[String]) -> String {
 }
 
 // De string die de remote shell te zien krijgt.
-fn build_remote_payload(
-    mux: &str,
-    os: &str,
-    session: &str,
-    cwd: &str,
-    program: &str,
-    args: &[String],
-) -> Result<String, String> {
-    build_remote_payload_via(mux, os, "", session, cwd, program, args)
-}
-
 // `via: wsl` bouwt de Linux-payload en zet die in WSL. De payload gaat als
 // base64 door cmd.exe: hij bevat quotes en pipes, en die zouden er onderweg
 // anders uit gehaald worden. Deze exacte vorm is tegen een echte host getest.
@@ -3598,18 +3587,18 @@ mod tests {
         // ongelezen en ~/.local/bin staat niet op PATH. Een claude die daar
         // staat wordt dan niet gevonden en de sessie eindigt meteen met alleen
         // "[exited]" -- precies wat er tegen een echte host gebeurde.
-        let s = build_remote_payload("tmux", "linux", "sess", "/home/a/p", "claude", &[]).unwrap();
+        let s = build_remote_payload_via("tmux", "linux", "", "sess", "/home/a/p", "claude", &[]).unwrap();
         assert!(s.contains("exec sh -l /tmp/sess.sh"), "moet een login shell zijn: {}", s);
         assert!(s.starts_with("echo "), "payload hoort als base64 mee te reizen: {}", s);
         // Windows loopt via PowerShell en heeft deze starter niet.
-        let w = build_remote_payload("none", "windows", "sess", r"C:\p", "claude", &[]).unwrap();
+        let w = build_remote_payload_via("none", "windows", "", "sess", r"C:\p", "claude", &[]).unwrap();
         assert!(w.starts_with("powershell -NoProfile -EncodedCommand "));
     }
 
     #[test]
     fn build_remote_payload_uses_base64_for_the_taurus_agent() {
         let args = vec!["-n".to_string(), r#"a "quoted" & risky task"#.to_string()];
-        let s = build_remote_payload("taurus-agent", "windows", "sess1", r"C:\p", "claude", &args)
+        let s = build_remote_payload_via("taurus-agent", "windows", "", "sess1", r"C:\p", "claude", &args)
             .unwrap();
         let expected_b64 = b64(
             serde_json::json!({ "cwd": r"C:\p", "program": "claude", "args": args })
@@ -3632,8 +3621,8 @@ mod tests {
     #[test]
     fn build_remote_payload_refuses_combinations_that_cannot_work() {
         // tmux bestaat niet op Windows.
-        assert!(build_remote_payload("tmux", "windows", "s", "C:\\p", "claude", &[]).is_err());
-        assert!(build_remote_payload("zellij", "linux", "s", "/p", "claude", &[]).is_err());
+        assert!(build_remote_payload_via("tmux", "windows", "", "s", "C:\\p", "claude", &[]).is_err());
+        assert!(build_remote_payload_via("zellij", "linux", "", "s", "/p", "claude", &[]).is_err());
         // Zonder multiplexer op Linux: kaal, met exec.
         let s = build_remote_payload_inner("none", "linux", "s", "/p", "claude", &[]).unwrap();
         assert_eq!(s, "cd '/p' && exec 'claude'");
@@ -3647,7 +3636,7 @@ mod tests {
             "-n".to_string(),
             r#"fix "the" thing & report it; it's urgent"#.to_string(),
         ];
-        let s = build_remote_payload("none", "windows", "s", r"C:\proj", "claude", &args).unwrap();
+        let s = build_remote_payload_via("none", "windows", "", "s", r"C:\proj", "claude", &args).unwrap();
         assert!(s.starts_with("powershell -NoProfile -EncodedCommand "));
         let enc = s.rsplit(' ').next().unwrap();
         // Alleen base64-tekens: cmd.exe ziet geen enkel metateken.
