@@ -181,6 +181,18 @@ Edit them with the in-app **Agents** editor, or by hand. Format:
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
 
+## Remote hosts
+
+A tab can run its agent on **another machine** over SSH instead of locally: the
+work happens where the data and the access are, and the tab still shows the
+agent's own TUI. Hosts live in `%APPDATA%\Taurus\hosts.json` and appear in the
+launch form under **Runs on**.
+
+Setup is two prompts — one for an agent on your workstation, one for an agent on
+the target machine — in **[REMOTE-HOSTS.md](REMOTE-HOSTS.md)**, along with the
+`hosts.json` format, what session persistence you get per host, and the security
+notes worth reading before pointing an agent at a machine you do not own.
+
 ## Branding (white-label)
 
 You can rebrand the launcher — app name, subtitle, logo, colours, skin, window

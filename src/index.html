@@ -124,6 +124,17 @@
                 <div id="claude-warn" class="claude-warn hidden" data-i18n="no_claude_md">ℹ Geen CLAUDE.md in deze map — agent start zonder projectinstructies.</div>
               </div>
               <div class="field">
+                <label for="host-input" data-i18n="launch_host">Draait op</label>
+                <select id="host-input">
+                  <option value="" data-i18n="host_local">Deze computer</option>
+                </select>
+                <div id="remote-path-row" class="hidden">
+                  <label for="remote-path-input" class="sublabel" data-i18n="remote_workdir">Werkmap op de host</label>
+                  <input id="remote-path-input" type="text" autocomplete="off" data-i18n-ph="remote_workdir_ph" placeholder="bijv. C:\Users\arjen\project of /home/arjen/project" />
+                  <div id="remote-hint" class="hint" data-i18n="remote_hint">De agent draait op die machine; deze werkmap geldt daar.</div>
+                </div>
+              </div>
+              <div class="field">
                 <label for="title-input" data-i18n="session_title">Titel van de sessie</label>
                 <input id="title-input" type="text" data-i18n-ph="title_ph" placeholder="bijv. ZGV-SAML-debug" />
                 <div class="hint" data-i18n="title_hint">Wordt de naam in Claude én op het tabblad.</div>
@@ -311,6 +322,47 @@
           <button id="editor-save" class="btn-primary" data-i18n="save">Opslaan</button>
         </div>
         <div id="editor-status" class="status-msg"></div>
+      </div>
+    </div>
+
+    <!-- ===== Host-modal: kies of voeg een machine toe (#98) ===== -->
+    <div id="host-modal" class="modal hidden">
+      <div class="modal-box wide">
+        <h2 data-i18n="hosts_title">Machines</h2>
+        <div id="host-rows" class="host-rows"></div>
+        <button id="host-add" class="btn-ghost add" data-i18n="host_add">＋ Machine toevoegen…</button>
+
+        <div id="host-form" class="host-form hidden">
+          <div class="e-field"><span class="e-cap" data-i18n="host_nickname">Naam</span>
+            <input id="hf-nickname" type="text" data-i18n-ph="host_nickname_ph" placeholder="bijv. support01" /></div>
+          <div class="host-form-row">
+            <div class="e-field grow"><span class="e-cap" data-i18n="host_hostname">Hostnaam of IP</span>
+              <input id="hf-hostname" type="text" placeholder="192.168.2.9" /></div>
+            <div class="e-field narrow"><span class="e-cap" data-i18n="host_port">Poort</span>
+              <input id="hf-port" type="number" value="22" min="1" max="65535" /></div>
+          </div>
+          <div class="e-field"><span class="e-cap" data-i18n="host_user">Gebruikersnaam</span>
+            <input id="hf-user" type="text" /></div>
+          <div class="e-field"><span class="e-cap" data-i18n="host_key">SSH-key (leeg = ssh kiest zelf)</span>
+            <div class="e-pathrow"><input id="hf-key" type="text" placeholder="~/.ssh/id_ed25519" /><button id="hf-key-browse" class="e-browse">📁</button></div></div>
+          <div class="e-field"><span class="e-cap" data-i18n="host_default_project">Standaard werkmap op de host</span>
+            <input id="hf-project" type="text" placeholder="C:\Users\arjen  of  /home/arjen/proj" /></div>
+          <div class="e-field"><span class="e-cap" data-i18n="host_via">Waar draait de agent</span>
+            <select id="hf-via">
+              <option value="" data-i18n="host_via_direct">Rechtstreeks op de machine</option>
+              <option value="wsl" data-i18n="host_via_wsl">In WSL (Windows-host, geeft tmux-persistentie)</option>
+            </select></div>
+          <div class="modal-actions">
+            <button id="hf-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+            <button id="hf-test" class="btn-primary" data-i18n="host_add_test">Toevoegen &amp; testen</button>
+          </div>
+          <div id="hf-status" class="status-msg"></div>
+          <div id="hf-report" class="host-report hidden"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="host-close" class="btn-ghost" data-i18n="close">Sluiten</button>
+        </div>
       </div>
     </div>
 

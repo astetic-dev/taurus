@@ -116,6 +116,458 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- remote hosts (#98) ----------
+
+// Een machine waarop een tab een agent kan draaien. Bewaard in
+// %APPDATA%\Taurus\hosts.json, naast projects.json en sessions.json.
+// Debug bevat geen geheim: key_path is een pad, nooit de sleutel zelf.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+struct Host {
+    id: String,
+    nickname: String,
+    hostname: String,
+    #[serde(default)]
+    user: String,
+    #[serde(default = "default_ssh_port")]
+    port: u16,
+    // Pad naar de private key. Leeg = laat ssh zelf kiezen (~/.ssh/config of de
+    // agent). Alles loopt via resolve_key, zodat een latere sleutelbron (vault)
+    // maar een plek raakt.
+    #[serde(default)]
+    key_path: String,
+    // Werkmap op de host als een project er geen eigen remote pad bij zet.
+    #[serde(default)]
+    default_project: String,
+    // Hieronder: ingevuld door de probe bij "Add & test", niet met de hand.
+    // "linux" | "windows" | "" (nog niet getest).
+    #[serde(default)]
+    os: String,
+    // Wat houdt de sessie in leven als de verbinding wegvalt:
+    // "tmux" | "psmux" | "taurus-agent" | "none". Bij "none" is het transcript
+    // de enige persistentie (claude --resume) en sterft een lopende beurt.
+    #[serde(default)]
+    mux: String,
+    // Versie van de taurus-agent op de host; leeg als hij er niet staat.
+    #[serde(default)]
+    agent_version: String,
+    // "" = de agent draait rechtstreeks op de host. "wsl" = hij draait in WSL op
+    // een Windows-host. Dat is de goedkope route naar echte persistentie op
+    // Windows: WSL heeft tmux, Windows niet. De prijs is dat de agent dan in
+    // Linux zit en Windows-paden via /mnt/c ziet, en dat WSL zijn VM afsluit bij
+    // inactiviteit -- wat een "persistente" sessie alsnog kan beeindigen.
+    #[serde(default)]
+    via: String,
+}
+
+// Onder welk OS draait de agent uiteindelijk? Bij `via: wsl` is de host Windows
+// maar is alles daarbinnen Linux: paden, quoting en de naam van de binary.
+fn effective_os(host: &Host) -> &str {
+    if host.via == "wsl" {
+        "linux"
+    } else {
+        &host.os
+    }
+}
+
+fn default_ssh_port() -> u16 {
+    22
+}
+
+fn hosts_path() -> std::path::PathBuf {
+    config_dir().join("hosts.json")
+}
+
+#[tauri::command]
+fn get_hosts() -> Vec<Host> {
+    let p = hosts_path();
+    if let Ok(txt) = std::fs::read_to_string(&p) {
+        match serde_json::from_str::<Vec<Host>>(&txt) {
+            Ok(list) => return list,
+            Err(_) => backup_invalid(&p),
+        }
+    }
+    Vec::new()
+}
+
+#[tauri::command]
+fn save_hosts(hosts: Vec<Host>) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(config_dir());
+    let txt = serde_json::to_string_pretty(&hosts).map_err(|e| e.to_string())?;
+    std::fs::write(hosts_path(), txt).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// Bereikbaarheid = kale TCP-connect naar de SSH-poort. Geen ICMP-ping: die
+// vraagt op Windows verhoogde rechten en zegt bovendien niets over sshd.
+const REACH_TIMEOUT_MS: u64 = 2000;
+
+#[derive(serde::Deserialize)]
+struct HostRef {
+    id: String,
+    hostname: String,
+    #[serde(default = "default_ssh_port")]
+    port: u16,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct HostStatus {
+    id: String,
+    reachable: bool,
+    // Hoe lang de check duurde; de UI kan er een trage host mee aanduiden.
+    ms: u64,
+}
+
+// Alle adressen van een naam TEGELIJK proberen, eerste succes wint.
+//
+// Serieel proberen lijkt logisch maar is fout: een machinenaam op een netwerk met
+// IPv6 levert er zo zeven op (link-local, ULA, globaal, plus het IPv4-adres), en
+// de niet-routeerbare adressen lopen elk in een timeout. Op volgorde is de hele
+// deadline dan op voordat het adres dat WEL werkt aan de beurt is, en meldt de
+// picker een bereikbare host als onbereikbaar. Zo gemeten op een echte host met
+// zeven adressen waarvan alleen de laatste antwoordde.
+//
+// Het aantal adressen is begrensd, zodat een pathologische DNS-uitkomst geen
+// tientallen threads oplevert.
+const MAX_PROBE_ADDRS: usize = 8;
+
+fn probe_tcp(hostname: &str, port: u16, timeout_ms: u64) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::sync::mpsc;
+
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let addrs: Vec<_> = match format!("{}:{}", hostname, port).to_socket_addrs() {
+        Ok(a) => a.take(MAX_PROBE_ADDRS).collect(),
+        Err(_) => return false, // onbekende naam telt als onbereikbaar
+    };
+    if addrs.is_empty() {
+        return false;
+    }
+
+    let (tx, rx) = mpsc::channel();
+    for addr in addrs {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            // Faalt de send, dan is de ontvanger al klaar (iemand anders was
+            // eerder of de deadline verliep) -- dat is geen fout.
+            let _ = tx.send(TcpStream::connect_timeout(&addr, timeout).is_ok());
+        });
+    }
+    drop(tx); // anders blokkeert recv tot in de eeuwigheid op onze eigen kopie
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(true) => return true,
+            Ok(false) => continue,       // dit adres niet, wacht op de rest
+            Err(_) => return false,      // alle adressen op, of tijd om
+        }
+    }
+}
+
+// Alle hosts tegelijk, want de host-picker checkt de hele lijst bij openen.
+// LET OP het `(async)`: een gewone synchrone #[tauri::command] draait bij Tauri
+// op de main thread, dus een blokkerende connect van 2s zou het venster laten
+// bevriezen. Met (async) gaat de aanroep naar de threadpool, en de threads
+// hieronder doen de hosts naast elkaar in plaats van na elkaar.
+#[tauri::command(async)]
+fn check_hosts(hosts: Vec<HostRef>) -> Vec<HostStatus> {
+    let handles: Vec<_> = hosts
+        .into_iter()
+        .map(|h| {
+            std::thread::spawn(move || {
+                let t0 = std::time::Instant::now();
+                let reachable = probe_tcp(&h.hostname, h.port, REACH_TIMEOUT_MS);
+                HostStatus {
+                    id: h.id,
+                    reachable,
+                    ms: t0.elapsed().as_millis() as u64,
+                }
+            })
+        })
+        .collect();
+    // Een gepanicte thread levert geen status op i.p.v. de hele lijst te slopen.
+    handles.into_iter().filter_map(|h| h.join().ok()).collect()
+}
+
+// Wat "Add & test" over een host te weten komt. Serialize-only, camelCase voor
+// de frontend -- net als SessionState/SttStatus.
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct HostProbe {
+    reachable: bool,
+    auth_ok: bool,
+    os: String,
+    // Beste multiplexer die op de host gevonden is; "none" als er geen is.
+    mux: String,
+    // Versieregel van de agent-CLI, leeg als hij ontbreekt.
+    claude: String,
+    // Uitgaand HTTPS naar api.anthropic.com. Zonder dit kan er geen agent
+    // draaien, hoe goed de rest ook werkt -- dus expliciet meten.
+    outbound: bool,
+    // Alleen voor Windows-hosts: heeft WSL zowel tmux als een agent-CLI? Dan is
+    // `via: wsl` de enige route naar echte sessiepersistentie op die machine.
+    wsl_usable: bool,
+    error: String,
+}
+
+// ssh-argumenten tot en met het doel, gedeeld door de launch en de probe.
+// `batch` hoort AAN bij een probe en UIT bij een launch: zonder BatchMode blijft
+// ssh op een wachtwoordprompt staan die niemand beantwoordt, en dan hangt "Add &
+// test" tot de timeout. Bij een echte sessie wil je die prompt juist wel -- daar
+// zit een pty en kun je een passphrase intypen.
+fn ssh_base_args(host: &Host, batch: bool) -> Result<Vec<String>, String> {
+    if host.hostname.trim().is_empty() {
+        return Err("host heeft geen hostname".into());
+    }
+    let mut a: Vec<String> = Vec::new();
+    if host.port != 22 {
+        a.push("-p".into());
+        a.push(host.port.to_string());
+    }
+    if let KeySource::Path(k) = resolve_key(host)? {
+        a.push("-i".into());
+        a.push(k);
+    }
+    a.push("-o".into());
+    a.push("StrictHostKeyChecking=accept-new".into());
+    a.push("-o".into());
+    a.push("ConnectTimeout=10".into());
+    if batch {
+        a.push("-o".into());
+        a.push("BatchMode=yes".into());
+    }
+    a.push(if host.user.trim().is_empty() {
+        host.hostname.trim().to_string()
+    } else {
+        format!("{}@{}", host.user.trim(), host.hostname.trim())
+    });
+    Ok(a)
+}
+
+// Eén ssh-aanroep; geeft (stdout, gelukt).
+fn ssh_run(host: &Host, remote_cmd: &str) -> Result<(String, bool), String> {
+    let mut args = ssh_base_args(host, true)?;
+    args.push(remote_cmd.to_string());
+    let out = std::process::Command::new(ssh_program())
+        .args(&args)
+        .stdin(std::process::Stdio::null()) // anders wacht de remote kant op invoer
+        .output()
+        .map_err(|e| format!("ssh starten mislukte: {}", e))?;
+    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
+    if s.trim().is_empty() {
+        s = String::from_utf8_lossy(&out.stderr).into_owned();
+    }
+    Ok((s, out.status.success()))
+}
+
+// Alles wat we van een host willen weten, in twee ssh-rondes: eerst het OS,
+// daarna een OS-specifieke inventarisatie. Duur genoeg (handshake) om los te
+// staan van de goedkope TCP-check van check_hosts.
+#[tauri::command(async)]
+fn probe_host(host: Host) -> HostProbe {
+    let mut p = HostProbe::default();
+    p.reachable = probe_tcp(host.hostname.trim(), host.port, REACH_TIMEOUT_MS);
+    if !p.reachable {
+        p.error = format!("Geen SSH-server bereikbaar op {}:{}", host.hostname.trim(), host.port);
+        return p;
+    }
+
+    // uname bestaat niet op Windows; dat het faalt is zelf het signaal.
+    match ssh_run(&host, "uname -sm") {
+        Err(e) => {
+            p.error = e;
+            return p;
+        }
+        Ok((out, ok)) if ok && out.to_lowercase().contains("linux") => {
+            p.auth_ok = true;
+            p.os = "linux".into();
+        }
+        Ok((out, _)) => {
+            // Auth-fouten herkennen we aan de ssh-melding; anders is het Windows.
+            let low = out.to_lowercase();
+            if low.contains("permission denied") || low.contains("publickey") {
+                p.error = "Key-auth geweigerd. Let op: voor een account in de Administrators-groep hoort de key in C:\\ProgramData\\ssh\\administrators_authorized_keys, niet in %USERPROFILE%\\.ssh\\authorized_keys.".into();
+                return p;
+            }
+            if low.contains("connection") && low.contains("refused") {
+                p.error = out.trim().to_string();
+                return p;
+            }
+            p.auth_ok = true;
+            p.os = "windows".into();
+        }
+    }
+
+    // Ronde 2: inventarisatie. Op Windows via base64 UTF-16LE, zodat cmd.exe geen
+    // enkel metateken te zien krijgt (dezelfde reden als bij de launch).
+    let (out, _) = if p.os == "linux" {
+        let script = "command -v tmux >/dev/null 2>&1 && echo MUX=tmux || echo MUX=none; \
+                      (claude --version 2>/dev/null || echo '') | head -1 | sed 's/^/CLAUDE=/'; \
+                      curl -sS -o /dev/null -w 'HTTP=%{http_code}' --max-time 10 https://api.anthropic.com/ 2>/dev/null || echo HTTP=000";
+        match ssh_run(&host, script) {
+            Ok(v) => v,
+            Err(e) => {
+                p.error = e;
+                return p;
+            }
+        }
+    } else {
+        let ps = r#"if (Get-Command psmux -EA 0) { 'MUX=psmux' } elseif (Test-Path "$env:USERPROFILE\.taurus\bin\taurus-agent.exe") { 'MUX=taurus-agent' } else { 'MUX=none' }
+$c = Get-Command claude -EA 0
+if ($c) { 'CLAUDE=' + (& claude --version 2>&1 | Select-Object -First 1) } else { 'CLAUDE=' }
+try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -TimeoutSec 10 -UseBasicParsing; 'HTTP=' + $r.StatusCode } catch { 'HTTP=' + [int]$_.Exception.Response.StatusCode }"#;
+        let enc = b64(&utf16le(ps));
+        match ssh_run(&host, &format!("powershell -NoProfile -EncodedCommand {}", enc)) {
+            Ok(v) => v,
+            Err(e) => {
+                p.error = e;
+                return p;
+            }
+        }
+    };
+
+    for line in out.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("MUX=") {
+            p.mux = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("CLAUDE=") {
+            p.claude = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("HTTP=") {
+            // Elke HTTP-status betekent dat er verbinding was; 000 is curl's
+            // "geen antwoord". 401/404 tellen dus als goed.
+            let code: u32 = v.trim().parse().unwrap_or(0);
+            p.outbound = code > 0;
+        }
+    }
+    if p.mux.is_empty() {
+        p.mux = "none".into();
+    }
+
+    // Windows zonder multiplexer: kijk of WSL er wel een heeft. Dat is de enige
+    // route naar heraanhaken op zo'n machine zonder iets te installeren. Losse
+    // ronde, want het script moet door cmd.exe EN door sh heen -- vandaar base64.
+    if p.os == "windows" {
+        let inner = "command -v tmux >/dev/null 2>&1 || exit 1; \
+                     { command -v claude >/dev/null 2>&1 || [ -x \"$HOME/.local/bin/claude\" ]; } || exit 1; \
+                     echo WSLOK";
+        let cmd = format!(
+            "wsl -e sh -c \"echo {} | base64 -d | sh\"",
+            b64(inner.as_bytes())
+        );
+        if let Ok((out, _)) = ssh_run(&host, &cmd) {
+            p.wsl_usable = out.contains("WSLOK");
+        }
+    }
+    p
+}
+
+// scp zit naast ssh in System32; zelfde voorkeur voor het systeempad, want een
+// Git-for-Windows scp gedraagt zich anders rond Windows-paden.
+fn scp_program() -> String {
+    if let Ok(root) = std::env::var("SystemRoot") {
+        let p = std::path::PathBuf::from(&root).join("System32\\OpenSSH\\scp.exe");
+        if p.is_file() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+    "scp.exe".into()
+}
+
+// Voeg een padcomponent toe met de scheidingstekens van de DOEL-machine, niet
+// die van ons. Een backslash in een Linux-pad is een gewoon teken, geen map.
+fn remote_join(os: &str, dir: &str, name: &str) -> String {
+    let d = dir.trim_end_matches(['/', '\\']);
+    if os == "windows" {
+        format!("{}\\{}", d, name)
+    } else {
+        format!("{}/{}", d, name)
+    }
+}
+
+// De DROPZONE op een remote sessie: kopieer het bestand naar <werkmap>/input op
+// de host en geef het pad DAAR terug, zodat de prompt een pad krijgt dat de
+// agent ook echt kan openen.
+#[tauri::command(async)]
+fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<String, String> {
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    if host.via == "wsl" {
+        // De scp-server draait op Windows en kan niet in het ext4 van WSL
+        // schrijven; dat zou via \\wsl.localhost\<distro>\... moeten en dat is
+        // een eigen puzzel. Liever een duidelijke melding dan een bestand dat
+        // ergens anders landt dan de agent verwacht.
+        return Err(
+            "Bestanden overzetten naar een agent in WSL kan nog niet. Zet het bestand met de hand neer, of gebruik een host zonder WSL-route.".into(),
+        );
+    }
+    let name = Path::new(&src)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("geen bestandsnaam in {}", src))?;
+    let remote_dir = remote_join(&host.os, remote_cwd.trim(), "input");
+
+    // De input-map hoeft nog niet te bestaan; scp maakt hem niet aan.
+    let mkdir = if host.os == "windows" {
+        let ps = format!(
+            "New-Item -ItemType Directory -Force -Path {} | Out-Null",
+            ps_quote(&remote_dir)
+        );
+        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
+    } else {
+        format!("mkdir -p {}", shell_quote_posix(&remote_dir))
+    };
+    let (out, ok) = ssh_run(&host, &mkdir)?;
+    if !ok {
+        return Err(format!("kon {} niet aanmaken op de host:\n{}", remote_dir, out.trim()));
+    }
+
+    // scp gebruikt -P voor de poort waar ssh -p gebruikt; met -p zou scp de
+    // tijdstempels willen behouden en zwijgend op de standaardpoort verbinden.
+    let mut args: Vec<String> = Vec::new();
+    if host.port != 22 {
+        args.push("-P".into());
+        args.push(host.port.to_string());
+    }
+    if let KeySource::Path(k) = resolve_key(&host)? {
+        args.push("-i".into());
+        args.push(k);
+    }
+    args.push("-o".into());
+    args.push("StrictHostKeyChecking=accept-new".into());
+    args.push("-o".into());
+    args.push("BatchMode=yes".into());
+    args.push(src.clone());
+    // NIET quoten achter de dubbele punt. Sinds OpenSSH 9 draait scp standaard
+    // over SFTP, en dan is het pad een letterlijke string in plaats van iets dat
+    // een remote shell nog parseert: quotes komen er dan als tekens aan en scp
+    // meldt `dest open "'C:/...'": No such file or directory`. Zonder quotes
+    // werkt een pad met spaties gewoon -- getest tegen een map "my input".
+    let target_dir = if host.os == "windows" {
+        // De Windows-kant wil forward slashes achter de dubbele punt.
+        remote_dir.replace('\\', "/")
+    } else {
+        remote_dir.clone()
+    };
+    let user_at = if host.user.trim().is_empty() {
+        host.hostname.trim().to_string()
+    } else {
+        format!("{}@{}", host.user.trim(), host.hostname.trim())
+    };
+    args.push(format!("{}:{}/", user_at, target_dir.trim_end_matches('/')));
+
+    let out = std::process::Command::new(scp_program())
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("scp starten mislukte: {}", e))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("scp mislukte: {}", err.trim()));
+    }
+    Ok(remote_join(&host.os, &remote_dir, &name))
+}
+
 // Map-kiezer (bladeren-knop in de project-editor).
 #[tauri::command]
 fn pick_folder(app: AppHandle) -> Option<String> {
@@ -133,6 +585,9 @@ fn pick_folder(app: AppHandle) -> Option<String> {
 #[tauri::command]
 fn pick_file(app: AppHandle, start_dir: String) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
+    // ~ expanderen: de sleutelkiezer vraagt om "~/.ssh", en zonder dit zou
+    // create_dir_all een relatieve map naast de exe aanmaken.
+    let start_dir = expand_home(&start_dir);
     let _ = std::fs::create_dir_all(&start_dir);
     let mut b = app.dialog().file();
     if Path::new(&start_dir).is_dir() {
@@ -189,6 +644,10 @@ struct PersistedSession {
     agent: String,
     #[serde(default)]
     model: String,
+    // Op welke host draaide deze sessie; leeg = lokaal. Bestaande sessions.json
+    // zonder dit veld blijven daardoor gewoon lokale sessies.
+    #[serde(default)]
+    host_id: String,
 }
 
 fn sessions_path() -> std::path::PathBuf {
@@ -625,6 +1084,24 @@ fn parse_override(command: &str) -> Result<(String, Vec<String>), String> {
 // wordt door de aanroeper afgehandeld; hier gaat het puur om claude/agy. De twee
 // CLIs verschillen sterk in vlaggen, dus we bouwen ze apart op i.p.v. Claude's
 // vlaggen voor beide aan te nemen.
+// Hoe heet de agent-binary OP EEN ANDERE MACHINE? Daar mag niets van dit
+// werkstation in meeliften: resolve_program levert een absoluut lokaal pad
+// (C:\Users\<mij>\.local\bin\claude.exe), en dat bestaat op de doelhost niet --
+// die heeft zijn eigen gebruiker en zijn eigen installatie. De host zoekt de
+// naam zelf op via zijn PATH. Op Windows expliciet met .exe, want de agent start
+// het programma via CreateProcess en die vult PATHEXT niet aan.
+fn remote_agent_program(agent: &str, os: &str) -> String {
+    let base = match agent {
+        "agy" => "agy",
+        _ => "claude",
+    };
+    if os == "windows" {
+        format!("{}.exe", base)
+    } else {
+        base.to_string()
+    }
+}
+
 fn build_command(
     agent: &str,
     kind: LaunchKind,
@@ -634,10 +1111,16 @@ fn build_command(
     mode: &str,
     model: &str,
     full_paths: bool,
+    // Some(os) = dit commando draait op een remote host, niet hier.
+    remote_os: Option<&str>,
 ) -> (String, Vec<String>) {
     // `a` start met de eventuele cmd.exe-shim-prefix ("/c <pad>", #40); de
-    // agent-vlaggen komen daarachter.
-    let (program, mut a) = resolve_program(agent);
+    // agent-vlaggen komen daarachter. Remote is er geen shim: daar bestaat het
+    // lokale pad niet en resolvet de host zelf.
+    let (program, mut a) = match remote_os {
+        Some(os) => (remote_agent_program(agent, os), Vec::new()),
+        None => resolve_program(agent),
+    };
     match agent {
         // agy (Antigravity/Gemini-agent): kent geen --session-id / -n /
         // --permission-mode / --append-system-prompt. Modus: auto -> alle tools
@@ -709,6 +1192,281 @@ fn build_command(
     (program, a)
 }
 
+// ---------- remote uitvoering (#98) ----------
+//
+// Een remote tab is een gewone tab waarin het programma toevallig ssh.exe heet:
+// start_pty spawnt elk programma in een ConPTY, dus de Session-struct, resize,
+// write, het Job Object en het (id, gen, base64)-eventcontract blijven precies
+// hetzelfde. wrap_remote wikkelt om de UITKOMST van parse_override/build_command
+// heen, niet ernaast -- daardoor werkt remote met beide agents en met een
+// commando-override, zonder een derde stille uitzondering (#93).
+
+// Waar de agent-binary op de host staat. Relatief aan de home-map, want dat is
+// de werkmap waarin sshd een commando start -- op Linux en Windows allebei. Dat
+// scheelt het expanderen van ~ of %USERPROFILE% in een vreemde shell.
+const AGENT_REL_UNIX: &str = ".taurus/bin/taurus-agent";
+const AGENT_REL_WIN: &str = ".taurus\\bin\\taurus-agent.exe";
+
+// Waar de private key vandaan komt. Vandaag alleen een pad of "laat ssh kiezen";
+// een vault-bron (bw serve) wordt hier later een derde variant, zodat die keuze
+// deze ene functie raakt en niet de hele launch-keten.
+#[derive(Debug, PartialEq)]
+enum KeySource {
+    Path(String),
+    // Geen -i meesturen: ssh valt terug op ~/.ssh/config en de agent.
+    SshConfig,
+}
+
+fn resolve_key(host: &Host) -> Result<KeySource, String> {
+    let raw = host.key_path.trim();
+    if raw.is_empty() {
+        return Ok(KeySource::SshConfig);
+    }
+    let expanded = expand_home(raw);
+    if !Path::new(&expanded).is_file() {
+        return Err(format!("SSH-key niet gevonden:\n{}", expanded));
+    }
+    Ok(KeySource::Path(expanded))
+}
+
+// ~ of ~/ aan het begin -> %USERPROFILE%. Het issue toont "~/.ssh/id_ed25519"
+// als voorbeeld, en dat moet op Windows gewoon werken.
+fn expand_home(p: &str) -> String {
+    if p == "~" || p.starts_with("~/") || p.starts_with("~\\") {
+        if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
+            return format!("{}{}", home, &p[1..]);
+        }
+    }
+    p.to_string()
+}
+
+// POSIX-shellquoting: alles tussen enkele quotes, en een enkele quote zelf wordt
+// afgesloten-geescaped-heropend. Nodig omdat ssh de payload als EEN string aan
+// de remote shell geeft, die hem opnieuw parseert -- een taak met een spatie of
+// een apostrof zou anders in losse argumenten uiteenvallen.
+fn shell_quote_posix(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+// PowerShell-quoting: alles tussen enkele quotes, en een enkele quote wordt
+// verdubbeld. Binnen '...' expandeert PowerShell niets, dus $ en ` zijn veilig.
+fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+// UTF-16LE, want dat verwacht powershell -EncodedCommand.
+fn utf16le(s: &str) -> Vec<u8> {
+    s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect()
+}
+
+// Kleine FNV-1a; genoeg om afgekapte paden uit elkaar te houden.
+fn fnv1a(s: &str) -> u32 {
+    let mut h: u32 = 0x811c9dc5;
+    for b in s.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    h
+}
+
+// Deterministische sessienaam per (host, project): dezelfde combinatie moet
+// dezelfde naam opleveren, anders haakt Taurus niet aan maar start hij een
+// tweede agent in dezelfde map. Alleen [a-z0-9-], want tmux gebruikt '.' en ':'
+// als scheidingstekens in target-namen. Het pad wordt afgekapt maar krijgt een
+// hash van het VOLLEDIGE pad mee, zodat twee lange paden met hetzelfde begin
+// niet stil op dezelfde sessie uitkomen.
+fn mux_session_name(host_id: &str, project_path: &str) -> String {
+    fn slug(s: &str, max: usize) -> String {
+        let mut out = String::new();
+        let mut last_dash = true; // voorkomt een leidend streepje
+        for c in s.chars() {
+            let c = c.to_ascii_lowercase();
+            if c.is_ascii_alphanumeric() {
+                out.push(c);
+                last_dash = false;
+            } else if !last_dash {
+                out.push('-');
+                last_dash = true;
+            }
+            if out.len() >= max {
+                break;
+            }
+        }
+        while out.ends_with('-') {
+            out.pop();
+        }
+        out
+    }
+    format!(
+        "taurus-{}-{}-{:08x}",
+        slug(host_id, 16),
+        slug(project_path, 24),
+        fnv1a(project_path)
+    )
+}
+
+// De opdracht voor de taurus-agent gaat als base64-JSON mee in plaats van als
+// shell-argumenten. Dat haalt de remote shell volledig uit de keten: base64 is
+// [A-Za-z0-9+/=] en overleeft zowel /bin/sh als cmd.exe zonder quoting. Zonder
+// dit zou een taak met een " of een & op een Windows-host de aanroep breken.
+fn agent_payload_b64(cwd: &str, program: &str, args: &[String]) -> String {
+    let json = serde_json::json!({ "cwd": cwd, "program": program, "args": args });
+    b64(json.to_string().as_bytes())
+}
+
+// De string die de remote shell te zien krijgt.
+fn build_remote_payload(
+    mux: &str,
+    os: &str,
+    session: &str,
+    cwd: &str,
+    program: &str,
+    args: &[String],
+) -> Result<String, String> {
+    build_remote_payload_via(mux, os, "", session, cwd, program, args)
+}
+
+// `via: wsl` bouwt de Linux-payload en zet die in WSL. De payload gaat als
+// base64 door cmd.exe: hij bevat quotes en pipes, en die zouden er onderweg
+// anders uit gehaald worden. Deze exacte vorm is tegen een echte host getest.
+fn build_remote_payload_via(
+    mux: &str,
+    os: &str,
+    via: &str,
+    session: &str,
+    cwd: &str,
+    program: &str,
+    args: &[String],
+) -> Result<String, String> {
+    if via == "wsl" {
+        let inner = build_remote_payload(mux, "linux", session, cwd, program, args)?;
+        // Het script gaat naar een BESTAND en wordt daarna met exec gestart, niet
+        // door een pipe (`... | sh`) gevoerd. Met een pipe krijgt die shell zijn
+        // stdin van de pipe in plaats van de terminal, en dan weigert tmux te
+        // starten met "open terminal failed: not a terminal". Na de pipeline erft
+        // exec de stdin van de buitenste sh, en dat is de pty van ssh -t.
+        return Ok(format!(
+            "wsl -e sh -c \"echo {} | base64 -d > /tmp/{}.sh && exec sh /tmp/{}.sh\"",
+            b64(inner.as_bytes()),
+            session,
+            session
+        ));
+    }
+    match mux {
+        // Eigen agent: geen shellquoting nodig, en hij bestaat op beide OS'en.
+        "taurus-agent" => {
+            let bin = if os == "windows" { AGENT_REL_WIN } else { AGENT_REL_UNIX };
+            Ok(format!(
+                "{} run -s {} --b64 {}",
+                bin,
+                session,
+                agent_payload_b64(cwd, program, args)
+            ))
+        }
+        // tmux (en psmux, dat dezelfde commandotaal spreekt). -A = aanhaken als
+        // de sessie bestaat, anders aanmaken; -c geldt alleen bij aanmaken, dus
+        // heraanhaken laat de bestaande werkmap met rust.
+        "tmux" | "psmux" => {
+            if os == "windows" && mux == "tmux" {
+                return Err("tmux bestaat niet op Windows; kies taurus-agent of psmux".into());
+            }
+            let mut s = format!(
+                "{} new-session -A -s {} -c {} --",
+                mux,
+                shell_quote_posix(session),
+                shell_quote_posix(cwd)
+            );
+            s.push(' ');
+            s.push_str(&shell_quote_posix(program));
+            for a in args {
+                s.push(' ');
+                s.push_str(&shell_quote_posix(a));
+            }
+            Ok(s)
+        }
+        // Geen multiplexer: kaal starten. Er is dan geen scrollback en geen
+        // heraanhaken; of de sessie een verbindingsbreuk overleeft hangt van de
+        // host af. Gemeten: Windows' sshd kapt de procesboom NIET af, dus daar
+        // loopt de agent door; op Linux sterft hij zonder tmux wel, en is het
+        // transcript (claude --resume) de enige persistentie.
+        "" | "none" => {
+            if os == "windows" {
+                // De remote shell is cmd.exe, en een taak met " of & zou de
+                // aanroep slopen. -EncodedCommand neemt base64 UTF-16LE, dus
+                // [A-Za-z0-9+/=]: cmd.exe ziet geen enkel metateken meer.
+                let mut script = format!("Set-Location {}; & {}", ps_quote(cwd), ps_quote(program));
+                for a in args {
+                    script.push(' ');
+                    script.push_str(&ps_quote(a));
+                }
+                return Ok(format!(
+                    "powershell -NoProfile -EncodedCommand {}",
+                    b64(&utf16le(&script))
+                ));
+            }
+            let mut s = format!("cd {} && exec {}", shell_quote_posix(cwd), shell_quote_posix(program));
+            for a in args {
+                s.push(' ');
+                s.push_str(&shell_quote_posix(a));
+            }
+            Ok(s)
+        }
+        other => Err(format!("onbekende multiplexer: {}", other)),
+    }
+}
+
+// ssh.exe uit System32 heeft de voorkeur boven wat er toevallig in PATH staat:
+// een Git-for-Windows of WSL-ssh in PATH gedraagt zich anders rond paden en pty.
+fn ssh_program() -> String {
+    if let Ok(root) = std::env::var("SystemRoot") {
+        let p = std::path::PathBuf::from(&root).join("System32\\OpenSSH\\ssh.exe");
+        if p.is_file() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+    "ssh.exe".into()
+}
+
+// (programma, argumenten) voor een remote sessie.
+fn wrap_remote(
+    host: &Host,
+    cwd: &str,
+    program: String,
+    args: Vec<String>,
+) -> Result<(String, Vec<String>), String> {
+    if host.hostname.trim().is_empty() {
+        return Err("host heeft geen hostname".into());
+    }
+    let session = mux_session_name(&host.id, cwd);
+    let payload = build_remote_payload_via(
+        &host.mux,
+        effective_os(host),
+        &host.via,
+        &session,
+        cwd,
+        &program,
+        &args,
+    )?;
+
+    // -t forceert een pty aan de andere kant; zonder pty tekent de agent-TUI niet.
+    let mut a = vec!["-t".to_string()];
+    // batch=false: bij een echte sessie MOET een passphrase- of wachtwoordprompt
+    // zichtbaar zijn, want er is een pty om hem in te typen. Alleen de probe
+    // draait met BatchMode.
+    a.extend(ssh_base_args(host, false)?);
+    a.push(payload);
+    Ok((ssh_program(), a))
+}
+
+// De lokale werkmap van ssh.exe doet er niet toe -- de echte werkmap zit in de
+// payload. start_pty eist wel een bestaande map, dus we geven de home van het
+// werkstation; die bestaat altijd.
+fn local_cwd_for_remote() -> String {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".into())
+}
+
 // Start een nieuwe agent-sessie. session_id is een vooraf bepaalde UUID, zodat we
 // later kunnen herstarten met `claude --resume <uuid>`.
 #[tauri::command]
@@ -726,9 +1484,13 @@ fn create_session(
     command: String,
     agent: String,
     model: String,
+    host_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    // De host moet BEKEND zijn voordat het commando gebouwd wordt: remote levert
+    // een andere programmanaam op dan lokaal.
+    let host = lookup_host(&host_id)?;
     let (program, args) = if !command.trim().is_empty() {
         // Commando-override (bijv. nep-Claude voor de demo): voer dit programma
         // uit i.p.v. de agent, zonder agent-vlaggen.
@@ -743,9 +1505,52 @@ fn create_session(
             &mode,
             &model,
             full_paths,
+            host.as_ref().map(|h| effective_os(h)),
         )
     };
-    start_pty(&app, &state.sessions, id, gen, program, &path, args, cols, rows)
+    let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
+    start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)
+}
+
+// Leeg host_id = lokaal. Een onbekend id is een fout en geen stille terugval op
+// lokaal: dan zou een remote tab ongemerkt op het werkstation starten.
+fn lookup_host(host_id: &str) -> Result<Option<Host>, String> {
+    if host_id.trim().is_empty() {
+        return Ok(None);
+    }
+    get_hosts()
+        .into_iter()
+        .find(|h| h.id == host_id)
+        .map(Some)
+        .ok_or_else(|| format!("onbekende host: {}", host_id))
+}
+
+// Lokaal blijft alles zoals het was; remote wikkelt ssh eromheen en verschuift
+// de werkmap: `path` is dan de map OP DE HOST, en de lokale werkmap van ssh.exe
+// is de home van het werkstation (start_pty eist een bestaande lokale map).
+fn apply_host(
+    host: Option<&Host>,
+    path: &str,
+    program: String,
+    args: Vec<String>,
+) -> Result<(String, Vec<String>, String), String> {
+    let host = match host {
+        None => return Ok((program, args, path.to_string())),
+        Some(h) => h,
+    };
+    let remote_cwd = if path.trim().is_empty() {
+        host.default_project.trim().to_string()
+    } else {
+        path.trim().to_string()
+    };
+    if remote_cwd.is_empty() {
+        return Err(format!(
+            "Geen werkmap voor host '{}'. Vul een projectpad in, of een standaard-projectpad bij de host.",
+            host.nickname
+        ));
+    }
+    let (program, args) = wrap_remote(host, &remote_cwd, program, args)?;
+    Ok((program, args, local_cwd_for_remote()))
 }
 
 // Herstart een sessie: stop het huidige claude-proces en hervat hetzelfde gesprek
@@ -764,6 +1569,7 @@ fn restart_session(
     command: String,
     agent: String,
     model: String,
+    host_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -772,6 +1578,7 @@ fn restart_session(
             let _ = s.child.kill();
         }
     }
+    let host = lookup_host(&host_id)?;
     let (program, args) = if !command.trim().is_empty() {
         parse_override(&command)?
     } else {
@@ -784,9 +1591,15 @@ fn restart_session(
             &mode,
             &model,
             full_paths,
+            host.as_ref().map(|h| effective_os(h)),
         )
     };
-    start_pty(&app, &state.sessions, id, gen, program, &path, args, cols, rows)
+    // Remote herstart: het kappen hierboven doodt alleen de lokale ssh.exe. Draait
+    // er een multiplexer op de host, dan leeft de agent daar gewoon door en haakt
+    // `new-session -A` er weer aan -- dan is dit een heraanhaak-actie in plaats van
+    // een herstart. Bestaat de sessie niet meer, dan start hij vers met --resume.
+    let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
+    start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)
 }
 
 #[tauri::command]
@@ -2013,6 +2826,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_projects,
             save_projects,
+            get_hosts,
+            save_hosts,
+            check_hosts,
+            probe_host,
+            scp_to_host,
             pick_folder,
             pick_file,
             path_exists,
@@ -2051,6 +2869,461 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_host() -> Host {
+        Host {
+            id: "h1".into(),
+            nickname: "Support".into(),
+            hostname: "support01".into(),
+            user: "arjen".into(),
+            port: 22,
+            key_path: String::new(),
+            default_project: String::new(),
+            os: "linux".into(),
+            mux: "tmux".into(),
+            agent_version: String::new(),
+            via: String::new(),
+        }
+    }
+
+    #[test]
+    fn via_wsl_builds_a_linux_payload_and_wraps_it_for_cmd() {
+        let mut h = test_host();
+        h.os = "windows".into();
+        h.via = "wsl".into();
+        h.mux = "tmux".into();
+        assert_eq!(effective_os(&h), "linux", "binnen WSL is alles Linux");
+
+        let (_, args) = wrap_remote(&h, "/home/arjen/proj", "claude".into(), vec!["-n".into()]).unwrap();
+        let payload = args.last().unwrap();
+        assert!(payload.starts_with("wsl -e sh -c \""));
+        // Alles tussen de dubbele quotes moet shell-neutraal zijn: de echte
+        // payload zit als base64 verpakt, want hij bevat zelf quotes en pipes
+        // die cmd.exe er anders uit haalt.
+        assert!(
+            payload.contains("> /tmp/") && payload.contains("&& exec sh /tmp/"),
+            "moet via een bestand starten, niet via een pipe -- anders heeft tmux geen tty: {}",
+            payload
+        );
+        let inner = payload
+            .trim_start_matches("wsl -e sh -c \"echo ")
+            .split(' ')
+            .next()
+            .unwrap();
+        assert!(
+            inner.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='),
+            "payload is niet zuiver base64: {}",
+            inner
+        );
+        // En het is de tmux-vorm, niet de PowerShell-vorm van een Windows-host.
+        let expected = b64(
+            build_remote_payload("tmux", "linux", &mux_session_name(&h.id, "/home/arjen/proj"),
+                                 "/home/arjen/proj", "claude", &["-n".to_string()])
+                .unwrap()
+                .as_bytes(),
+        );
+        assert_eq!(inner, expected);
+    }
+
+    #[test]
+    fn via_wsl_uses_the_unix_agent_name() {
+        // Zonder dit zou "claude.exe" in WSL gezocht worden.
+        let mut h = test_host();
+        h.os = "windows".into();
+        h.via = "wsl".into();
+        assert_eq!(remote_agent_program("claude", effective_os(&h)), "claude");
+    }
+
+    #[test]
+    fn remote_join_uses_the_targets_separator_not_ours() {
+        // Een backslash in een Linux-pad is een gewoon teken, geen map -- dus de
+        // scheiding moet van de DOEL-machine komen, niet van dit werkstation.
+        assert_eq!(remote_join("windows", r"C:\proj", "input"), r"C:\proj\input");
+        assert_eq!(remote_join("linux", "/home/a/proj", "input"), "/home/a/proj/input");
+        // Een al aanwezige scheiding aan het eind mag niet verdubbelen.
+        assert_eq!(remote_join("windows", r"C:\proj\", "input"), r"C:\proj\input");
+        assert_eq!(remote_join("linux", "/home/a/proj/", "input"), "/home/a/proj/input");
+    }
+
+    #[test]
+    fn shell_quote_posix_survives_spaces_quotes_and_expansion() {
+        assert_eq!(shell_quote_posix("plain"), "'plain'");
+        assert_eq!(shell_quote_posix("with space"), "'with space'");
+        assert_eq!(shell_quote_posix(""), "''");
+        // $ en ` mogen NIET expanderen aan de andere kant.
+        assert_eq!(shell_quote_posix("$HOME `id`"), "'$HOME `id`'");
+        // De enkele quote zelf: sluiten, geescapet toevoegen, heropenen.
+        assert_eq!(shell_quote_posix("it's"), r"'it'\''s'");
+        // Een taak die de shell zou kunnen slopen blijft een enkel argument.
+        assert_eq!(
+            shell_quote_posix("fix; rm -rf / && echo hi"),
+            "'fix; rm -rf / && echo hi'"
+        );
+    }
+
+    #[test]
+    fn mux_session_name_is_deterministic_and_tmux_safe() {
+        let a = mux_session_name("h1", "/home/arjen/proj");
+        assert_eq!(a, mux_session_name("h1", "/home/arjen/proj"), "moet stabiel zijn");
+        assert!(a.starts_with("taurus-h1-"));
+        // tmux gebruikt '.' en ':' als scheidingstekens in target-namen.
+        assert!(
+            a.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "onverwacht teken in {}",
+            a
+        );
+        // Andere host of ander project -> andere sessie.
+        assert_ne!(a, mux_session_name("h2", "/home/arjen/proj"));
+        assert_ne!(a, mux_session_name("h1", "/home/arjen/other"));
+    }
+
+    #[test]
+    fn mux_session_name_separates_long_paths_that_share_a_prefix() {
+        // Precies het geval waarvoor de hash er zit: na afkappen zijn deze twee
+        // identiek, en zonder hash zou Taurus aan de verkeerde sessie aanhaken.
+        let a = mux_session_name("h1", "/home/arjen/werk/klant-alpha/heel/diep/project-een");
+        let b = mux_session_name("h1", "/home/arjen/werk/klant-alpha/heel/diep/project-twee");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn build_remote_payload_wraps_tmux_with_attach_or_create() {
+        let args = vec!["-n".to_string(), "my session".to_string()];
+        let s = build_remote_payload("tmux", "linux", "taurus-h1-p-0", "/home/a/p", "claude", &args)
+            .unwrap();
+        assert_eq!(
+            s,
+            "tmux new-session -A -s 'taurus-h1-p-0' -c '/home/a/p' -- 'claude' '-n' 'my session'"
+        );
+    }
+
+    #[test]
+    fn build_remote_payload_uses_base64_for_the_taurus_agent() {
+        let args = vec!["-n".to_string(), r#"a "quoted" & risky task"#.to_string()];
+        let s = build_remote_payload("taurus-agent", "windows", "sess1", r"C:\p", "claude", &args)
+            .unwrap();
+        let expected_b64 = b64(
+            serde_json::json!({ "cwd": r"C:\p", "program": "claude", "args": args })
+                .to_string()
+                .as_bytes(),
+        );
+        assert_eq!(
+            s,
+            format!(".taurus\\bin\\taurus-agent.exe run -s sess1 --b64 {}", expected_b64)
+        );
+        // Het hele commando moet shell-neutraal zijn: geen teken waar cmd.exe of
+        // /bin/sh iets mee doet. Dat is de reden dat de payload base64 is.
+        assert!(
+            !s.contains('"') && !s.contains('&') && !s.contains('<') && !s.contains('>'),
+            "payload mag geen shell-metatekens bevatten: {}",
+            s
+        );
+    }
+
+    #[test]
+    fn build_remote_payload_refuses_combinations_that_cannot_work() {
+        // tmux bestaat niet op Windows.
+        assert!(build_remote_payload("tmux", "windows", "s", "C:\\p", "claude", &[]).is_err());
+        assert!(build_remote_payload("zellij", "linux", "s", "/p", "claude", &[]).is_err());
+        // Zonder multiplexer op Linux: kaal, met exec.
+        let s = build_remote_payload("none", "linux", "s", "/p", "claude", &[]).unwrap();
+        assert_eq!(s, "cd '/p' && exec 'claude'");
+    }
+
+    #[test]
+    fn build_remote_payload_encodes_a_bare_windows_launch_for_powershell() {
+        // De remote shell is cmd.exe. Een taak met aanhalingstekens, een & en
+        // een apostrof is precies wat een naief samengesteld commando sloopt.
+        let args = vec![
+            "-n".to_string(),
+            r#"fix "the" thing & report it; it's urgent"#.to_string(),
+        ];
+        let s = build_remote_payload("none", "windows", "s", r"C:\proj", "claude", &args).unwrap();
+        assert!(s.starts_with("powershell -NoProfile -EncodedCommand "));
+        let enc = s.rsplit(' ').next().unwrap();
+        // Alleen base64-tekens: cmd.exe ziet geen enkel metateken.
+        assert!(
+            enc.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='),
+            "niet-base64 teken in payload: {}",
+            enc
+        );
+        // En het decodeert naar het bedoelde PowerShell-script.
+        let expected = b64(&utf16le(
+            "Set-Location 'C:\\proj'; & 'claude' '-n' 'fix \"the\" thing & report it; it''s urgent'",
+        ));
+        assert_eq!(enc, expected);
+    }
+
+    #[test]
+    fn ps_quote_doubles_the_single_quote_and_blocks_expansion() {
+        assert_eq!(ps_quote("plain"), "'plain'");
+        assert_eq!(ps_quote("it's"), "'it''s'");
+        // Binnen '...' expandeert PowerShell niets.
+        assert_eq!(ps_quote("$env:PATH `id`"), "'$env:PATH `id`'");
+        assert_eq!(ps_quote(""), "''");
+    }
+
+    #[test]
+    fn utf16le_is_what_encodedcommand_expects() {
+        // "Hi" -> 48 00 69 00
+        assert_eq!(utf16le("Hi"), vec![0x48, 0x00, 0x69, 0x00]);
+        assert_eq!(utf16le(""), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn wrap_remote_builds_the_ssh_argument_list() {
+        let (prog, args) = wrap_remote(&test_host(), "/home/a/p", "claude".into(), vec![]).unwrap();
+        assert!(prog.to_lowercase().ends_with("ssh.exe"), "onverwacht programma: {}", prog);
+        assert_eq!(args[0], "-t", "zonder pty tekent de agent-TUI niet");
+        // Standaardpoort hoort niet als -p mee.
+        assert!(!args.contains(&"-p".to_string()));
+        // Geen key_path -> geen -i, ssh mag zelf kiezen.
+        assert!(!args.contains(&"-i".to_string()));
+        // Een GEWIJZIGDE hostkey moet geweigerd worden, niet stil geaccepteerd.
+        assert!(args.contains(&"StrictHostKeyChecking=accept-new".to_string()));
+        assert!(!args.iter().any(|a| a.contains("StrictHostKeyChecking=no")));
+        // Doel en payload staan achteraan, in die volgorde.
+        assert_eq!(args[args.len() - 2], "arjen@support01");
+        assert!(args[args.len() - 1].starts_with("tmux new-session -A -s "));
+    }
+
+    #[test]
+    fn wrap_remote_adds_the_port_only_when_it_is_not_the_default() {
+        let mut h = test_host();
+        h.port = 2222;
+        let (_, args) = wrap_remote(&h, "/p", "claude".into(), vec![]).unwrap();
+        let i = args.iter().position(|a| a == "-p").expect("-p verwacht");
+        assert_eq!(args[i + 1], "2222");
+    }
+
+    #[test]
+    fn wrap_remote_omits_the_user_when_the_host_has_none() {
+        let mut h = test_host();
+        h.user = String::new();
+        let (_, args) = wrap_remote(&h, "/p", "claude".into(), vec![]).unwrap();
+        assert_eq!(args[args.len() - 2], "support01");
+    }
+
+    #[test]
+    fn wrap_remote_refuses_a_host_without_a_hostname() {
+        let mut h = test_host();
+        h.hostname = "  ".into();
+        assert!(wrap_remote(&h, "/p", "claude".into(), vec![]).is_err());
+    }
+
+    #[test]
+    fn resolve_key_falls_back_to_ssh_config_and_rejects_a_missing_file() {
+        let mut h = test_host();
+        assert_eq!(resolve_key(&h).unwrap(), KeySource::SshConfig);
+        h.key_path = "   ".into();
+        assert_eq!(resolve_key(&h).unwrap(), KeySource::SshConfig);
+        // Een pad dat niet bestaat moet nu al falen, niet pas als ssh start --
+        // anders is de foutmelding een cryptische ssh-exit in de terminal.
+        h.key_path = r"C:\taurus-test\does-not-exist\id_ed25519".into();
+        assert!(resolve_key(&h).is_err());
+
+        // En een key die er wel is, komt als pad terug.
+        let dir = std::env::temp_dir().join(format!("taurus-test-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = dir.join("id_ed25519");
+        std::fs::write(&key, b"not a real key").unwrap();
+        h.key_path = key.to_string_lossy().into_owned();
+        assert_eq!(resolve_key(&h).unwrap(), KeySource::Path(key.to_string_lossy().into_owned()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn expand_home_only_touches_a_leading_tilde() {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        if !home.is_empty() {
+            assert_eq!(expand_home("~/.ssh/id_ed25519"), format!("{}/.ssh/id_ed25519", home));
+            assert_eq!(expand_home(r"~\.ssh\id_ed25519"), format!(r"{}\.ssh\id_ed25519", home));
+        }
+        // Geen tilde, of een tilde midden in het pad: onaangeroerd.
+        assert_eq!(expand_home("/abs/path"), "/abs/path");
+        assert_eq!(expand_home(r"C:\keys\a~b"), r"C:\keys\a~b");
+    }
+
+    #[test]
+    fn apply_host_leaves_a_local_launch_untouched() {
+        let (p, a, cwd) =
+            apply_host(None, r"C:\proj", "claude".into(), vec!["-n".into()]).unwrap();
+        assert_eq!(p, "claude");
+        assert_eq!(a, vec!["-n".to_string()]);
+        assert_eq!(cwd, r"C:\proj", "lokale werkmap mag niet verschuiven");
+    }
+
+    #[test]
+    fn lookup_host_reports_an_unknown_id_instead_of_falling_back_to_local() {
+        assert!(lookup_host("").unwrap().is_none(), "leeg id = lokaal");
+        // Stil terugvallen op lokaal zou een remote tab ongemerkt op het
+        // werkstation starten -- met de agent-rechten van dit werkstation.
+        let e = lookup_host("nope-does-not-exist").unwrap_err();
+        assert!(e.contains("onbekende host"), "onverwachte fout: {}", e);
+    }
+
+    #[test]
+    fn remote_launches_never_carry_a_local_path() {
+        // Gevonden tegen een echte host: build_command resolveert het programma
+        // via het PATH van DIT werkstation, dus er ging
+        // C:\Users\<mij>\.local\bin\claude.exe naar een machine met een andere
+        // gebruiker en een andere installatie. Remote hoort de kale naam te zijn.
+        for (os, expect) in [("windows", "claude.exe"), ("linux", "claude")] {
+            let (program, _) = build_command(
+                "claude",
+                LaunchKind::Create,
+                "sid",
+                "t",
+                "",
+                "default",
+                "",
+                false,
+                Some(os),
+            );
+            assert_eq!(program, expect);
+            assert!(!program.contains('\\') && !program.contains('/'), "geen pad: {}", program);
+        }
+        assert_eq!(remote_agent_program("agy", "linux"), "agy");
+        assert_eq!(remote_agent_program("agy", "windows"), "agy.exe");
+    }
+
+    #[test]
+    fn probe_tcp_sees_an_open_port_and_misses_a_closed_one() {
+        use std::net::TcpListener;
+        // Poort 0 = het OS kiest een vrije poort; geen vaste poort die op een
+        // andere machine (of een parallelle testrun) al bezet kan zijn.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        assert!(probe_tcp("127.0.0.1", port, 1000), "open poort moet bereikbaar zijn");
+        drop(listener);
+        // Dicht: de kernel weigert meteen, dus een korte timeout volstaat.
+        assert!(!probe_tcp("127.0.0.1", port, 300), "gesloten poort mag niet bereikbaar heten");
+    }
+
+    #[test]
+    fn probe_tcp_treats_an_unresolvable_name_as_unreachable() {
+        // .invalid is gereserveerd (RFC 2606) en resolvet nooit.
+        assert!(!probe_tcp("taurus-nonexistent.invalid", 22, 300));
+    }
+
+    #[test]
+    fn probe_tcp_finds_the_working_address_of_a_multi_address_name() {
+        use std::net::TcpListener;
+        // "localhost" levert doorgaans zowel ::1 als 127.0.0.1 op. We luisteren
+        // op precies EEN daarvan, dus dit slaagt alleen als alle adressen aan
+        // bod komen. Serieel proberen met een gedeelde deadline liet een naam
+        // met meerdere adressen ten onrechte als onbereikbaar gelden.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        assert!(
+            probe_tcp("localhost", port, 2000),
+            "moet het werkende adres vinden, ook als een ander adres eerst komt"
+        );
+    }
+
+    // Print de ssh-aanroep die Taurus voor een echte host zou doen, zodat je hem
+    // los kunt uitvoeren en de keten kunt narekenen zonder de app te starten:
+    //   set TAURUS_TEST_HOST=192.168.2.9
+    //   set TAURUS_TEST_USER=arjen
+    //   set TAURUS_TEST_CWD=C:\pad\op\de\host
+    //   cargo test print_the_real_ssh_invocation -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn print_the_real_ssh_invocation() {
+        let host = Host {
+            id: "ursu".into(),
+            nickname: "ursu".into(),
+            hostname: std::env::var("TAURUS_TEST_HOST").expect("TAURUS_TEST_HOST"),
+            user: std::env::var("TAURUS_TEST_USER").unwrap_or_default(),
+            port: 22,
+            key_path: std::env::var("TAURUS_TEST_KEY").unwrap_or_default(),
+            default_project: String::new(),
+            os: std::env::var("TAURUS_TEST_OS").unwrap_or_else(|_| "windows".into()),
+            mux: std::env::var("TAURUS_TEST_MUX").unwrap_or_else(|_| "none".into()),
+            agent_version: String::new(),
+            via: String::new(),
+        };
+        let cwd = std::env::var("TAURUS_TEST_CWD").unwrap_or_else(|_| r"C:\Users\arjen".into());
+        // Exact het pad dat create_session loopt: agent-vlaggen eerst, dan de
+        // remote wikkel eromheen.
+        let (program, args) = build_command(
+            "claude",
+            LaunchKind::Create,
+            "11111111-2222-3333-4444-555555555555",
+            "remote test",
+            "",
+            "default",
+            "",
+            false,
+            Some(host.os.as_str()),
+        );
+        let (prog, a) = wrap_remote(&host, &cwd, program, args).expect("wrap_remote");
+        println!("PROGRAM: {}", prog);
+        for (i, x) in a.iter().enumerate() {
+            println!("ARG[{}]: {}", i, x);
+        }
+    }
+
+    // Meet tegen een echte host uit het eigen netwerk. Draaien met:
+    //   set TAURUS_TEST_HOST=192.168.2.9 && cargo test -- --ignored
+    // Geen adressen in de code: dit is een publieke repo.
+    #[test]
+    #[ignore]
+    fn probe_tcp_reaches_a_real_host_from_the_environment() {
+        let host = std::env::var("TAURUS_TEST_HOST")
+            .expect("zet TAURUS_TEST_HOST=<hostname of ip>");
+        let port: u16 = std::env::var("TAURUS_TEST_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(22);
+        let t0 = std::time::Instant::now();
+        let ok = probe_tcp(&host, port, REACH_TIMEOUT_MS);
+        println!("{}:{} bereikbaar={} in {:?}", host, port, ok, t0.elapsed());
+        assert!(ok, "{}:{} niet bereikbaar binnen {}ms", host, port, REACH_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn host_json_fills_in_the_default_port_and_optional_fields() {
+        // Een met de hand geschreven hosts.json hoeft alleen het minimum te
+        // bevatten; alles wat de probe invult heeft een default.
+        let h: Host = serde_json::from_str(
+            r#"{"id":"h1","nickname":"Home PC","hostname":"192.168.1.42"}"#,
+        )
+        .expect("minimale host moet parsen");
+        assert_eq!(h.port, 22);
+        assert_eq!(h.user, "");
+        assert_eq!(h.key_path, "");
+        assert_eq!(h.os, "");
+        assert_eq!(h.mux, "");
+        assert_eq!(h.agent_version, "");
+    }
+
+    #[test]
+    fn host_round_trips_through_json() {
+        // save_hosts/get_hosts gebruiken dezelfde struct, dus een opgeslagen
+        // host moet ongewijzigd terugkomen -- inclusief een niet-default poort.
+        let src = Host {
+            id: "h2".into(),
+            nickname: "Work".into(),
+            hostname: "work.tail.net".into(),
+            user: "arjen".into(),
+            port: 2222,
+            key_path: r"C:\Users\AST\.ssh\id_ed25519".into(),
+            default_project: "/home/arjen/proj".into(),
+            os: "linux".into(),
+            mux: "tmux".into(),
+            agent_version: String::new(),
+            via: String::new(),
+        };
+        let txt = serde_json::to_string(&src).unwrap();
+        let back: Host = serde_json::from_str(&txt).unwrap();
+        assert_eq!(back.port, 2222);
+        assert_eq!(back.hostname, "work.tail.net");
+        assert_eq!(back.mux, "tmux");
+        assert_eq!(back.key_path, r"C:\Users\AST\.ssh\id_ed25519");
+    }
 
     #[test]
     fn b64_matches_rfc4648_vectors() {
@@ -2105,14 +3378,14 @@ mod tests {
 
     #[test]
     fn build_command_claude_create_and_resume() {
-        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true);
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true, None);
         assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
         assert!(a.windows(2).any(|w| w == ["--permission-mode", "plan"]));
         assert!(a.windows(2).any(|w| w == ["--model", "opus"]));
         assert!(a.contains(&"--append-system-prompt".to_string()));
         assert_eq!(a.last().unwrap(), "do it");
 
-        let (_, r) = build_command("claude", LaunchKind::Resume, "u1", "t", "do it", "default", "", false);
+        let (_, r) = build_command("claude", LaunchKind::Resume, "u1", "t", "do it", "default", "", false, None);
         assert_eq!(r[0..2], ["--resume".to_string(), "u1".to_string()]);
         // Bij resume geen taak meesturen en geen --permission-mode "default".
         assert!(!r.contains(&"do it".to_string()));
@@ -2121,7 +3394,7 @@ mod tests {
 
     #[test]
     fn build_command_agy_resume_continues_without_task() {
-        let (_, a) = build_command("agy", LaunchKind::Resume, "u1", "t", "task", "auto", "", true);
+        let (_, a) = build_command("agy", LaunchKind::Resume, "u1", "t", "task", "auto", "", true, None);
         assert!(a.contains(&"--continue".to_string()));
         assert!(a.contains(&"--dangerously-skip-permissions".to_string()));
         // agy kent geen prompt bij --continue en geen full-paths-equivalent.

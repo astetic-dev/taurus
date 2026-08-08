@@ -27,6 +27,30 @@ const I18N = {
     model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exact model-ID mag ook.",
     model_fable: "nieuwste Fable", model_opus: "nieuwste Opus", model_sonnet: "nieuwste Sonnet",
     model_haiku: "nieuwste Haiku", model_opusplan: "Opus in plan-modus, daarna Sonnet",
+    launch_host: "Draait op", host_local: "Deze computer",
+    remote_workdir: "Werkmap op de host", remote_workdir_ph: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
+    remote_hint: "De agent draait op die machine; deze werkmap geldt daar.",
+    remote_need_path: "Vul een werkmap op de host in.",
+    remote_local_only: "Werkt alleen bij een sessie op deze computer",
+    hosts_title: "Machines", host_manage: "Machines beheren…", host_add: "＋ Machine toevoegen…",
+    host_nickname: "Naam", host_nickname_ph: "bijv. support01",
+    host_hostname: "Hostnaam of IP", host_port: "Poort", host_user: "Gebruikersnaam",
+    host_key: "SSH-key (leeg = ssh kiest zelf)", host_default_project: "Standaard werkmap op de host",
+    host_add_test: "Toevoegen & testen", host_testing: "Verbinden…", host_retest: "Opnieuw testen",
+    host_del: "Verwijderen", close: "Sluiten",
+    host_need_fields: "Naam, hostnaam en gebruikersnaam zijn verplicht.",
+    host_none: "Nog geen machines. Voeg er een toe om een agent elders te draaien.",
+    host_ok: "Verbinding gelukt", host_reachable: "bereikbaar", host_unreachable: "onbereikbaar",
+    host_no_claude: "⚠ Geen agent-CLI gevonden op deze machine — een sessie zal niet starten.",
+    host_no_outbound: "⚠ Geen uitgaand HTTPS naar api.anthropic.com — een agent kan hier niet werken.",
+    host_no_mux: "ℹ Geen tmux/psmux: een sessie is niet opnieuw aan te haken.",
+    host_via: "Waar draait de agent", host_via_direct: "Rechtstreeks op de machine",
+    host_via_wsl: "In WSL (Windows-host, geeft tmux-persistentie)",
+    host_wsl_tip: "💡 WSL op deze machine heeft tmux én een agent-CLI. Kies \"In WSL\" voor sessies die een verbroken verbinding overleven — de agent werkt dan wel in Linux, met Windows-schijven onder /mnt/c.",
+    dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
+    dropper_sending: "Bestand overzetten naar de host…",
+    dropper_sent: "Op de host gezet",
+    dropper_paste_local_only: "Plakken uit het klembord werkt alleen bij een sessie op deze computer.",
     launch_command: "Commando-override", command_ph: "leeg = start de gekozen agent",
     command_hint: "Draait dit programma zoals het er staat, in plaats van de agent.",
     command_warn: "⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.",
@@ -122,6 +146,30 @@ const I18N = {
     model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact model ID works too.",
     model_fable: "newest Fable", model_opus: "newest Opus", model_sonnet: "newest Sonnet",
     model_haiku: "newest Haiku", model_opusplan: "Opus in plan mode, Sonnet after",
+    launch_host: "Runs on", host_local: "This computer",
+    remote_workdir: "Working directory on the host", remote_workdir_ph: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
+    remote_hint: "The agent runs on that machine; this working directory applies there.",
+    remote_need_path: "Enter a working directory on the host.",
+    remote_local_only: "Only works for a session on this computer",
+    hosts_title: "Machines", host_manage: "Manage machines…", host_add: "＋ Add machine…",
+    host_nickname: "Name", host_nickname_ph: "e.g. support01",
+    host_hostname: "Hostname or IP", host_port: "Port", host_user: "Username",
+    host_key: "SSH key (empty = let ssh decide)", host_default_project: "Default working directory on the host",
+    host_add_test: "Add & test", host_testing: "Connecting…", host_retest: "Test again",
+    host_del: "Remove", close: "Close",
+    host_need_fields: "Name, hostname and username are required.",
+    host_none: "No machines yet. Add one to run an agent elsewhere.",
+    host_ok: "Connection succeeded", host_reachable: "reachable", host_unreachable: "unreachable",
+    host_no_claude: "⚠ No agent CLI found on this machine — a session will not start.",
+    host_no_outbound: "⚠ No outbound HTTPS to api.anthropic.com — an agent cannot work here.",
+    host_no_mux: "ℹ No tmux/psmux: a session cannot be reattached.",
+    host_via: "Where the agent runs", host_via_direct: "Directly on the machine",
+    host_via_wsl: "In WSL (Windows host, gives tmux persistence)",
+    host_wsl_tip: "💡 WSL on this machine has both tmux and an agent CLI. Pick \"In WSL\" for sessions that survive a dropped connection — the agent then works in Linux, with Windows drives under /mnt/c.",
+    dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
+    dropper_sending: "Copying file to the host…",
+    dropper_sent: "Placed on the host",
+    dropper_paste_local_only: "Pasting from the clipboard only works for a session on this computer.",
     launch_command: "Command override", command_ph: "empty = start the selected agent",
     command_hint: "Runs this program as-is, instead of the agent.",
     command_warn: "⚠ Agent flags do not apply: model, mode and task are not passed.",
@@ -717,13 +765,222 @@ async function selectProject(p, card) {
   els.commandInput.value = p.command || "";
   refreshOverrideState();
   els.status.textContent = "";
-  const ok = await invoke("path_exists", { path: p.path });
-  els.warn.classList.toggle("hidden", ok);
-  let hasMd = false;
-  try { hasMd = await invoke("has_claude_md", { path: p.path }); } catch (_) {}
-  els.claudeWarn.classList.toggle("hidden", hasMd);
+  await refreshHostState(); // doet de lokale pad-checks, of slaat ze over bij remote
 }
 async function loadProjects() { projects = await invoke("get_projects"); renderProjects(); }
+
+/* ============ remote hosts (#98) ============ */
+// De machines waarop een tab een agent kan draaien. Leeg = alleen lokaal, en dan
+// gedraagt de app zich exact zoals voorheen.
+let hosts = [];
+async function loadHosts() {
+  try { hosts = await invoke("get_hosts"); } catch (_) { hosts = []; }
+  fillHostSelect();
+}
+function hostById(id) { return hosts.find((h) => h.id === id) || null; }
+// Laatste item opent de beheermodal; die keuze is geen host, dus we zetten de
+// select daarna meteen terug op wat er stond.
+const HOST_MANAGE = "__manage";
+function fillHostSelect() {
+  const keep = els.hostInput.value;
+  els.hostInput.innerHTML = `<option value="">${escapeHtml(t("host_local"))}</option>` +
+    hosts.map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.nickname || h.hostname)}</option>`).join("") +
+    `<option value="${HOST_MANAGE}">${escapeHtml(t("host_manage"))}</option>`;
+  // Selectie behouden zolang die host nog bestaat.
+  els.hostInput.value = hosts.some((h) => h.id === keep) ? keep : "";
+  refreshHostState();
+}
+/* ---- host-modal: kiezen, toevoegen, testen ---- */
+let hostStatus = {}; // id -> {reachable, ms}, gevuld door check_hosts
+
+function openHostModal() {
+  els.hfForm.classList.add("hidden");
+  els.hostStatusMsg.textContent = "";
+  els.hfReport.classList.add("hidden");
+  renderHostRows();
+  els.hostModal.classList.remove("hidden");
+  refreshHostReachability();
+}
+// De dots vullen zich ná de eerste render: check_hosts doet alle hosts naast
+// elkaar, dus de modal is meteen zichtbaar i.p.v. te wachten op de traagste.
+async function refreshHostReachability() {
+  if (!hosts.length) return;
+  try {
+    const list = await invoke("check_hosts", { hosts: hosts.map((h) => ({ id: h.id, hostname: h.hostname, port: h.port || 22 })) });
+    hostStatus = {};
+    for (const s of list) hostStatus[s.id] = s;
+  } catch (_) { hostStatus = {}; }
+  renderHostRows();
+}
+function renderHostRows() {
+  if (!hosts.length) {
+    els.hostRows.innerHTML = `<div class="host-empty">${escapeHtml(t("host_none"))}</div>`;
+    return;
+  }
+  els.hostRows.innerHTML = "";
+  hosts.forEach((h, i) => {
+    const st = hostStatus[h.id];
+    const cls = !st ? "pending" : st.reachable ? "up" : "down";
+    const label = !st ? "…" : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
+    const row = document.createElement("div");
+    row.className = "host-row";
+    row.innerHTML = `
+      <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(h.nickname || h.hostname)}</div>
+        <div class="host-sub">${escapeHtml((h.user ? h.user + "@" : "") + h.hostname + (h.port && h.port !== 22 ? ":" + h.port : ""))}
+          · ${escapeHtml(h.os || "?")} · ${escapeHtml(h.mux || "none")}</div>
+      </div>
+      <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
+      <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
+    row.querySelector(".host-test").addEventListener("click", () => testExistingHost(i));
+    row.querySelector(".host-del").addEventListener("click", async () => {
+      hosts.splice(i, 1);
+      await invoke("save_hosts", { hosts });
+      fillHostSelect();
+      renderHostRows();
+    });
+    els.hostRows.appendChild(row);
+  });
+}
+
+function openHostForm() {
+  els.hfNickname.value = ""; els.hfHostname.value = ""; els.hfPort.value = "22";
+  els.hfUser.value = ""; els.hfKey.value = ""; els.hfProject.value = ""; els.hfVia.value = "";
+  els.hostStatusMsg.textContent = ""; els.hostStatusMsg.className = "status-msg";
+  els.hfReport.classList.add("hidden");
+  els.hfForm.classList.remove("hidden");
+  els.hfNickname.focus();
+}
+
+// "Toevoegen & testen": de host wordt pas opgeslagen als de probe lukt, zodat
+// hosts.json geen half-werkende entries verzamelt. De probe vult os en mux zelf
+// in -- dat zijn eigenschappen van de machine, niet iets om met de hand te typen.
+async function addAndTestHost() {
+  const nickname = els.hfNickname.value.trim();
+  const hostname = els.hfHostname.value.trim();
+  const user = els.hfUser.value.trim();
+  if (!nickname || !hostname || !user) {
+    els.hostStatusMsg.textContent = t("host_need_fields");
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  const host = {
+    id: uniqueHostId(slugify(nickname)),
+    nickname, hostname, user,
+    port: parseInt(els.hfPort.value, 10) || 22,
+    key_path: els.hfKey.value.trim(),
+    default_project: els.hfProject.value.trim(),
+    via: els.hfVia.value || "",
+    os: "", mux: "", agent_version: "",
+  };
+  els.hostStatusMsg.textContent = t("host_testing");
+  els.hostStatusMsg.className = "status-msg";
+  els.hfReport.classList.add("hidden");
+  els.hfTest.disabled = true;
+  let p;
+  try { p = await invoke("probe_host", { host }); }
+  catch (e) { p = { reachable: false, error: String(e) }; }
+  finally { els.hfTest.disabled = false; }
+
+  if (!p.reachable || !p.authOk) {
+    els.hostStatusMsg.textContent = "✗ " + (p.error || t("host_unreachable"));
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  host.os = p.os;
+  // Via WSL is de multiplexer die van WSL (tmux), niet die van Windows.
+  host.mux = host.via === "wsl" ? "tmux" : (p.mux || "none");
+  hosts.push(host);
+  await invoke("save_hosts", { hosts });
+  fillHostSelect();
+  renderHostRows();
+  els.hostStatusMsg.textContent = "✓ " + t("host_ok");
+  els.hostStatusMsg.className = "status-msg ok";
+  showProbeReport(p);
+  els.hfForm.classList.add("hidden");
+}
+
+// Bestaande host opnieuw meten (bv. nadat er tmux is geïnstalleerd).
+async function testExistingHost(i) {
+  const h = hosts[i];
+  els.hostStatusMsg.textContent = `${h.nickname}: ${t("host_testing")}`;
+  els.hostStatusMsg.className = "status-msg";
+  let p;
+  try { p = await invoke("probe_host", { host: h }); }
+  catch (e) { p = { reachable: false, error: String(e) }; }
+  if (p.reachable && p.authOk) {
+    hosts[i] = { ...h, os: p.os, mux: p.mux || "none" };
+    await invoke("save_hosts", { hosts });
+    fillHostSelect();
+    els.hostStatusMsg.textContent = `${h.nickname}: ✓ ${t("host_ok")}`;
+    els.hostStatusMsg.className = "status-msg ok";
+  } else {
+    els.hostStatusMsg.textContent = `${h.nickname}: ✗ ${p.error || t("host_unreachable")}`;
+    els.hostStatusMsg.className = "status-msg err";
+  }
+  showProbeReport(p);
+  hostStatus[h.id] = { id: h.id, reachable: !!p.reachable, ms: 0 };
+  renderHostRows();
+}
+
+// Wat de probe vond, met de twee dingen die een sessie echt blokkeren bovenaan:
+// geen agent-CLI en geen uitgaand HTTPS.
+function showProbeReport(p) {
+  const lines = [];
+  if (p.os) lines.push(`OS: ${p.os}`);
+  if (p.claude) lines.push(`agent: ${p.claude}`);
+  else if (p.authOk) lines.push(t("host_no_claude"));
+  if (p.authOk && !p.outbound) lines.push(t("host_no_outbound"));
+  if (p.authOk && (!p.mux || p.mux === "none")) lines.push(t("host_no_mux"));
+  else if (p.mux) lines.push(`persistentie: ${p.mux}`);
+  // Windows zonder multiplexer maar mét een bruikbare WSL: dat is de enige route
+  // naar heraanhaken op die machine zonder iets te installeren.
+  if (p.wslUsable && (!p.mux || p.mux === "none")) lines.push(t("host_wsl_tip"));
+  if (!lines.length) return;
+  els.hfReport.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
+  els.hfReport.classList.remove("hidden");
+}
+
+function uniqueHostId(base) {
+  let id = base || "host", n = 2;
+  while (hosts.some((h) => h.id === id)) id = `${base}-${n++}`;
+  return id;
+}
+
+// Bij een remote host betekent "werkmap" een pad OP DIE MACHINE, niet het lokale
+// projectpad -- daarom een eigen veld, voorgevuld met het standaardpad van de host.
+let lastHostChoice = "";
+async function refreshHostState() {
+  if (els.hostInput.value === HOST_MANAGE) {
+    els.hostInput.value = lastHostChoice; // "beheren" is geen keuze, maar een actie
+    openHostModal();
+    return;
+  }
+  lastHostChoice = els.hostInput.value;
+  const h = hostById(els.hostInput.value);
+  els.remotePathRow.classList.toggle("hidden", !h);
+  if (h && !els.remotePathInput.value.trim()) els.remotePathInput.value = h.default_project || "";
+  // "Map niet bereikbaar" en "Geen CLAUDE.md" zijn checks op DEZE machine. Bij een
+  // remote host gaat het om een pad daar, dus die zouden altijd vals alarm slaan.
+  if (h) {
+    els.warn.classList.add("hidden");
+    els.claudeWarn.classList.add("hidden");
+  } else if (selected && selected.path) {
+    await checkLocalPath(selected.path);
+  }
+}
+
+// De twee lokale controles op de gekozen werkmap, apart zodat zowel het kiezen
+// van een project als het terugschakelen naar "deze computer" ze kan herhalen.
+async function checkLocalPath(path) {
+  let ok = false;
+  try { ok = await invoke("path_exists", { path }); } catch (_) {}
+  els.warn.classList.toggle("hidden", ok);
+  let hasMd = false;
+  try { hasMd = await invoke("has_claude_md", { path }); } catch (_) {}
+  els.claudeWarn.classList.toggle("hidden", hasMd);
+}
 
 // Open de OS-mapkiezer en start een ad-hoc launch in de gekozen map: vul het
 // startformulier voor die map (niet opgeslagen als project). Optimaal heeft de
@@ -751,8 +1008,12 @@ function renderTabs() {
     tab.style.setProperty("--tab-accent", s.accent || "#7c9cff");
     const live = settings.tabStatus && s.status && !s.exited;
     const shown = live ? `✶ ${s.status}…` : s.title;
-    tab.innerHTML = `<span class="tab-dot"></span><span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
-    tab.title = s.title;
+    // Bij tien agents over vier machines moet je op de tab kunnen zien waar er
+    // een draait -- zonder dat een lokale tab er anders uit gaat zien.
+    const host = s.hostId ? hostById(s.hostId) : null;
+    const badge = host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "";
+    tab.innerHTML = `<span class="tab-dot"></span>${badge}<span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
+    tab.title = host ? `${s.title} — ${host.nickname || host.hostname}` : s.title;
     tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
     tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
@@ -788,13 +1049,14 @@ function showView(target) {
     const s = sessions.get(target);
     if (s) { s.awaiting = false; refitTerm(s); s.term.focus(); }
   }
+  updateDropperForSession(); // DROPZONE geldt per sessie: remote kan niet
   renderTabs();
 }
 
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -889,6 +1151,8 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
 
   const session = {
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
+    // Leeg = lokaal. Bij een remote sessie geldt `path` op DIE machine.
+    hostId: hostId || "",
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
@@ -950,7 +1214,10 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   // split-paneel). Daarom reconstrueren we eerst de volledige LOGISCHE regel
   // (eerste rij + alle isWrapped-vervolgrijen) en matchen we daarop; anders zou
   // de bevraagde rij alleen een staartfragment zien -> verkeerd (relatief) pad.
-  if (term.registerLinkProvider) {
+  // Niet bij een remote sessie: de preview leest het bestand met read_file op DIT
+  // werkstation, en het pad dat de agent noemt bestaat op de host. Een klikbaar
+  // ogende link die niets doet is misleidender dan geen link.
+  if (term.registerLinkProvider && !hostId) {
     term.registerLinkProvider({
       provideLinks(y, cb) {
         const buf = term.buffer.active;
@@ -1014,10 +1281,17 @@ async function startSession() {
   const command = els.commandInput.value.trim();
   const agent = els.agentInput.value || "claude";
   const model = els.modelInput.value.trim();
+  const hostId = els.hostInput.value || "";
+  // Remote: het pad geldt op de HOST, dus niet het lokale projectpad meesturen.
+  const runPath = hostId ? els.remotePathInput.value.trim() : path;
+  if (hostId && !runPath) {
+    els.status.textContent = t("remote_need_path"); els.status.className = "status-msg err";
+    return;
+  }
 
-  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model });
+  const session = spawnTerminal({ id, uuid, path: runPath, title, accent, mode, command, agent, model, hostId });
   try {
-    await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), cols: session.term.cols, rows: session.term.rows });
+    await invoke("create_session", { id, gen: session.gen, path: runPath, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -1068,7 +1342,7 @@ function persistSessionsToDisk() {
   if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
   const list = [...sessions.values()]
     .filter((s) => !s.command)
-    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "" }));
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "" }));
   invoke("save_sessions", { sessions: list }).catch(() => {});
 }
 
@@ -1087,9 +1361,17 @@ async function restoreSessions() {
   for (const meta of saved) {
     const uuid = meta.uuid;
     if (!uuid) continue;
-    let st = { exists: false, ageSecs: 0 };
-    try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
-    if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
+    // Het transcript van een REMOTE sessie staat op de host, niet hier -- die
+    // check zou hem altijd overslaan. Draait er een multiplexer, dan haakt de
+    // herstart bovendien gewoon aan de nog levende sessie aan; zo niet, dan
+    // vindt claude --resume het transcript daar zelf.
+    if (!meta.host_id) {
+      let st = { exists: false, ageSecs: 0 };
+      try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
+      if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
+    } else if (!hostById(meta.host_id)) {
+      continue; // host is inmiddels verwijderd
+    }
 
     const id = "s" + (++seq);
     const session = spawnTerminal({
@@ -1097,6 +1379,7 @@ async function restoreSessions() {
       title: meta.title || "agent", accent: meta.accent || "#7c9cff",
       mode: meta.mode || "default", command: "",
       agent: meta.agent || "claude", model: meta.model || "",
+      hostId: meta.host_id || "",
     });
     session.el.classList.add("hidden");
     session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
@@ -1105,6 +1388,7 @@ async function restoreSessions() {
         id, gen: session.gen, path: meta.path, title: session.title, sessionId: uuid,
         mode: session.mode, fullPaths: settings.fullPaths, command: "",
         agent: session.agent, model: resolveModelArg(session.agent, session.model),
+        hostId: session.hostId || "",
         cols: session.term.cols, rows: session.term.rows,
       });
     } catch (_) {
@@ -1437,7 +1721,7 @@ async function restartSession(id) {
   s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
   if (current !== id) showView(id); else renderTabs();
   try {
-    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), cols: s.term.cols, rows: s.term.rows });
+    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), hostId: s.hostId || "", cols: s.term.cols, rows: s.term.rows });
   } catch (e) { s.term.write(`\r\n\x1b[31m[${t("restart_failed")}: ${e}]\x1b[0m\r\n`); }
 }
 
@@ -1449,22 +1733,29 @@ function openTabMenu(x, y, id) {
   if (!s) return;
   const m = document.createElement("div");
   m.className = "ctx-menu";
+  // Preview en Verkenner lezen de werkmap van DIT werkstation. Bij een remote
+  // sessie staat die map op de host: Verkenner zou niets of de verkeerde map
+  // openen en de preview blijft leeg. Uitgrijzen i.p.v. stil laten mislukken.
+  const off = s.hostId ? " disabled" : "";
+  const why = s.hostId ? ` title="${escapeHtml(t("remote_local_only"))}"` : "";
   m.innerHTML = `
     <div class="ctx-item" data-act="restart">${t("ctx_restart")}</div>
-    <div class="ctx-item" data-act="preview">${t("ctx_preview")}</div>
+    <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
     <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
-    <div class="ctx-item" data-act="explorer">${t("ctx_explorer")}</div>
+    <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
   m.querySelector('[data-act="restart"]').addEventListener("click", () => restartSession(id));
-  m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
   m.querySelector('[data-act="speak"]').addEventListener("click", () => {
     closeTabMenu();
     const sel = s.term.getSelection();
     if (sel) speak(sel, true); // force: uitspreken is hier expliciet gevraagd
   });
-  m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
+  if (!s.hostId) {
+    m.querySelector('[data-act="preview"]').addEventListener("click", () => openPreview(id));
+    m.querySelector('[data-act="explorer"]').addEventListener("click", () => { closeTabMenu(); invoke("open_folder", { path: s.path }).catch(() => {}); });
+  }
   document.body.appendChild(m);
   const r = m.getBoundingClientRect();
   if (r.right > window.innerWidth) m.style.left = (window.innerWidth - r.width - 6) + "px";
@@ -1738,7 +2029,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); } return; }
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.hostModal.classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   const ctrl = e.ctrlKey && !e.altKey;
   if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); changeFont(1); return; }
@@ -1780,6 +2071,40 @@ function dropperCwd() {
   if (s && s.path) return s.path;
   if (selected && selected.path) return selected.path;
   return null;
+}
+
+// De DROPZONE zet een bestand in de input-map van de werkmap en plakt dat pad in
+// de prompt. Bij een remote sessie staat die werkmap op de host, dus lokaal
+// kopieren levert een pad op dat de agent daar niet kan openen -- hij meldt dan
+// "file not found" en niemand legt het verband. Daarom gaat het bestand over met
+// scp en komt het pad OP DE HOST in de prompt.
+function activeSessionIsRemote() {
+  const s = sessions.get(current);
+  return !!(s && s.hostId);
+}
+function updateDropperForSession() {
+  if (!els.fileDropper) return;
+  els.fileDropper.classList.toggle("dropzone-remote", activeSessionIsRemote());
+  els.fileDropper.title = activeSessionIsRemote() ? t("dropper_remote_hint") : "";
+}
+
+// Eén bestand naar de host, ongeacht welke zone je raakte: "verplaatsen" zou
+// betekenen dat we het lokale origineel na een netwerkoverdracht weggooien, en
+// dat is een beslissing die je zelf hoort te nemen, niet een sleepgebaar.
+async function dropToRemote(src) {
+  const s = sessions.get(current);
+  if (!s || !s.hostId) return false;
+  toast(t("dropper_sending"), "");
+  try {
+    const dest = await invoke("scp_to_host", { hostId: s.hostId, src, remoteCwd: s.path });
+    insertPathIntoTerminal(dest, true);
+    addDropperEntry(dest);
+    toast(t("dropper_sent"), "ok");
+  } catch (err) {
+    dbg(`scp FAIL: ${err}`);
+    toast(t("dropper_save_failed") + " " + err, "err");
+  }
+  return true;
 }
 
 // Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
@@ -1849,6 +2174,10 @@ function wireFileDropper() {
     if (!paths.length) return;
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    if (activeSessionIsRemote()) {
+      for (const src of paths) await dropToRemote(src);
+      return;
+    }
     for (const src of paths) {
       try {
         // Alleen pad: geen bestandsactie, enkel het bestaande pad in de prompt.
@@ -1868,6 +2197,9 @@ function wireFileDropper() {
   });
 
   els.dropperPaste.addEventListener("click", async () => {
+    // Klembord-plakken schrijft eerst lokaal (save_clipboard_to_input) en zou
+    // dan nog overgezet moeten worden; die tweetrapsvorm bestaat nog niet.
+    if (activeSessionIsRemote()) { toast(t("dropper_paste_local_only"), "err"); return; }
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
     try {
@@ -1887,6 +2219,13 @@ function wireFileDropper() {
 async function addFileViaPicker() {
   const cwd = dropperCwd();
   if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+  if (activeSessionIsRemote()) {
+    // Bij remote is de input-map niet lokaal te openen: begin in de home-map.
+    let f = null;
+    try { f = await invoke("pick_file", { startDir: "~" }); } catch (_) { return; }
+    if (f) await dropToRemote(f);
+    return;
+  }
   const inputDir = cwd.replace(/\//g, "\\").replace(/\\+$/, "") + "\\input";
   let file = null;
   try { file = await invoke("pick_file", { startDir: inputDir }); } catch (_) { return; }
@@ -2106,6 +2445,22 @@ window.addEventListener("DOMContentLoaded", () => {
     modelSuggestions: document.querySelector("#model-suggestions"),
     commandInput: document.querySelector("#command-input"),
     commandWarn: document.querySelector("#command-warn"),
+    hostInput: document.querySelector("#host-input"),
+    remotePathRow: document.querySelector("#remote-path-row"),
+    remotePathInput: document.querySelector("#remote-path-input"),
+    hostModal: document.querySelector("#host-modal"),
+    hostRows: document.querySelector("#host-rows"),
+    hfForm: document.querySelector("#host-form"),
+    hfNickname: document.querySelector("#hf-nickname"),
+    hfHostname: document.querySelector("#hf-hostname"),
+    hfPort: document.querySelector("#hf-port"),
+    hfUser: document.querySelector("#hf-user"),
+    hfKey: document.querySelector("#hf-key"),
+    hfProject: document.querySelector("#hf-project"),
+    hfVia: document.querySelector("#hf-via"),
+    hfTest: document.querySelector("#hf-test"),
+    hostStatusMsg: document.querySelector("#hf-status"),
+    hfReport: document.querySelector("#hf-report"),
     helpTip: document.querySelector("#help-tip"),
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
@@ -2119,6 +2474,19 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
   els.commandInput.addEventListener("input", refreshOverrideState);
+  els.hostInput.addEventListener("change", refreshHostState);
+  document.querySelector("#host-add").addEventListener("click", openHostForm);
+  document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
+  document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
+  document.querySelector("#host-close").addEventListener("click", () => els.hostModal.classList.add("hidden"));
+  // Sleutelkiezer via het bestaande pick_file-command: de dialog-plugin is niet
+  // vanuit JS aanroepbaar (staat niet in capabilities/default.json).
+  document.querySelector("#hf-key-browse").addEventListener("click", async () => {
+    try {
+      const f = await invoke("pick_file", { startDir: "~/.ssh" });
+      if (f) els.hfKey.value = f;
+    } catch (_) {}
+  });
   // Andere agent op het startformulier -> model-keuze EN modus-opties mee.
   // Het modelveld wissen: een model van de vorige agent is hier niet geldig en
   // zou de datalist-suggesties wegfilteren (leeg = de default van de agent).
@@ -2187,7 +2555,8 @@ window.addEventListener("DOMContentLoaded", () => {
   applyBranding();
   renderTabs();
   loadProjects();
-  restoreSessions();
+  // Hosts eerst: restoreSessions moet een opgeslagen host_id kunnen opzoeken.
+  loadHosts().then(restoreSessions);
 
   // Toon de app-versie discreet onderin de sidebar.
   invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});
