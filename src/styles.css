@@ -653,6 +653,9 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .e-cmdwarn { font-size: 10.5px; color: var(--orange); }
 
 /* ---- host-modal (#98) ---- */
+/* Kan bovenop de agents-editor geopend worden (een agent heeft een machine
+   nodig die er nog niet is), dus expliciet erboven: .modal staat al op 100. */
+#host-modal { z-index: 110; }
 .host-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; max-height: 320px; overflow-y: auto; }
 .host-empty { color: var(--text-dim); font-size: 12.5px; padding: 14px 2px; }
 .host-row {

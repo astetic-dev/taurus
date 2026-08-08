@@ -47,6 +47,7 @@ const I18N = {
     host_via: "Waar draait de agent", host_via_direct: "Rechtstreeks op de machine",
     host_via_wsl: "In WSL (Windows-host, geeft tmux-persistentie)",
     host_wsl_tip: "💡 WSL op deze machine heeft tmux én een agent-CLI. Kies \"In WSL\" voor sessies die een verbroken verbinding overleven — de agent werkt dan wel in Linux, met Windows-schijven onder /mnt/c.",
+    host_wsl_unusable: "In WSL gekozen, maar WSL op deze machine mist tmux of een agent-CLI. Installeer die daar, of kies \"Rechtstreeks op de machine\".",
     dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
     dropper_sending: "Bestand overzetten naar de host…",
     dropper_sent: "Op de host gezet",
@@ -170,6 +171,7 @@ const I18N = {
     host_via: "Where the agent runs", host_via_direct: "Directly on the machine",
     host_via_wsl: "In WSL (Windows host, gives tmux persistence)",
     host_wsl_tip: "💡 WSL on this machine has both tmux and an agent CLI. Pick \"In WSL\" for sessions that survive a dropped connection — the agent then works in Linux, with Windows drives under /mnt/c.",
+    host_wsl_unusable: "You picked In WSL, but WSL on this machine has no tmux or no agent CLI. Install those there, or pick \"Directly on the machine\".",
     dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
     dropper_sending: "Copying file to the host…",
     dropper_sent: "Placed on the host",
@@ -907,6 +909,15 @@ async function addAndTestHost() {
   if (!p.reachable || !p.authOk) {
     els.hostStatusMsg.textContent = "✗ " + (p.error || t("host_unreachable"));
     els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  // Kies je WSL, dan moet daar ook echt tmux EN een agent-CLI in zitten. Anders
+  // zou de host opgeslagen worden en pas bij de eerste sessie stukgaan, met een
+  // foutmelding uit een shell drie lagen diep.
+  if (host.via === "wsl" && !p.wslUsable) {
+    els.hostStatusMsg.textContent = "✗ " + t("host_wsl_unusable");
+    els.hostStatusMsg.className = "status-msg err";
+    showProbeReport(p);
     return;
   }
   host.os = p.os;
@@ -2573,6 +2584,10 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
   els.commandInput.addEventListener("input", refreshOverrideState);
+  // Twee ingangen: naast de agentlijst (waar je bent als je een machine wilt
+  // toevoegen) en in de agents-editor (waar je bent als een agent er een nodig
+  // heeft). Alleen die tweede plek bleek onvindbaar.
+  document.querySelector("#hosts-btn").addEventListener("click", openHostModal);
   document.querySelector("#editor-hosts").addEventListener("click", openHostModal);
   document.querySelector("#host-add").addEventListener("click", openHostForm);
   document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
