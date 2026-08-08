@@ -124,17 +124,6 @@
                 <div id="claude-warn" class="claude-warn hidden" data-i18n="no_claude_md">ℹ Geen CLAUDE.md in deze map — agent start zonder projectinstructies.</div>
               </div>
               <div class="field">
-                <label for="host-input" data-i18n="launch_host">Draait op</label>
-                <select id="host-input">
-                  <option value="" data-i18n="host_local">Deze computer</option>
-                </select>
-                <div id="remote-path-row" class="hidden">
-                  <label for="remote-path-input" class="sublabel" data-i18n="remote_workdir">Werkmap op de host</label>
-                  <input id="remote-path-input" type="text" autocomplete="off" data-i18n-ph="remote_workdir_ph" placeholder="bijv. C:\Users\arjen\project of /home/arjen/project" />
-                  <div id="remote-hint" class="hint" data-i18n="remote_hint">De agent draait op die machine; deze werkmap geldt daar.</div>
-                </div>
-              </div>
-              <div class="field">
                 <label for="title-input" data-i18n="session_title">Titel van de sessie</label>
                 <input id="title-input" type="text" data-i18n-ph="title_ph" placeholder="bijv. ZGV-SAML-debug" />
                 <div class="hint" data-i18n="title_hint">Wordt de naam in Claude én op het tabblad.</div>
@@ -318,6 +307,7 @@
         <h2 data-i18n="manage_projects">Agents beheren</h2>
         <div id="editor-rows" class="editor-rows"></div>
         <button id="editor-add" class="btn-ghost add" data-i18n="add_agent">＋ Agent toevoegen</button>
+        <button id="editor-hosts" class="btn-ghost add" data-i18n="host_manage">Machines beheren…</button>
         <div class="modal-actions">
           <button id="editor-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
           <button id="editor-save" class="btn-primary" data-i18n="save">Opslaan</button>

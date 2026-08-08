@@ -32,6 +32,11 @@ struct Project {
     // Model voor de agent (vrije tekst). Leeg = de eigen default van de agent.
     #[serde(default)]
     model: String,
+    // Op welke machine draait deze agent; leeg = deze computer. Hoort bij de
+    // AGENT en niet bij het starten: een kaart is een precieze werkplek, en dan
+    // is `path` een pad op DIE machine (#98).
+    #[serde(default)]
+    host_id: String,
 }
 
 // Lege defaults: een verse installatie start zonder projecten. De gebruiker

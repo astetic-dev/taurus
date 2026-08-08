@@ -58,6 +58,8 @@ const I18N = {
     cap_command: "Commando-override — draait dit programma i.p.v. de agent (optioneel)",
     row_expand: "Openklappen", row_collapse: "Dichtklappen",
     agent_command: "Eigen commando…",
+    cap_host: "Draait op", cap_workdir_remote: "Werkmap OP DIE MACHINE",
+    ph_path_remote: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
@@ -179,6 +181,8 @@ const I18N = {
     cap_command: "Command override — runs this program instead of the agent (optional)",
     row_expand: "Expand", row_collapse: "Collapse",
     agent_command: "Own command…",
+    cap_host: "Runs on", cap_workdir_remote: "Working directory ON THAT MACHINE",
+    ph_path_remote: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
@@ -607,6 +611,14 @@ function locText(p) {
   if (!d) return t("loc_unknown");
   return (isNetwork(p) ? t("loc_net") : t("loc_local")) + ` (${d.toUpperCase()}:)`;
 }
+// Waar draait deze agent? De machine is een eigenschap van de AGENT, niet iets
+// dat je per keer kiest -- een kaart is een precieze werkplek, en die ligt op
+// een machine net zo goed als in een map.
+function agentLocTag(p) {
+  const h = p.host_id ? hostById(p.host_id) : null;
+  if (h) return { text: `(${h.nickname || h.hostname})`, cls: "remote", title: `${h.user}@${h.hostname}` };
+  return { text: driveTag(p.path), cls: locClass(p.path), title: locText(p.path) };
+}
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -725,8 +737,9 @@ function renderProjects() {
     card.className = "project-card";
     card.dataset.idx = String(index);
     card.style.borderLeftColor = p.accent || "#7c9cff";
+    const loc = agentLocTag(p);
     card.innerHTML =
-      `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${locClass(p.path)}">${driveTag(p.path)}</span></div>` +
+      `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${loc.cls}" title="${escapeHtml(loc.title)}">${escapeHtml(loc.text)}</span></div>` +
       `<div class="pc-actions">` +
         `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
         `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
@@ -792,17 +805,11 @@ async function loadHosts() {
   fillHostSelect();
 }
 function hostById(id) { return hosts.find((h) => h.id === id) || null; }
-// Laatste item opent de beheermodal; die keuze is geen host, dus we zetten de
-// select daarna meteen terug op wat er stond.
-const HOST_MANAGE = "__manage";
+// De hostlijst is veranderd: de agentkaarten tonen hun machine, en een open
+// editor moet de nieuwe keuzes tonen.
 function fillHostSelect() {
-  const keep = els.hostInput.value;
-  els.hostInput.innerHTML = `<option value="">${escapeHtml(t("host_local"))}</option>` +
-    hosts.map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.nickname || h.hostname)}</option>`).join("") +
-    `<option value="${HOST_MANAGE}">${escapeHtml(t("host_manage"))}</option>`;
-  // Selectie behouden zolang die host nog bestaat.
-  els.hostInput.value = hosts.some((h) => h.id === keep) ? keep : "";
-  refreshHostState();
+  renderProjects();
+  if (els.editorModal && !els.editorModal.classList.contains("hidden")) renderEditor();
 }
 /* ---- host-modal: kiezen, toevoegen, testen ---- */
 let hostStatus = {}; // id -> {reachable, ms}, gevuld door check_hosts
@@ -964,25 +971,17 @@ function uniqueHostId(base) {
 
 // Bij een remote host betekent "werkmap" een pad OP DIE MACHINE, niet het lokale
 // projectpad -- daarom een eigen veld, voorgevuld met het standaardpad van de host.
-let lastHostChoice = "";
+// "Map niet bereikbaar" en "Geen CLAUDE.md" zijn checks op DEZE machine. Draait
+// de agent elders, dan gaat het om een pad daar en zouden ze altijd vals alarm
+// slaan -- dus overslaan.
 async function refreshHostState() {
-  if (els.hostInput.value === HOST_MANAGE) {
-    els.hostInput.value = lastHostChoice; // "beheren" is geen keuze, maar een actie
-    openHostModal();
-    return;
-  }
-  lastHostChoice = els.hostInput.value;
-  const h = hostById(els.hostInput.value);
-  els.remotePathRow.classList.toggle("hidden", !h);
-  if (h && !els.remotePathInput.value.trim()) els.remotePathInput.value = h.default_project || "";
-  // "Map niet bereikbaar" en "Geen CLAUDE.md" zijn checks op DEZE machine. Bij een
-  // remote host gaat het om een pad daar, dus die zouden altijd vals alarm slaan.
-  if (h) {
+  const remote = !!(selected && selected.host_id);
+  if (remote || !selected || !selected.path) {
     els.warn.classList.add("hidden");
     els.claudeWarn.classList.add("hidden");
-  } else if (selected && selected.path) {
-    await checkLocalPath(selected.path);
+    return;
   }
+  await checkLocalPath(selected.path);
 }
 
 // De twee lokale controles op de gekozen werkmap, apart zodat zowel het kiezen
@@ -1298,17 +1297,17 @@ async function startSession() {
   const command = isCmd ? els.commandInput.value.trim() : "";
   const agent = isCmd ? "claude" : (els.agentInput.value || "claude");
   const model = els.modelInput.value.trim();
-  const hostId = els.hostInput.value || "";
-  // Remote: het pad geldt op de HOST, dus niet het lokale projectpad meesturen.
-  const runPath = hostId ? els.remotePathInput.value.trim() : path;
-  if (hostId && !runPath) {
+  // De machine hoort bij de AGENT, niet bij deze keer starten: standaard lokaal,
+  // en remote alleen als de agent zo is ingericht in "Agents beheren".
+  const hostId = selected.host_id || "";
+  if (hostId && !path) {
     els.status.textContent = t("remote_need_path"); els.status.className = "status-msg err";
     return;
   }
 
-  const session = spawnTerminal({ id, uuid, path: runPath, title, accent, mode, command, agent, model, hostId });
+  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId });
   try {
-    await invoke("create_session", { id, gen: session.gen, path: runPath, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
+    await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -1337,6 +1336,7 @@ async function addAgentFromForm() {
     agent: els.agentInput.value === AGENT_COMMAND ? "claude" : (els.agentInput.value || "claude"),
     model: els.modelInput.value.trim(),
     command: els.agentInput.value === AGENT_COMMAND ? els.commandInput.value.trim() : "",
+    host_id: selected.host_id || "", // machine hoort bij de agent, niet bij deze start
   };
   const next = projects.filter((p) => p.id !== entry.id);
   next.push(entry);
@@ -1934,7 +1934,7 @@ function saveSettingsFromForm() {
 /* ============ project-editor ============ */
 let editRows = [];
 function slugify(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project"; }
-function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "" }; }
+function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "", host_id: "" }; }
 function openEditor() {
   editRows = projects.map((p) => ({ ...p }));
   editorOpen = new Set();
@@ -1968,6 +1968,9 @@ function renderEditor() {
     // alleen bij die keuze; de bestaande waarde in projects.json bepaalt of de
     // rij er al mee begint.
     const hasOverride = !!(r.command || "").trim();
+    // Remote: dan is de werkmap een pad OP DIE MACHINE, dus geen lokale
+    // bladerknop -- die zou een pad opleveren dat daar niet bestaat.
+    const isRemoteRow = !!r.host_id;
     const row = document.createElement("div");
     row.className = "erow" + (open ? " open" : "");
     // Ingeklapt toont een rij precies wat hem identificeert: kleur, label, pad.
@@ -1987,9 +1990,14 @@ function renderEditor() {
         <div class="e-grid">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_button"))}</span>
           <input class="e-label" type="text" placeholder="${escapeHtml(t("ph_label"))}" value="${escapeHtml(r.label)}" /></div>
-        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_workdir"))}</span>
-          <div class="e-pathrow"><input class="e-path" type="text" placeholder="${escapeHtml(t("ph_path"))}" value="${escapeHtml(r.path)}" /><button class="e-browse">📁</button></div></div>
+        <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_host"))}</span>
+          <select class="e-host">
+            <option value="">${escapeHtml(t("host_local"))}</option>
+            ${hosts.map((h) => `<option value="${escapeHtml(h.id)}"${r.host_id === h.id ? " selected" : ""}>${escapeHtml(h.nickname || h.hostname)}</option>`).join("")}
+          </select></div>
         </div>
+        <div class="e-field"><span class="e-cap">${escapeHtml(isRemoteRow ? t("cap_workdir_remote") : t("cap_workdir"))}</span>
+          <div class="e-pathrow"><input class="e-path" type="text" placeholder="${escapeHtml(isRemoteRow ? t("ph_path_remote") : t("ph_path"))}" value="${escapeHtml(r.path)}" />${isRemoteRow ? "" : `<button class="e-browse">📁</button>`}</div></div>
         <div class="e-grid">
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_tabtitle"))}</span>
           <input class="e-title" type="text" placeholder="${escapeHtml(t("ph_title"))}" value="${escapeHtml(r.title || "")}" /></div>
@@ -2052,7 +2060,18 @@ function renderEditor() {
       }
       renderEditor();
     });
-    row.querySelector(".e-browse").addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
+    // Van machine wisselen maakt het bestaande pad betekenisloos: een lokaal
+    // pad bestaat niet op de host en omgekeerd. Leegmaken is eerlijker dan een
+    // pad laten staan dat straks stil naar de verkeerde map wijst.
+    row.querySelector(".e-host").addEventListener("change", (e) => {
+      if ((editRows[i].host_id || "") === e.target.value) return;
+      editRows[i].host_id = e.target.value;
+      const h = hostById(e.target.value);
+      editRows[i].path = h ? (h.default_project || "") : "";
+      renderEditor();
+    });
+    const browse = row.querySelector(".e-browse");
+    if (browse) browse.addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
     row.querySelector(".e-del").addEventListener("click", () => {
       editRows.splice(i, 1);
       // editorOpen bevat INDEXEN, en die schuiven op bij een splice: zonder dit
@@ -2084,7 +2103,7 @@ function renderEditor() {
 async function saveEditor() {
   const cleaned = editRows
     .filter((r) => r.label.trim() && r.path.trim())
-    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: (r.command || "").trim() }));
+    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: (r.command || "").trim(), host_id: r.host_id || "" }));
   if (cleaned.length === 0) { els.editorStatus.textContent = t("err_need_project"); els.editorStatus.className = "status-msg err"; return; }
   try { await invoke("save_projects", { projects: cleaned }); projects = cleaned; renderProjects(); els.editorModal.classList.add("hidden"); }
   catch (e) { els.editorStatus.textContent = "✗ " + e; els.editorStatus.className = "status-msg err"; }
@@ -2528,9 +2547,6 @@ window.addEventListener("DOMContentLoaded", () => {
     commandInput: document.querySelector("#command-input"),
     commandWarn: document.querySelector("#command-warn"),
     commandField: document.querySelector("#command-field"),
-    hostInput: document.querySelector("#host-input"),
-    remotePathRow: document.querySelector("#remote-path-row"),
-    remotePathInput: document.querySelector("#remote-path-input"),
     hostModal: document.querySelector("#host-modal"),
     hostRows: document.querySelector("#host-rows"),
     hfForm: document.querySelector("#host-form"),
@@ -2557,7 +2573,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
   els.commandInput.addEventListener("input", refreshOverrideState);
-  els.hostInput.addEventListener("change", refreshHostState);
+  document.querySelector("#editor-hosts").addEventListener("click", openHostModal);
   document.querySelector("#host-add").addEventListener("click", openHostForm);
   document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
   document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
