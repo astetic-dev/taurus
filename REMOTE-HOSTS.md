@@ -130,10 +130,39 @@ What it costs:
 
 - the agent lives in Linux and reaches Windows drives through `/mnt/c`, which is
   slow for git and file watching
-- WSL shuts its VM down when idle, which can end a session you expected to
-  persist — keep a process alive in WSL, or set `vmIdleTimeout` in `.wslconfig`
 - the DROPZONE cannot send files to a `via: wsl` host: the scp server runs on
   Windows and cannot write into WSL's ext4 filesystem
+
+### WSL stops on its own — and `vmIdleTimeout` does not fix it
+
+Measured on a real machine: a WSL distro shuts down roughly 20–30 seconds after
+the last process in it exits, **even with `vmIdleTimeout=-1`**. That setting
+governs the utility VM, not how long a distro instance stays alive; WSL stops a
+distro once nothing is running in it.
+
+That matters in two ways:
+
+- an SSH server *inside* WSL is only reachable while WSL happens to be running,
+  so a host on that port works intermittently at best
+- a session you expected to persist ends when the distro does — unless something
+  keeps it alive, which a running tmux session does by itself
+
+The fix is a process that never exits, started at boot. A Windows scheduled task
+with trigger *At startup*, set to **run whether the user is logged on or not**,
+running as the account you connect with:
+
+```powershell
+# sshd is both the service and the keep-alive
+wsl -d Ubuntu-24.04 -u root -- /usr/sbin/sshd -D
+
+# or, with [boot] systemd=true in /etc/wsl.conf, just keep the distro up
+wsl -d Ubuntu-24.04 -- sleep infinity
+```
+
+With that in place the machine is simply a **Linux host** on that port —
+`os: linux`, no `via` — and the DROPZONE works to it as well. Without it,
+`via: wsl` over the Windows SSH server is the more reliable route, because that
+starts WSL on demand.
 
 ## Moving an agent to another machine
 
