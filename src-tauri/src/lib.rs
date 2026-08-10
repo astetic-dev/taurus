@@ -846,8 +846,23 @@ done"#,
 
 // Zet de werkmap over naar een host. `skip` bevat de mapnamen die niet meegaan.
 // Kopieert; de bron blijft staan -- zie #102 voor waarom dat een bewuste keuze is.
+// Voortgang van een overzetting (#107). 1,7 GB duurt minuten, en zonder dit
+// staat er alleen "Synchroniseren…" terwijl niemand kan zien of het opschiet.
+//
+// Wat WEL meegaat: welk item aan de beurt is en hoeveel er zijn. Wat NIET
+// meegaat: bytes. De frontend heeft de groottes per item al uit de survey
+// staan -- daar rekent hij het percentage zelf uit, en dat scheelt hier een
+// tweede recursieve telling die net zo lang duurt als de survey zelf.
+//
+// Twee fasen, want met alleen "done" zou het eerste item -- vaak juist het
+// grootste -- er dood uitzien tot het klaar is.
+fn emit_transfer(app: &AppHandle, phase: &str, name: &str, index: u32, total: u32) {
+    let _ = app.emit("transfer-progress", (phase, name, index, total));
+}
+
 #[tauri::command(async)]
 fn push_workspace(
+    app: AppHandle,
     host_id: String,
     local_path: String,
     remote_path: String,
@@ -882,9 +897,7 @@ fn push_workspace(
     // Per top-level item apart, zodat overslaan mogelijk is. scp -r op de hele
     // map zou alles meenemen, inclusief een node_modules van een halve gigabyte.
     let skip_lower: Vec<String> = skip.iter().map(|s| s.to_lowercase()).collect();
-    let mut sent = 0u32;
     let mut skipped = 0u32;
-    let rd = std::fs::read_dir(src).map_err(|e| e.to_string())?;
     let target_dir = if host.os == "windows" {
         remote_path.replace('\\', "/")
     } else {
@@ -892,14 +905,25 @@ fn push_workspace(
     };
     let user_at = host_target(&host);
 
-    for e in rd.flatten() {
+    // Eerst de lijst, dan versturen: voor "item 3 van 12" moet het totaal
+    // bekend zijn voordat het eerste item begint.
+    let mut todo: Vec<(String, std::path::PathBuf)> = Vec::new();
+    for e in std::fs::read_dir(src).map_err(|e| e.to_string())?.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         if skip_lower.contains(&name.to_lowercase()) {
             skipped += 1;
             continue;
         }
+        todo.push((name, e.path()));
+    }
+    let total = todo.len() as u32;
+
+    for (i, (name, path)) in todo.iter().enumerate() {
+        let index = i as u32 + 1;
+        emit_transfer(&app, "start", name, index, total);
+
         let mut args = scp_base_args(&host)?;
-        args.push(e.path().to_string_lossy().into_owned());
+        args.push(path.to_string_lossy().into_owned());
         // Niet quoten achter de dubbele punt: scp loopt sinds OpenSSH 9 over
         // SFTP, en dan is het pad letterlijk (zie scp_to_host).
         args.push(format!("{}:{}/", user_at, target_dir.trim_end_matches('/')));
@@ -912,9 +936,9 @@ fn push_workspace(
             let err = String::from_utf8_lossy(&out.stderr);
             return Err(format!("overzetten van '{}' mislukte:\n{}", name, err.trim()));
         }
-        sent += 1;
+        emit_transfer(&app, "done", name, index, total);
     }
-    Ok(format!("{} overgezet, {} overgeslagen", sent, skipped))
+    Ok(format!("{} overgezet, {} overgeslagen", total, skipped))
 }
 
 // Gedeelde scp-opties voor beide richtingen.
@@ -950,6 +974,7 @@ fn host_target(host: &Host) -> String {
 // kant is de bron van waarheid.
 #[tauri::command(async)]
 fn pull_workspace(
+    app: AppHandle,
     host_id: String,
     remote_path: String,
     local_path: String,
@@ -970,8 +995,11 @@ fn pull_workspace(
         remote_path.clone()
     };
     let user_at = host_target(&host);
-    let mut got = 0u32;
-    for name in &items {
+    let total = items.len() as u32;
+    for (i, name) in items.iter().enumerate() {
+        let index = i as u32 + 1;
+        emit_transfer(&app, "start", name, index, total);
+
         let mut args = scp_base_args(&host)?;
         // Niet quoten achter de dubbele punt: scp loopt sinds OpenSSH 9 over
         // SFTP en behandelt het pad letterlijk.
@@ -985,9 +1013,9 @@ fn pull_workspace(
             let err = String::from_utf8_lossy(&out.stderr);
             return Err(format!("ophalen van '{}' mislukte:\n{}", name, err.trim()));
         }
-        got += 1;
+        emit_transfer(&app, "done", name, index, total);
     }
-    Ok(format!("{} opgehaald", got))
+    Ok(format!("{} opgehaald", total))
 }
 
 // Map-kiezer (bladeren-knop in de project-editor).
