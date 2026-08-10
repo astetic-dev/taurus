@@ -1098,6 +1098,12 @@ struct PersistedSession {
     // zonder dit veld blijven daardoor gewoon lokale sessies.
     #[serde(default)]
     host_id: String,
+    // Van welke agentkaart komt deze sessie (#90); leeg = losse sessie. Nodig om
+    // de tabbundeling een herstart te laten overleven. Een bestaande
+    // sessions.json zonder dit veld levert lege waarden -- die sessies komen dan
+    // eenmalig als losse sessies terug.
+    #[serde(default)]
+    project_id: String,
 }
 
 fn sessions_path() -> std::path::PathBuf {

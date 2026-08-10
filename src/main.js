@@ -79,6 +79,11 @@ const I18N = {
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
     c_tabs: "Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude-status op de tab (✶ Orbiting…)",
+    c_groups: "Tabs uit dezelfde map bundelen vanaf", c_groups_unit: "tabs",
+    c_recap: "Recap tonen bij hover over een tab",
+    grp_tab_members: "{n} sessies", grp_waiting: "wacht", grp_working: "bezig",
+    grp_adhoc: "Losse sessies",
+    recap_none: "(nog niets van deze agent te zien)", recap_exited: "afgesloten",
     c_mouse: "Agent mag de muis gebruiken (anders selecteert/scrolt de muis lokaal)",
     cancel: "Annuleer", save: "Opslaan",
     manage_projects: "Agents beheren", add_agent: "＋ Agent toevoegen",
@@ -111,6 +116,8 @@ const I18N = {
     help_search: "Zoeken in de scrollback met Ctrl+Shift+F. Geldt voor nieuwe sessies.",
     help_tabshortcuts: "Sneltoetsen voor tabs: Ctrl+Tab wisselt, Ctrl+1..9 springt naar een tab, Ctrl+T opent een nieuwe, Ctrl+W sluit de huidige.",
     help_tabstatus: "Toont Claude's huidige bezigheid live op het tabblad.\nVoorbeeld: '✶ Orbiting…' terwijl Claude werkt; een stille groene stip = klaar/wachtend.",
+    help_groups: "Vanaf dit aantal tabs worden sessies uit dezelfde map onder een tab gebundeld.\nHover (of klik) op zo'n tab om de sessies eronder uit te klappen.\nDe gebundelde tab flitst als een van zijn sessies op je wacht, dus je mist niets.",
+    help_recap: "Toont bij hover het laatste wat die agent zei, ook van tabs die niet in beeld staan.\nGelezen uit het terminalvenster van die sessie zelf; er wordt niets naar de agent gestuurd.",
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
     skin_default: "Standaard (donker)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
@@ -217,6 +224,11 @@ const I18N = {
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
     c_tabs: "Tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude status on the tab (✶ Orbiting…)",
+    c_groups: "Group tabs from the same folder from", c_groups_unit: "tabs",
+    c_recap: "Show a recap when hovering a tab",
+    grp_tab_members: "{n} sessions", grp_waiting: "waiting", grp_working: "working",
+    grp_adhoc: "Ad-hoc sessions",
+    recap_none: "(nothing from this agent yet)", recap_exited: "exited",
     c_mouse: "Let the agent use the mouse (otherwise the mouse selects/scrolls locally)",
     cancel: "Cancel", save: "Save",
     manage_projects: "Manage agents", add_agent: "＋ Add agent",
@@ -249,6 +261,8 @@ const I18N = {
     help_search: "Search the scrollback with Ctrl+Shift+F. Applies to new sessions.",
     help_tabshortcuts: "Tab shortcuts: Ctrl+Tab switches, Ctrl+1..9 jumps to a tab, Ctrl+T opens a new one, Ctrl+W closes the current.",
     help_tabstatus: "Shows Claude's current activity live on the tab.\nExample: '✶ Orbiting…' while Claude works; a steady green dot = done/waiting.",
+    help_groups: "From this many tabs, sessions from the same folder collapse into one tab.\nHover (or click) such a tab to expand its sessions below it.\nThe grouped tab flashes when one of its sessions is waiting for you, so nothing is missed.",
+    help_recap: "On hover, shows the last thing that agent said — including tabs that are not on screen.\nRead from that session's own terminal view; nothing is sent to the agent.",
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
     skin_default: "Default (dark)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
@@ -588,6 +602,9 @@ const DEFAULT_SETTINGS = {
   htmlView: "split",
   copyOnSelect: true, pasteOnRightClick: true, ctrlShiftCV: true,
   webLinks: true, search: true, tabShortcuts: true, tabStatus: true,
+  // Tabs bundelen zodra het er te veel worden (#90). Onder de drempel verandert
+  // er niets; daarboven vouwen sessies uit dezelfde bron samen.
+  tabGroups: true, tabGroupAt: 10, tabRecap: true,
   fullPaths: true,
   persistSessions: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
@@ -749,7 +766,17 @@ function commitProjectOrder() {
 // Idem voor de tabs: herbouw de sessions-Map in de nieuwe volgorde (Map bewaart de
 // invoegvolgorde en renderTabs itereert sessions.values()), persist die volgorde.
 function commitTabOrder() {
-  const ids = [...els.tabbar.children].map((c) => c.dataset.tabId).filter(Boolean);
+  // Met gebundelde tabs (#90) staat niet elke sessie los in de balk. Een
+  // groepstab vertegenwoordigt zijn leden, dus die vullen we op zijn plek weer
+  // in. Zonder dat klopt het aantal niet meer met sessions.size en zou de guard
+  // hieronder de hele herordening stil laten vallen.
+  const ids = [];
+  for (const c of els.tabbar.children) {
+    if (c.dataset.tabId) { ids.push(c.dataset.tabId); continue; }
+    const key = c.dataset.groupKey;
+    if (!key) continue;
+    for (const s of sessions.values()) if (tabGroupKey(s) === key) ids.push(s.id);
+  }
   const pairs = ids.map((id) => [id, sessions.get(id)]).filter(([, s]) => s);
   if (pairs.length === sessions.size) {
     sessions.clear();
@@ -1290,37 +1317,361 @@ async function browseFolder() {
 }
 
 /* ============ tabbalk ============ */
+// ---- tabs bundelen bij drukte (#90) ----
+//
+// "Dezelfde bron" is dezelfde map op dezelfde machine. Dat staat al op de
+// sessie; er is geen extra veld voor nodig. Twee sidebar-kaarten die naar
+// dezelfde map wijzen belanden daarmee wel in dezelfde groep -- dat is de
+// bewuste afweging in #90 (een projectId zou scherper zijn).
+// Sessies groeperen op de AGENT waaruit ze gestart zijn, niet op de map. Twee
+// kaarten die dezelfde map delen maar een ander model of een andere modus
+// hebben, horen niet samen te vallen -- en voor de gebruiker is "dit is de
+// kaart waarop ik geklikt heb" veel navolgbaarder dan "dit is dezelfde map".
+//
+// Losse sessies (via map-verkennen gestart) hebben geen kaart en dus een lege
+// projectId. Die vallen daarmee vanzelf in een eigen gezamenlijke bak.
+function tabGroupKey(s) {
+  return s.projectId || "";
+}
+
+// De rijen voor de tabbalk: losse sessies, of groepen als het er te veel worden.
+// De volgorde volgt de tabvolgorde; een groep staat op de plek van zijn eerste lid.
+function tabRows() {
+  const alle = [...sessions.values()];
+  if (!settings.tabGroups || alle.length <= settings.tabGroupAt) {
+    return alle.map((s) => ({ groep: false, leden: [s] }));
+  }
+  const perBron = new Map();
+  for (const s of alle) {
+    const k = tabGroupKey(s);
+    if (!perBron.has(k)) perBron.set(k, []);
+    perBron.get(k).push(s);
+  }
+  const rijen = [];
+  const gezien = new Set();
+  for (const s of alle) {
+    const k = tabGroupKey(s);
+    if (gezien.has(k)) continue;
+    gezien.add(k);
+    const leden = perBron.get(k);
+    rijen.push({ groep: leden.length > 1, leden, key: k });
+  }
+  return rijen;
+}
+
+// De staat van een groep is de dringendste staat van zijn leden. Zonder dit
+// verdwijnt het "klaar"-signaal van vier agents achter een dichtgeklapte tab --
+// precies het risico dat #90 als niet-onderhandelbaar benoemt.
+function groupState(leden) {
+  if (leden.some((s) => s.awaiting)) return "awaiting";
+  if (leden.some((s) => s.working)) return "working";
+  if (leden.every((s) => s.exited)) return "exited";
+  return "";
+}
+
+function hostBadge(s) {
+  const host = s.hostId ? hostById(s.hostId) : null;
+  return host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "";
+}
+
 function renderTabs() {
   els.tabbar.innerHTML = "";
-  for (const s of sessions.values()) {
+  closeTabPanel();
+  for (const rij of tabRows()) {
     const tab = document.createElement("div");
-    let cls = "tab";
-    if (current === s.id) cls += " active";
-    if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
-    tab.className = cls;
-    tab.dataset.tabId = s.id;
-    tab.style.borderTopColor = s.accent || "#7c9cff";
-    tab.style.setProperty("--tab-accent", s.accent || "#7c9cff");
-    const live = settings.tabStatus && s.status && !s.exited;
-    const shown = live ? `✶ ${s.status}…` : s.title;
-    // Bij tien agents over vier machines moet je op de tab kunnen zien waar er
-    // een draait -- zonder dat een lokale tab er anders uit gaat zien.
-    const host = s.hostId ? hostById(s.hostId) : null;
-    const badge = host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "";
-    tab.innerHTML = `<span class="tab-dot"></span>${badge}<span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
-    tab.title = host ? `${s.title} — ${host.nickname || host.hostname}` : s.title;
-    tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
-    tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
-    tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
-    makeReorderable(tab, { axis: "x", itemClass: "tab", endSelector: ".newtab", onDrop: commitTabOrder });
     els.tabbar.appendChild(tab);
+
+    if (!rij.groep) {
+      const s = rij.leden[0];
+      let cls = "tab";
+      if (current === s.id) cls += " active";
+      if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
+      tab.className = cls;
+      tab.dataset.tabId = s.id;
+      tab.style.borderTopColor = s.accent || "#7c9cff";
+      tab.style.setProperty("--tab-accent", s.accent || "#7c9cff");
+      const live = settings.tabStatus && s.status && !s.exited;
+      const shown = live ? `✶ ${s.status}…` : s.title;
+      // Bij tien agents over vier machines moet je op de tab kunnen zien waar er
+      // een draait -- zonder dat een lokale tab er anders uit gaat zien.
+      const host = s.hostId ? hostById(s.hostId) : null;
+      tab.innerHTML = `<span class="tab-dot"></span>${hostBadge(s)}<span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
+      tab.title = host ? `${s.title} — ${host.nickname || host.hostname}` : s.title;
+      tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
+      tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
+      tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
+      makeReorderable(tab, { axis: "x", itemClass: "tab", endSelector: ".newtab", onDrop: commitTabOrder });
+      wireRecapHover(tab, s);
+      continue;
+    }
+
+    // Gebundelde tab.
+    const leden = rij.leden;
+    const staat = groupState(leden);
+    const eerste = leden[0];
+    const bevatHuidige = leden.some((s) => s.id === current);
+    tab.className = "tab tabgroup" + (bevatHuidige ? " active" : "") + (staat ? ` ${staat}` : "");
+    tab.dataset.groupKey = rij.key;
+    tab.style.borderTopColor = eerste.accent || "#7c9cff";
+    tab.style.setProperty("--tab-accent", eerste.accent || "#7c9cff");
+    const wacht = leden.filter((s) => s.awaiting).length;
+    // De naam van de KAART, niet die van het eerste lid: leden kunnen een eigen
+    // sessietitel hebben, en dan zou de groep willekeurig de naam van wie
+    // toevallig eerst stond lenen. Losse sessies hebben geen kaart.
+    const kaart = rij.key ? projects.find((p) => p.id === rij.key) : null;
+    const naam = kaart ? (kaart.label || kaart.title || rij.key) : t("grp_adhoc");
+    tab.innerHTML =
+      `<span class="tab-dot"></span>${hostBadge(eerste)}` +
+      `<span class="tab-title">${escapeHtml(naam)}</span>` +
+      `<span class="tab-count">${leden.length}</span>` +
+      `<span class="tab-caret">▾</span>`;
+    tab.title = `${naam} — ${t("grp_tab_members").replace("{n}", leden.length)}` +
+      (wacht ? ` · ${wacht} ${t("grp_waiting")}` : "");
+    // Hover klapt uit, klik ook -- niets mag alleen via hover bereikbaar zijn.
+    tab.addEventListener("mouseenter", () => scheduleTabPanel(tab, rij));
+    tab.addEventListener("mouseleave", () => scheduleTabPanelClose());
+    tab.addEventListener("click", (e) => {
+      if (suppressNextClick) return;
+      e.stopPropagation();
+      if (tabPanelKey === rij.key) closeTabPanel(); else openTabPanel(tab, rij);
+    });
   }
   const plus = document.createElement("div");
   plus.className = "tab newtab" + (current === "new" ? " active" : "");
   plus.textContent = t("newtab");
   plus.addEventListener("click", () => { resetLaunchForm(); showView("new"); });
   els.tabbar.appendChild(plus);
+  syncTabPanel();
 }
+
+// ---- uitklappaneel van een gebundelde tab ----
+//
+// Het paneel hangt aan document.body, niet in de tabbalk. Dat is hetzelfde
+// patroon als .ctx-menu (openTabMenu) en het scheelt gepuzzel met clipping en
+// z-index in de topbar.
+let tabPanel = null;
+let tabPanelKey = null;
+let panelOpenTimer = null;
+let panelCloseTimer = null;
+
+const PANEL_OPEN_MS = 160;   // hover moet bedoeld zijn, niet langslopen
+const PANEL_CLOSE_MS = 260;  // marge: de muis moet van tab naar paneel reizen
+const RECAP_OPEN_MS = 450;
+const RECAP_REGELS = 10;
+
+function scheduleTabPanel(anchor, rij) {
+  if (panelCloseTimer) { clearTimeout(panelCloseTimer); panelCloseTimer = null; }
+  // Ook op tabPanel controleren, niet alleen op de sleutel: is het element weg
+  // zonder dat closeTabPanel liep, dan zou een sleutel-alleen-check het paneel
+  // voorgoed weigeren te heropenen.
+  if (tabPanelKey === rij.key && tabPanel) return;
+  if (panelOpenTimer) clearTimeout(panelOpenTimer);
+  panelOpenTimer = setTimeout(() => openTabPanel(anchor, rij), PANEL_OPEN_MS);
+}
+
+function scheduleTabPanelClose() {
+  if (panelOpenTimer) { clearTimeout(panelOpenTimer); panelOpenTimer = null; }
+  if (panelCloseTimer) clearTimeout(panelCloseTimer);
+  panelCloseTimer = setTimeout(closeTabPanel, PANEL_CLOSE_MS);
+}
+
+function closeTabPanel() {
+  if (panelOpenTimer) { clearTimeout(panelOpenTimer); panelOpenTimer = null; }
+  if (panelCloseTimer) { clearTimeout(panelCloseTimer); panelCloseTimer = null; }
+  hideRecap();
+  if (tabPanel) { tabPanel.remove(); tabPanel = null; }
+  tabPanelKey = null;
+}
+
+// renderTabs draait bij elke statuswijziging, ook van een agent op de
+// achtergrond. Het paneel daar dichtklappen zou het onder je muis weghalen
+// terwijl je aan het kijken bent -- dus opnieuw vullen als de groep nog bestaat.
+function syncTabPanel() {
+  if (!tabPanelKey) return;
+  const rij = tabRows().find((r) => r.groep && r.key === tabPanelKey);
+  const anchor = els.tabbar.querySelector(`[data-group-key="${CSS.escape(tabPanelKey)}"]`);
+  if (!rij || !anchor) { closeTabPanel(); return; }
+  openTabPanel(anchor, rij, true);
+}
+
+function openTabPanel(anchor, rij, hervullen = false) {
+  if (panelOpenTimer) { clearTimeout(panelOpenTimer); panelOpenTimer = null; }
+  if (!hervullen) hideRecap();
+  if (tabPanel) tabPanel.remove();
+  tabPanelKey = rij.key;
+
+  tabPanel = document.createElement("div");
+  tabPanel.className = "tabpanel";
+  for (const s of rij.leden) {
+    const rw = document.createElement("div");
+    let cls = "tabpanel-row";
+    if (s.id === current) cls += " active";
+    if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
+    rw.className = cls;
+    rw.style.setProperty("--tab-accent", s.accent || "#7c9cff");
+    const live = settings.tabStatus && s.status && !s.exited;
+    rw.innerHTML =
+      `<span class="tab-dot"></span>` +
+      `<span class="tabpanel-title">${escapeHtml(s.title)}</span>` +
+      (live ? `<span class="tabpanel-state live">✶ ${escapeHtml(s.status)}…</span>` : "") +
+      `<span class="tab-close">✕</span>`;
+    rw.addEventListener("click", (e) => {
+      if (e.target.closest(".tab-close")) return;
+      closeTabPanel();
+      showView(s.id);
+    });
+    rw.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
+    rw.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); closeTabPanel(); openTabMenu(e.clientX, e.clientY, s.id); });
+    // Bewust GEEN makeReorderable hier: een rij uit een hover-paneel slepen
+    // heeft geen betekenis (#90).
+    wireRecapHover(rw, s);
+    tabPanel.appendChild(rw);
+  }
+  tabPanel.addEventListener("mouseenter", () => {
+    if (panelCloseTimer) { clearTimeout(panelCloseTimer); panelCloseTimer = null; }
+  });
+  tabPanel.addEventListener("mouseleave", scheduleTabPanelClose);
+  document.body.appendChild(tabPanel);
+
+  const r = anchor.getBoundingClientRect();
+  const breedte = tabPanel.offsetWidth;
+  tabPanel.style.left = `${Math.max(6, Math.min(r.left, window.innerWidth - breedte - 6))}px`;
+  tabPanel.style.top = `${r.bottom}px`;
+}
+
+// ---- recap: wat is deze agent aan het doen? ----
+//
+// Uit de xterm-buffer van de sessie zelf. Dat kan omdat pty-output naar
+// s.term.write gaat ongeacht welke tab in beeld staat -- dus ook een verborgen
+// sessie houdt zijn scherm bij. Claude Code draait in de alternate buffer, dus
+// buffer.active IS het zichtbare TUI-scherm.
+//
+// Niet uit het transcript: dat formaat is intern aan Claude Code en verandert
+// tussen versies. En niet via /recap: dat zou tokens kosten en in het gesprek
+// belanden.
+function recapChrome(regel) {
+  const r = regel.trim();
+  if (!r) return true;
+  // Kadertekens (U+2500..U+257F): de scheidingslijnen om het invoerveld.
+  if (/^[─-╿\s]+$/.test(r)) return true;
+  if (/^[>❯]/.test(r)) return true;                    // invoerregel: > of ❯
+  if (/for shortcuts|to interrupt|manual mode|accept edits/i.test(r)) return true;
+  if (/^[⏸▪·]/.test(r)) return true;         // modus-/hintbalk
+  // Spinnerglyphs: dezelfde set als lastSpinnerVerb. Het werkwoord staat al op
+  // de tab, dus in de recap is die regel ruis.
+  if (/^[✶✻✽✳✢✦✧⋆∗]/.test(r)) return true;
+  return false;
+}
+
+function sessionRecap(s) {
+  const term = s && s.term;
+  if (!term || !term.buffer) return "";
+  try {
+    const buf = term.buffer.active;
+    const vanaf = Math.max(0, buf.length - Math.max((term.rows || 24) * 2, 48));
+    const regels = [];
+    for (let i = vanaf; i < buf.length; i++) {
+      const ln = buf.getLine(i);
+      regels.push(ln ? ln.translateToString(true) : "");
+    }
+    // Claude Code zet een bolletje voor elk agentbericht; dat is het anker.
+    // Zonder anker zou "de laatste niet-lege regels" het invoerveld tonen,
+    // want dat staat onderaan het scherm.
+    let van = -1;
+    for (let i = regels.length - 1; i >= 0; i--) {
+      if (regels[i].trim().startsWith("●")) { van = i; break; }
+    }
+    const schoon = (van >= 0 ? regels.slice(van) : regels)
+      .filter((r) => !recapChrome(r))
+      .map((r) => r.replace(/\s+$/, ""));
+    const gekozen = van >= 0 ? schoon.slice(0, RECAP_REGELS) : schoon.slice(-RECAP_REGELS);
+    return gekozen.join("\n").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+let recapTip = null;
+let recapTimer = null;
+
+function hideRecap() {
+  if (recapTimer) { clearTimeout(recapTimer); recapTimer = null; }
+  if (recapTip) { recapTip.remove(); recapTip = null; }
+}
+
+function showRecap(anchor, s) {
+  hideRecap();
+  const tekst = sessionRecap(s) || t("recap_none");
+  const host = s.hostId ? hostById(s.hostId) : null;
+  const staat = s.exited ? t("recap_exited")
+    : s.awaiting ? t("grp_waiting")
+    : s.working ? (s.status ? `✶ ${s.status}…` : t("grp_working"))
+    : "";
+  recapTip = document.createElement("div");
+  recapTip.className = "recap-tip";
+  // Waarmee is deze agent gestart? Bij een bundel per kaart kunnen leden
+  // verschillen in agent, model en modus, en dan moet je hier kunnen zien welke
+  // je te pakken hebt zonder eerst te schakelen.
+  const meta = s.command
+    ? [s.command]
+    : [s.agent || "claude", s.model || "", s.mode && s.mode !== "default" ? s.mode : ""].filter(Boolean);
+
+  recapTip.innerHTML =
+    `<div class="recap-head">` +
+      `<span class="recap-name">${escapeHtml(s.title)}</span>` +
+      (host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "") +
+      (staat ? `<span class="recap-state">${escapeHtml(staat)}</span>` : "") +
+    `</div>` +
+    `<div class="recap-meta">${escapeHtml(meta.join(" · "))}</div>` +
+    `<pre class="recap-body">${escapeHtml(tekst)}</pre>`;
+  document.body.appendChild(recapTip);
+
+  const r = anchor.getBoundingClientRect();
+  const w = recapTip.offsetWidth, h = recapTip.offsetHeight;
+  const rand = 8;
+  let x, y;
+
+  if (anchor.classList.contains("tabpanel-row") && tabPanel) {
+    // Naast het PANEEL, niet naast de rij: anders schuift de recap over de
+    // andere rijen heen en kun je niet meer zien waar je hovert. Past hij er
+    // rechts niet naast, dan onder het paneel -- nooit erover.
+    const p = tabPanel.getBoundingClientRect();
+    if (p.right + 6 + w <= window.innerWidth - rand) {
+      x = p.right + 6;
+      y = r.top;
+    } else {
+      x = p.left;
+      y = p.bottom + 6;
+    }
+  } else {
+    x = r.left;
+    y = r.bottom + 6;
+  }
+
+  if (x + w > window.innerWidth - rand) x = window.innerWidth - w - rand;
+  if (y + h > window.innerHeight - rand) y = window.innerHeight - h - rand;
+  recapTip.style.left = `${Math.max(rand, x)}px`;
+  recapTip.style.top = `${Math.max(rand, y)}px`;
+}
+
+function wireRecapHover(el, s) {
+  el.addEventListener("mouseenter", () => {
+    if (!settings.tabRecap) return;
+    if (recapTimer) clearTimeout(recapTimer);
+    recapTimer = setTimeout(() => showRecap(el, s), RECAP_OPEN_MS);
+  });
+  el.addEventListener("mouseleave", hideRecap);
+  el.addEventListener("mousedown", hideRecap);
+}
+
+// Buiten klikken of Escape sluit het paneel; hover alleen zou het aan de muis
+// vastplakken als de pointer het venster verlaat.
+document.addEventListener("mousedown", (e) => {
+  if (!tabPanel) return;
+  if (e.target.closest(".tabpanel") || e.target.closest(".tabgroup")) return;
+  closeTabPanel();
+});
+window.addEventListener("blur", () => { hideRecap(); closeTabPanel(); });
 
 // Zet de launch-view terug naar de lege startstaat: geen geselecteerd project,
 // het ingevulde formulier verborgen en het lege scherm met de browse-knop zichtbaar.
@@ -1351,7 +1702,7 @@ function showView(target) {
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -1448,6 +1799,9 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
     // Leeg = lokaal. Bij een remote sessie geldt `path` op DIE machine.
     hostId: hostId || "",
+    // Van welke agentkaart komt deze sessie (#90)? Leeg = losse sessie, via
+    // map-verkennen gestart. Bepaalt onder welke tab hij gebundeld wordt.
+    projectId: projectId || "",
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
@@ -1587,7 +1941,10 @@ async function startSession() {
     return;
   }
 
-  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId });
+  // Van welke kaart komt deze sessie? Bladeren naar een map zet id op "", dus
+  // losse sessies krijgen hier vanzelf een lege projectId.
+  const projectId = selected.id || "";
+  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId });
   try {
     await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
     showView(id);
@@ -1641,7 +1998,7 @@ function persistSessionsToDisk() {
   if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
   const list = [...sessions.values()]
     .filter((s) => !s.command)
-    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "" }));
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "" }));
   invoke("save_sessions", { sessions: list }).catch(() => {});
 }
 
@@ -1679,6 +2036,9 @@ async function restoreSessions() {
       mode: meta.mode || "default", command: "",
       agent: meta.agent || "claude", model: meta.model || "",
       hostId: meta.host_id || "",
+      // Zonder dit zouden alle hervatte sessies na een herstart als losse
+      // sessies in een bak belanden in plaats van bij hun eigen agent (#90).
+      projectId: meta.project_id || "",
     });
     session.el.classList.add("hidden");
     session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
@@ -2132,6 +2492,8 @@ function openSettings() {
   els.setSearch.checked = settings.search;
   els.setTabs.checked = settings.tabShortcuts;
   els.setTabStatus.checked = settings.tabStatus;
+  els.setTabRecap.checked = settings.tabRecap;
+  els.setTabGroupAt.value = settings.tabGroups ? settings.tabGroupAt : 0;
   els.setFullPaths.checked = settings.fullPaths;
   els.setPersist.checked = settings.persistSessions;
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
@@ -2195,6 +2557,12 @@ function saveSettingsFromForm() {
   settings.search = els.setSearch.checked;
   settings.tabShortcuts = els.setTabs.checked;
   settings.tabStatus = els.setTabStatus.checked;
+  settings.tabRecap = els.setTabRecap.checked;
+  // 0 = uit. Een aparte aanvinkvakje ernaast zou twee besturingselementen voor
+  // een keuze zijn; nul is hier de natuurlijke "nooit bundelen".
+  const drempel = parseInt(els.setTabGroupAt.value, 10);
+  settings.tabGroupAt = Number.isFinite(drempel) && drempel > 0 ? drempel : DEFAULT_SETTINGS.tabGroupAt;
+  settings.tabGroups = Number.isFinite(drempel) && drempel > 0;
   settings.fullPaths = els.setFullPaths.checked;
   settings.persistSessions = els.setPersist.checked;
   settings.skin = els.setSkin.value;
@@ -2423,6 +2791,9 @@ document.addEventListener("keydown", (e) => {
   }
   if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.hostModal.classList.add("hidden"); els.moveModal.classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
+  // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
+  // sluiten voordat de toets naar de terminal gaat (#90).
+  if (e.key === "Escape" && (tabPanel || recapTip)) { e.preventDefault(); closeTabPanel(); return; }
   const ctrl = e.ctrlKey && !e.altKey;
   if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); changeFont(1); return; }
   if (ctrl && e.key === "-") { e.preventDefault(); changeFont(-1); return; }
@@ -2816,6 +3187,8 @@ window.addEventListener("DOMContentLoaded", () => {
     setSearch: document.querySelector("#set-search"),
     setTabs: document.querySelector("#set-tabshortcuts"),
     setTabStatus: document.querySelector("#set-tabstatus"),
+    setTabRecap: document.querySelector("#set-tabrecap"),
+    setTabGroupAt: document.querySelector("#set-tabgroupat"),
     setFullPaths: document.querySelector("#set-fullpaths"),
     setPersist: document.querySelector("#set-persist"),
     setSkin: document.querySelector("#set-skin"),

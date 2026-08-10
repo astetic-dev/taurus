@@ -542,6 +542,78 @@ select:-webkit-autofill {
 .ctx-item { padding: 8px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: var(--text); }
 .ctx-item:hover { background: var(--bg-card-hover); }
 
+/* ---- Gebundelde tabs en hun uitklappaneel (#90) ---- */
+.tab.tabgroup { cursor: pointer; }
+.tab .tab-count {
+  flex: none; min-width: 18px; text-align: center;
+  padding: 1px 5px; border-radius: 9px;
+  background: var(--bg-card-hover); color: var(--text-dim);
+  font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.tab.tabgroup.active .tab-count { color: var(--text); }
+.tab .tab-caret { flex: none; color: var(--text-dim); font-size: 10px; }
+
+/* Aan document.body, net als .ctx-menu: dan kan de topbar hem niet afknippen. */
+.tabpanel {
+  position: fixed;
+  z-index: 210;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  padding: 4px;
+  min-width: 220px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.5);
+}
+.tabpanel-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 6px;
+  font-size: 13px; color: var(--text); cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.tabpanel-row:hover { background: var(--bg-card-hover); }
+.tabpanel-row.active { background: var(--bg); border-left-color: var(--tab-accent, var(--accent)); }
+.tabpanel-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabpanel-state { flex: none; color: var(--text-dim); font-size: 11px; }
+.tabpanel-row.exited .tabpanel-title { text-decoration: line-through; opacity: .7; }
+.tabpanel-row.exited .tab-dot { background: var(--text-dim); }
+
+/* ---- Recap bij hover over een tab ---- */
+.recap-tip {
+  position: fixed;
+  z-index: 220;
+  max-width: 460px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.5);
+  pointer-events: none; /* mag de hover die hem opriep niet onderbreken */
+}
+.recap-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.recap-name { font-weight: 600; font-size: 12.5px; color: var(--text); }
+/* Waarmee de agent gestart is: agent, model, modus -- of het eigen commando. */
+.recap-meta {
+  margin: -2px 0 6px;
+  font-family: Consolas, Monaco, monospace; font-size: 11px;
+  color: var(--accent); opacity: .85;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recap-state { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+.recap-body {
+  margin: 0; max-height: 15em; overflow: hidden;
+  font-family: Consolas, Monaco, monospace; font-size: 12px; line-height: 1.5;
+  color: var(--text-dim); white-space: pre-wrap; word-break: break-word;
+}
+
+/* Getal + eenheid als een geheel rechts in een instellingsrij. */
+.srow-num { display: flex; align-items: center; gap: 6px; }
+.srow-num input[type="number"] { width: 70px; }
+
 /* ---- Zoekbalk ---- */
 .searchbar {
   position: absolute;
