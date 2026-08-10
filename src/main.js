@@ -59,13 +59,14 @@ const I18N = {
     cap_command: "Commando-override — draait dit programma i.p.v. de agent (optioneel)",
     row_expand: "Openklappen", row_collapse: "Dichtklappen",
     agent_command: "Eigen commando…",
-    ctx_move: "⇄ Verplaats naar andere machine…",
-    move_title: "Agent verplaatsen naar een andere machine", move_target: "Doelmachine",
-    move_target_path: "Werkmap op de doelmachine", move_start: "Kopiëren & verplaatsen",
+    ctx_move: "⇄ Synchroniseer naar andere machine…",
+    move_title: "Agent synchroniseren naar een andere machine", move_target: "Doelmachine",
+    move_target_path: "Werkmap op de doelmachine", move_start: "Synchroniseren",
     move_surveying: "Werkmap doormeten…", move_core: "Projectbestanden (gaan altijd mee)",
     move_files: "bestanden", move_total: "Wordt overgezet", move_kind_work: "werkmap",
-    move_kind_bulk: "opnieuw op te bouwen", move_copying: "Kopiëren naar de doelmachine…",
-    move_done: "Agent verplaatst", move_need_path: "Vul een werkmap op de doelmachine in.",
+    move_kind_bulk: "opnieuw op te bouwen", move_copying: "Synchroniseren…",
+    move_progress: "Synchroniseren — {name} ({n}/{total}, {pct}%)",
+    move_done: "Agent gesynchroniseerd", move_need_path: "Vul een werkmap op de doelmachine in.",
     move_no_path: "Deze agent heeft geen werkmap.", move_no_target: "Voeg eerst een machine toe.",
     move_target_newer: "Daar staat al een map, en die is RECENTER bijgewerkt ({when}). Wat je aanvinkt vervangt wat daar staat. Weet je het zeker?",
     move_target_exists_info: "Daar staat al een map (laatst gewijzigd {when}). Wat je aanvinkt vervangt wat daar staat.",
@@ -196,13 +197,14 @@ const I18N = {
     cap_command: "Command override — runs this program instead of the agent (optional)",
     row_expand: "Expand", row_collapse: "Collapse",
     agent_command: "Own command…",
-    ctx_move: "⇄ Move to another machine…",
-    move_title: "Move agent to another machine", move_target: "Target machine",
-    move_target_path: "Working directory on the target machine", move_start: "Copy & move",
+    ctx_move: "⇄ Synchronize to another machine…",
+    move_title: "Synchronize agent to another machine", move_target: "Target machine",
+    move_target_path: "Working directory on the target machine", move_start: "Synchronize",
     move_surveying: "Measuring working directory…", move_core: "Project files (always included)",
     move_files: "files", move_total: "Will be transferred", move_kind_work: "work folder",
-    move_kind_bulk: "rebuildable", move_copying: "Copying to the target machine…",
-    move_done: "Agent moved", move_need_path: "Enter a working directory on the target machine.",
+    move_kind_bulk: "rebuildable", move_copying: "Synchronizing…",
+    move_progress: "Synchronizing — {name} ({n}/{total}, {pct}%)",
+    move_done: "Agent synchronized", move_need_path: "Enter a working directory on the target machine.",
     move_no_path: "This agent has no working directory.", move_no_target: "Add a machine first.",
     move_target_newer: "A folder is already there, and it was changed MORE RECENTLY ({when}). What you tick replaces what is there. Are you sure?",
     move_target_exists_info: "A folder is already there (last changed {when}). What you tick replaces what is there.",
@@ -1138,6 +1140,32 @@ function suggestTargetPath(project, targetHostId) {
 }
 function effectiveWindows(h) { return h && h.os === "windows" && h.via !== "wsl"; }
 
+// Hoe zwaar weegt elk item in de voortgang? (#107) De backend meldt alleen WELK
+// item aan de beurt is; de groottes staan hier al uit de survey, dus het
+// percentage rekenen we hier uit in plaats van de map nog een keer te tellen.
+//
+// coreBytes is een gezamenlijk getal voor alle losse projectbestanden, en die
+// gaan per stuk over. Ze krijgen daarom een gelijk deel toebedeeld -- niet
+// exact, maar wel netjes oplopend, en samen kloppen ze met het totaal dat de
+// dialoog boven de knop toont.
+function transferWeights(survey, skip) {
+  const s = survey || {};
+  const map = new Map();
+  let total = 0;
+  const core = s.core || [];
+  const perCore = core.length ? (s.coreBytes || 0) / core.length : 0;
+  for (const naam of core) {
+    map.set(naam.toLowerCase(), perCore);
+    total += perCore;
+  }
+  for (const d of [...(s.work || []), ...(s.bulk || [])]) {
+    if (skip.has(d.name.toLowerCase())) continue;
+    map.set(d.name.toLowerCase(), d.bytes || 0);
+    total += d.bytes || 0;
+  }
+  return { map, total };
+}
+
 async function runMove() {
   if (!movePlan) return;
   const target = els.mvTarget.value;
@@ -1153,6 +1181,28 @@ async function runMove() {
   els.mvGo.disabled = true;
   els.mvStatus.className = "status-msg";
   els.mvStatus.textContent = t("move_copying");
+
+  // Voortgang meelezen (#107). Het percentage loopt op de bytes die de survey
+  // al kende; kent hij een naam niet, dan valt hij terug op het aantal items.
+  const w = transferWeights(movePlan.survey, movePlan.skip);
+  let doneBytes = 0;
+  const stopProgress = await listen("transfer-progress", (ev) => {
+    const [phase, name, index, total] = ev.payload;
+    if (phase === "done") {
+      doneBytes += w.map.get(String(name).toLowerCase()) ?? 0;
+      return;
+    }
+    const pct = w.total > 0
+      // 99 als plafond: 100% terwijl het laatste item nog loopt leest als klaar.
+      ? Math.min(99, Math.floor((doneBytes / w.total) * 100))
+      : Math.floor(((index - 1) / Math.max(1, total)) * 100);
+    els.mvStatus.textContent = t("move_progress")
+      .replace("{name}", name)
+      .replace("{n}", index)
+      .replace("{total}", total)
+      .replace("{pct}", pct);
+  });
+
   try {
     let res;
     if (target) {
@@ -1188,6 +1238,9 @@ async function runMove() {
     els.mvStatus.textContent = "✗ " + e;
     els.mvStatus.className = "status-msg err";
   } finally {
+    // Altijd afmelden: blijft deze luisteraar staan, dan schrijft een volgende
+    // synchronisatie in de statusregel van een dialoog die al gesloten is.
+    stopProgress();
     els.mvGo.disabled = false;
   }
 }
