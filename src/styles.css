@@ -596,6 +596,13 @@ select:-webkit-autofill {
   border-bottom: 1px solid var(--border);
 }
 .recap-name { font-weight: 600; font-size: 12.5px; color: var(--text); }
+/* Waarmee de agent gestart is: agent, model, modus -- of het eigen commando. */
+.recap-meta {
+  margin: -2px 0 6px;
+  font-family: Consolas, Monaco, monospace; font-size: 11px;
+  color: var(--accent); opacity: .85;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .recap-state { color: var(--text-dim); font-size: 11px; margin-left: auto; }
 .recap-body {
   margin: 0; max-height: 15em; overflow: hidden;

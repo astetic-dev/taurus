@@ -82,6 +82,7 @@ const I18N = {
     c_groups: "Tabs uit dezelfde map bundelen vanaf", c_groups_unit: "tabs",
     c_recap: "Recap tonen bij hover over een tab",
     grp_tab_members: "{n} sessies", grp_waiting: "wacht", grp_working: "bezig",
+    grp_adhoc: "Losse sessies",
     recap_none: "(nog niets van deze agent te zien)", recap_exited: "afgesloten",
     c_mouse: "Agent mag de muis gebruiken (anders selecteert/scrolt de muis lokaal)",
     cancel: "Annuleer", save: "Opslaan",
@@ -226,6 +227,7 @@ const I18N = {
     c_groups: "Group tabs from the same folder from", c_groups_unit: "tabs",
     c_recap: "Show a recap when hovering a tab",
     grp_tab_members: "{n} sessions", grp_waiting: "waiting", grp_working: "working",
+    grp_adhoc: "Ad-hoc sessions",
     recap_none: "(nothing from this agent yet)", recap_exited: "exited",
     c_mouse: "Let the agent use the mouse (otherwise the mouse selects/scrolls locally)",
     cancel: "Cancel", save: "Save",
@@ -1321,15 +1323,15 @@ async function browseFolder() {
 // sessie; er is geen extra veld voor nodig. Twee sidebar-kaarten die naar
 // dezelfde map wijzen belanden daarmee wel in dezelfde groep -- dat is de
 // bewuste afweging in #90 (een projectId zou scherper zijn).
-// Scheidingsteken dat in geen enkel pad kan voorkomen. Opgebouwd met
-// String.fromCharCode in plaats van als escape in de broncode: een echte
-// NUL-byte in het bestand laat git het als binair zien, en dan is er geen
-// regeldiff meer. Een spatie zou hier niet volstaan, want een pad mag
-// spaties bevatten.
-const TAB_GROEP_SCHEIDING = String.fromCharCode(0);
-
+// Sessies groeperen op de AGENT waaruit ze gestart zijn, niet op de map. Twee
+// kaarten die dezelfde map delen maar een ander model of een andere modus
+// hebben, horen niet samen te vallen -- en voor de gebruiker is "dit is de
+// kaart waarop ik geklikt heb" veel navolgbaarder dan "dit is dezelfde map".
+//
+// Losse sessies (via map-verkennen gestart) hebben geen kaart en dus een lege
+// projectId. Die vallen daarmee vanzelf in een eigen gezamenlijke bak.
 function tabGroupKey(s) {
-  return (s.hostId || "") + TAB_GROEP_SCHEIDING + (s.path || "").toLowerCase();
+  return s.projectId || "";
 }
 
 // De rijen voor de tabbalk: losse sessies, of groepen als het er te veel worden.
@@ -1413,12 +1415,17 @@ function renderTabs() {
     tab.style.borderTopColor = eerste.accent || "#7c9cff";
     tab.style.setProperty("--tab-accent", eerste.accent || "#7c9cff");
     const wacht = leden.filter((s) => s.awaiting).length;
+    // De naam van de KAART, niet die van het eerste lid: leden kunnen een eigen
+    // sessietitel hebben, en dan zou de groep willekeurig de naam van wie
+    // toevallig eerst stond lenen. Losse sessies hebben geen kaart.
+    const kaart = rij.key ? projects.find((p) => p.id === rij.key) : null;
+    const naam = kaart ? (kaart.label || kaart.title || rij.key) : t("grp_adhoc");
     tab.innerHTML =
       `<span class="tab-dot"></span>${hostBadge(eerste)}` +
-      `<span class="tab-title">${escapeHtml(eerste.title)}</span>` +
+      `<span class="tab-title">${escapeHtml(naam)}</span>` +
       `<span class="tab-count">${leden.length}</span>` +
       `<span class="tab-caret">▾</span>`;
-    tab.title = `${eerste.title} — ${t("grp_tab_members").replace("{n}", leden.length)}` +
+    tab.title = `${naam} — ${t("grp_tab_members").replace("{n}", leden.length)}` +
       (wacht ? ` · ${wacht} ${t("grp_waiting")}` : "");
     // Hover klapt uit, klik ook -- niets mag alleen via hover bereikbaar zijn.
     tab.addEventListener("mouseenter", () => scheduleTabPanel(tab, rij));
@@ -1602,12 +1609,21 @@ function showRecap(anchor, s) {
     : "";
   recapTip = document.createElement("div");
   recapTip.className = "recap-tip";
+  // Waarmee is deze agent gestart? Bij een bundel per kaart kunnen leden
+  // verschillen in agent, model en modus, en dan moet je hier kunnen zien welke
+  // je te pakken hebt zonder eerst te schakelen.
+  const meta = s.command
+    ? [s.command]
+    : [s.agent || "claude", s.model || "", s.mode && s.mode !== "default" ? s.mode : ""].filter(Boolean);
+
   recapTip.innerHTML =
     `<div class="recap-head">` +
       `<span class="recap-name">${escapeHtml(s.title)}</span>` +
       (host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "") +
       (staat ? `<span class="recap-state">${escapeHtml(staat)}</span>` : "") +
-    `</div><pre class="recap-body">${escapeHtml(tekst)}</pre>`;
+    `</div>` +
+    `<div class="recap-meta">${escapeHtml(meta.join(" · "))}</div>` +
+    `<pre class="recap-body">${escapeHtml(tekst)}</pre>`;
   document.body.appendChild(recapTip);
 
   const r = anchor.getBoundingClientRect();
@@ -1686,7 +1702,7 @@ function showView(target) {
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -1783,6 +1799,9 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     id, uuid, path, title, accent, mode, command, agent: agent || "claude", model: model || "", term, fit, search, el,
     // Leeg = lokaal. Bij een remote sessie geldt `path` op DIE machine.
     hostId: hostId || "",
+    // Van welke agentkaart komt deze sessie (#90)? Leeg = losse sessie, via
+    // map-verkennen gestart. Bepaalt onder welke tab hij gebundeld wordt.
+    projectId: projectId || "",
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
@@ -1922,7 +1941,10 @@ async function startSession() {
     return;
   }
 
-  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId });
+  // Van welke kaart komt deze sessie? Bladeren naar een map zet id op "", dus
+  // losse sessies krijgen hier vanzelf een lege projectId.
+  const projectId = selected.id || "";
+  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId });
   try {
     await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
     showView(id);
@@ -1976,7 +1998,7 @@ function persistSessionsToDisk() {
   if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
   const list = [...sessions.values()]
     .filter((s) => !s.command)
-    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "" }));
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "" }));
   invoke("save_sessions", { sessions: list }).catch(() => {});
 }
 
@@ -2014,6 +2036,9 @@ async function restoreSessions() {
       mode: meta.mode || "default", command: "",
       agent: meta.agent || "claude", model: meta.model || "",
       hostId: meta.host_id || "",
+      // Zonder dit zouden alle hervatte sessies na een herstart als losse
+      // sessies in een bak belanden in plaats van bij hun eigen agent (#90).
+      projectId: meta.project_id || "",
     });
     session.el.classList.add("hidden");
     session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
