@@ -463,26 +463,33 @@ select:-webkit-autofill {
 .dropper-paste:hover { color: var(--text); border-color: var(--accent); }
 .dropper-paste .dropper-paste-ico { width: 15px; height: 15px; }
 .dropper-paste .dropper-paste-ico svg { width: 100%; height: 100%; display: block; }
-/* Gemeten: een rij is 24px, de gap 5px. 146px laat dus vijf hele rijen zien
-   plus een streepje van de zesde. Dat streepje is functioneel: de scroller
-   hieronder is onzichtbaar tot je erover hovert, dus het is het enige signaal
-   dat er meer onder staat. Boven deze hoogte scrollen, niet krimpen -- zie
-   flex: none op .dropper-item (#113). */
+/* Gemeten: een rij is 24px, de gap 5px, dus 88px = precies DRIE hele rijen.
+   Drie is het maximum: de zijbalk moet vooral ruimte houden voor de agentlijst
+   erboven, en op een laag scherm is dat krap. Boven deze hoogte scrollen, niet
+   krimpen -- zie flex: none op .dropper-item (#113). */
 .dropper-list {
   display: flex; flex-direction: column; gap: 5px; margin-top: 8px;
-  max-height: 146px; overflow-y: auto;
+  max-height: 88px; overflow-y: auto;
 }
 
-/* Discrete scroller: geen pijlknoppen, geen zichtbare baan, en een dunne duim
-   die pas opvalt als je er met de muis bij bent. De retro-skins stylen
-   scrollbars bewust zelf en zijn specifieker, dus die houden hun eigen bak. */
-.dropper-list { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+/* Discrete scroller: geen zichtbare baan, en een dunne duim die flauw zichtbaar
+   is en oplicht bij hover. Niet volledig verbergen: met drie rijen is die duim het
+   enige signaal dat er meer bestanden onder staan.
+
+   De kleine eindpijltjes blijven staan, en dat is hier gewenst. Chromium tekent
+   die zodra je de scrollbar zelf stylet en trekt zich niets aan van display:none
+   op ::-webkit-scrollbar-button; ze zijn 8px breed en flauw genoeg om als
+   eindmarkering te lezen. Echt weg krijg je ze alleen via de expliciete varianten
+   :vertical:start:decrement en :vertical:end:increment.
+
+   De retro-skins stylen scrollbars bewust zelf en zijn specifieker, dus die
+   houden hun eigen bak. */
+.dropper-list { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .dropper-list:hover { scrollbar-color: var(--text-dim) transparent; }
 .dropper-list::-webkit-scrollbar { width: 8px; }
 .dropper-list::-webkit-scrollbar-track { background: transparent; }
-.dropper-list::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .dropper-list::-webkit-scrollbar-thumb {
-  background: transparent; border-radius: 999px;
+  background: var(--border); border-radius: 999px;
   /* Doorzichtige rand + clip maakt de duim optisch 4px in een 8px goot. */
   border: 2px solid transparent; background-clip: content-box;
 }
