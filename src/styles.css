@@ -463,11 +463,37 @@ select:-webkit-autofill {
 .dropper-paste:hover { color: var(--text); border-color: var(--accent); }
 .dropper-paste .dropper-paste-ico { width: 15px; height: 15px; }
 .dropper-paste .dropper-paste-ico svg { width: 100%; height: 100%; display: block; }
-.dropper-list { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 150px; overflow-y: auto; }
+/* Gemeten: een rij is 24px, de gap 5px. 146px laat dus vijf hele rijen zien
+   plus een streepje van de zesde. Dat streepje is functioneel: de scroller
+   hieronder is onzichtbaar tot je erover hovert, dus het is het enige signaal
+   dat er meer onder staat. Boven deze hoogte scrollen, niet krimpen -- zie
+   flex: none op .dropper-item (#113). */
+.dropper-list {
+  display: flex; flex-direction: column; gap: 5px; margin-top: 8px;
+  max-height: 146px; overflow-y: auto;
+}
+
+/* Discrete scroller: geen pijlknoppen, geen zichtbare baan, en een dunne duim
+   die pas opvalt als je er met de muis bij bent. De retro-skins stylen
+   scrollbars bewust zelf en zijn specifieker, dus die houden hun eigen bak. */
+.dropper-list { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.dropper-list:hover { scrollbar-color: var(--text-dim) transparent; }
+.dropper-list::-webkit-scrollbar { width: 8px; }
+.dropper-list::-webkit-scrollbar-track { background: transparent; }
+.dropper-list::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.dropper-list::-webkit-scrollbar-thumb {
+  background: transparent; border-radius: 999px;
+  /* Doorzichtige rand + clip maakt de duim optisch 4px in een 8px goot. */
+  border: 2px solid transparent; background-clip: content-box;
+}
+.dropper-list:hover::-webkit-scrollbar-thumb { background: var(--text-dim); background-clip: content-box; }
 .dropper-list:empty { display: none; }
 /* Klikbare regel = overzicht van input\; klik plaatst het volledige pad in de prompt. */
 .dropper-item {
   display: block;
+  /* Anders krimpen de rijen tot onleesbaar in plaats van de lijst te laten
+     scrollen: flex-shrink is standaard 1 in een flexkolom (#113). */
+  flex: none;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 7px;
