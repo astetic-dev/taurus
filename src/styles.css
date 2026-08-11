@@ -463,11 +463,44 @@ select:-webkit-autofill {
 .dropper-paste:hover { color: var(--text); border-color: var(--accent); }
 .dropper-paste .dropper-paste-ico { width: 15px; height: 15px; }
 .dropper-paste .dropper-paste-ico svg { width: 100%; height: 100%; display: block; }
-.dropper-list { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; max-height: 150px; overflow-y: auto; }
+/* Gemeten: een rij is 24px, de gap 5px, dus 88px = precies DRIE hele rijen.
+   Drie is het maximum: de zijbalk moet vooral ruimte houden voor de agentlijst
+   erboven, en op een laag scherm is dat krap. Boven deze hoogte scrollen, niet
+   krimpen -- zie flex: none op .dropper-item (#113). */
+.dropper-list {
+  display: flex; flex-direction: column; gap: 5px; margin-top: 8px;
+  max-height: 88px; overflow-y: auto;
+}
+
+/* Discrete scroller: geen zichtbare baan, en een dunne duim die flauw zichtbaar
+   is en oplicht bij hover. Niet volledig verbergen: met drie rijen is die duim het
+   enige signaal dat er meer bestanden onder staan.
+
+   De kleine eindpijltjes blijven staan, en dat is hier gewenst. Chromium tekent
+   die zodra je de scrollbar zelf stylet en trekt zich niets aan van display:none
+   op ::-webkit-scrollbar-button; ze zijn 8px breed en flauw genoeg om als
+   eindmarkering te lezen. Echt weg krijg je ze alleen via de expliciete varianten
+   :vertical:start:decrement en :vertical:end:increment.
+
+   De retro-skins stylen scrollbars bewust zelf en zijn specifieker, dus die
+   houden hun eigen bak. */
+.dropper-list { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.dropper-list:hover { scrollbar-color: var(--text-dim) transparent; }
+.dropper-list::-webkit-scrollbar { width: 8px; }
+.dropper-list::-webkit-scrollbar-track { background: transparent; }
+.dropper-list::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 999px;
+  /* Doorzichtige rand + clip maakt de duim optisch 4px in een 8px goot. */
+  border: 2px solid transparent; background-clip: content-box;
+}
+.dropper-list:hover::-webkit-scrollbar-thumb { background: var(--text-dim); background-clip: content-box; }
 .dropper-list:empty { display: none; }
 /* Klikbare regel = overzicht van input\; klik plaatst het volledige pad in de prompt. */
 .dropper-item {
   display: block;
+  /* Anders krimpen de rijen tot onleesbaar in plaats van de lijst te laten
+     scrollen: flex-shrink is standaard 1 in een flexkolom (#113). */
+  flex: none;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 7px;
