@@ -30,7 +30,9 @@ projects.real.json
 # Real branding lives in %APPDATA%\Taurus\branding.json (+ a logo); these are
 # only here in case someone keeps a copy in the working tree for testing.
 branding.json
-src/*-logo.png
+# Zonder pad-prefix: een merk-logo hoort ook naast de gebundelde resources
+# (src-tauri/<merk>-logo.png), en dat pad viel eerder buiten de regel (#111).
+*-logo.png
 !src/taurus-logo.png
 # Brand-specific Tauri config overlays (installer name/identifier) stay local.
 src-tauri/tauri.*.conf.json
