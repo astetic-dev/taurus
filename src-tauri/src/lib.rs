@@ -148,10 +148,17 @@ struct Host {
     #[serde(default)]
     os: String,
     // Wat houdt de sessie in leven als de verbinding wegvalt:
-    // "tmux" | "psmux" | "taurus-agent" | "none". Bij "none" is het transcript
-    // de enige persistentie (claude --resume) en sterft een lopende beurt.
+    // "herdr" | "tmux" | "psmux" | "taurus-agent" | "none". Bij "none" is het
+    // transcript de enige persistentie (claude --resume) en sterft een lopende
+    // beurt.
     #[serde(default)]
     mux: String,
+    // Volgt `mux` de probe, of heb je hem zelf vastgezet? Een hertest mag een
+    // eigen keuze niet stilletjes terugdraaien -- die test doe je juist vaak
+    // NADAT je iets geinstalleerd hebt. Een oude hosts.json zonder dit veld
+    // gedraagt zich als voorheen: automatisch.
+    #[serde(default = "default_true")]
+    mux_auto: bool,
     // Versie van de taurus-agent op de host; leeg als hij er niet staat.
     #[serde(default)]
     agent_version: String,
@@ -176,6 +183,10 @@ fn effective_os(host: &Host) -> &str {
 
 fn default_ssh_port() -> u16 {
     22
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn hosts_path() -> std::path::PathBuf {
@@ -306,6 +317,10 @@ struct HostProbe {
     os: String,
     // Beste multiplexer die op de host gevonden is; "none" als er geen is.
     mux: String,
+    // Alles wat er gevonden is, in voorkeursvolgorde. Nodig omdat de gebruiker
+    // een andere dan de beste mag kiezen: zonder deze lijst kan het formulier
+    // niet zien of die keuze op de host bestaat.
+    muxes: Vec<String>,
     // Versieregel van de agent-CLI, leeg als hij ontbreekt.
     claude: String,
     // Uitgaand HTTPS naar api.anthropic.com. Zonder dit kan er geen agent
@@ -319,6 +334,19 @@ struct HostProbe {
     // niet blind op tmux wordt gezet terwijl daar herdr staat.
     wsl_mux: String,
     error: String,
+}
+
+// Welke van de gevonden multiplexers Taurus zou kiezen. Herdr eerst: dezelfde
+// persistentie als tmux, plus een status die je kunt uitlezen, en hij bestaat op
+// alle drie de platforms. taurus-agent staat er nog in omdat een oude
+// hosts.json hem kan bevatten, maar hij is nooit gebouwd -- daarom laatst.
+fn best_mux(found: &[String]) -> String {
+    for pref in ["herdr", "tmux", "psmux", "taurus-agent"] {
+        if found.iter().any(|m| m == pref) {
+            return pref.to_string();
+        }
+    }
+    "none".to_string()
 }
 
 // ssh-argumenten tot en met het doel, gedeeld door de launch en de probe.
@@ -425,12 +453,14 @@ fn probe_host(host: Host) -> HostProbe {
     // Ronde 2: inventarisatie. Op Windows via base64 UTF-16LE, zodat cmd.exe geen
     // enkel metateken te zien krijgt (dezelfde reden als bij de launch).
     let (out, _) = if p.os == "linux" {
-        // Herdr eerst: hij geeft dezelfde persistentie als tmux plus een status
-        // die je kunt uitlezen, en hij is er op alle drie de platforms. Deze
-        // shell is GEEN login shell, dus ~/.local/bin staat niet op PATH -- het
-        // expliciete -x is daarom geen luxe maar de normale situatie.
-        let script = "if command -v herdr >/dev/null 2>&1 || [ -x \"$HOME/.local/bin/herdr\" ]; then echo MUX=herdr; \
-                      elif command -v tmux >/dev/null 2>&1; then echo MUX=tmux; else echo MUX=none; fi; \
+        // Alles rapporteren wat er staat, niet alleen de beste: de gebruiker mag
+        // in het formulier een andere kiezen, en dan moet te zien zijn of die
+        // keuze bestaat. Deze shell is GEEN login shell, dus ~/.local/bin staat
+        // niet op PATH -- het expliciete -x is daarom geen luxe maar de normale
+        // situatie.
+        let script = "M=''; for c in herdr tmux psmux; do \
+                      if command -v \"$c\" >/dev/null 2>&1 || [ -x \"$HOME/.local/bin/$c\" ]; then M=\"$M$c,\"; fi; done; \
+                      echo \"MUXES=$M\"; \
                       (claude --version 2>/dev/null || echo '') | head -1 | sed 's/^/CLAUDE=/'; \
                       curl -sS -o /dev/null -w 'HTTP=%{http_code}' --max-time 10 https://api.anthropic.com/ 2>/dev/null || echo HTTP=000";
         match ssh_run(&host, script) {
@@ -441,9 +471,13 @@ fn probe_host(host: Host) -> HostProbe {
             }
         }
     } else {
-        // Zelfde volgorde als op POSIX. De herdr-installer zet zijn map alleen in
-        // de PATH van NIEUWE sessies, dus Get-Command alleen is niet genoeg.
-        let ps = r#"if ((Get-Command herdr -EA 0) -or (Test-Path "$env:LOCALAPPDATA\Programs\Herdr\bin\herdr.exe")) { 'MUX=herdr' } elseif (Get-Command psmux -EA 0) { 'MUX=psmux' } elseif (Test-Path "$env:USERPROFILE\.taurus\bin\taurus-agent.exe") { 'MUX=taurus-agent' } else { 'MUX=none' }
+        // Zelfde lijst als op POSIX. De herdr-installer zet zijn map alleen in de
+        // PATH van NIEUWE sessies, dus Get-Command alleen is niet genoeg.
+        let ps = r#"$f = @()
+if ((Get-Command herdr -EA 0) -or (Test-Path "$env:LOCALAPPDATA\Programs\Herdr\bin\herdr.exe")) { $f += 'herdr' }
+if (Get-Command psmux -EA 0) { $f += 'psmux' }
+if (Test-Path "$env:USERPROFILE\.taurus\bin\taurus-agent.exe") { $f += 'taurus-agent' }
+'MUXES=' + ($f -join ',')
 $c = Get-Command claude -EA 0
 if ($c) { 'CLAUDE=' + (& claude --version 2>&1 | Select-Object -First 1) } else { 'CLAUDE=' }
 try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -TimeoutSec 10 -UseBasicParsing; 'HTTP=' + $r.StatusCode } catch { 'HTTP=' + [int]$_.Exception.Response.StatusCode }"#;
@@ -459,8 +493,12 @@ try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -Timeo
 
     for line in out.lines() {
         let line = line.trim();
-        if let Some(v) = line.strip_prefix("MUX=") {
-            p.mux = v.trim().to_string();
+        if let Some(v) = line.strip_prefix("MUXES=") {
+            p.muxes = v
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
         } else if let Some(v) = line.strip_prefix("CLAUDE=") {
             p.claude = v.trim().to_string();
         } else if let Some(v) = line.strip_prefix("HTTP=") {
@@ -470,9 +508,7 @@ try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -Timeo
             p.outbound = code > 0;
         }
     }
-    if p.mux.is_empty() {
-        p.mux = "none".into();
-    }
+    p.mux = best_mux(&p.muxes);
 
     // Windows zonder multiplexer: kijk of WSL er wel een heeft. Dat is de enige
     // route naar heraanhaken op zo'n machine zonder iets te installeren. Losse
@@ -2087,6 +2123,301 @@ fn build_remote_payload_inner(
     }
 }
 
+// Een sessienaam komt van de HOST terug en gaat daarna in een commando dat daar
+// weer geparseerd wordt, plus in een bestandsnaam onder /tmp. Alleen tekens waar
+// geen shell iets mee doet. Dit is geen bescherming van dit werkstation -- de
+// payload draait ginds -- maar het houdt een rare naam (spatie, puntkomma,
+// backtick) uit een commando dat anders stil iets anders doet dan bedoeld.
+fn valid_session_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+// Aanhaken aan een sessie die er AL is. Bewust een andere payload dan die van een
+// nieuwe sessie: hier wordt niets aangemaakt en niets gestart. Een `pane run` op
+// een sessie waar de agent middenin een beurt zit, zou die beurt overschrijven.
+fn build_attach_payload(host: &Host, session: &str) -> Result<String, String> {
+    if !valid_session_name(session) {
+        return Err(format!(
+            "Ongeldige sessienaam: {}. Alleen letters, cijfers, - _ en .",
+            session
+        ));
+    }
+    let os = effective_os(host);
+    let via_wsl = host.via == "wsl";
+
+    if host.mux == "herdr" && os == "windows" && !via_wsl {
+        // Zoals bij de launch: `agent attach` bestaat nog niet op Windows, dus de
+        // sessie-TUI haakt aan.
+        let script = [
+            "$h = (Get-Command herdr -EA 0).Source".to_string(),
+            format!(
+                "if (-not $h) {{ $h = Join-Path $env:LOCALAPPDATA '{}' }}",
+                HERDR_WIN_FALLBACK
+            ),
+            "if (-not (Test-Path $h)) { Write-Host 'herdr staat niet op deze machine'; exit 1 }"
+                .to_string(),
+            format!("$s = {}", ps_quote(session)),
+            "& $h --session $s".to_string(),
+        ]
+        .join("\n");
+        return Ok(format!(
+            "powershell -NoProfile -EncodedCommand {}",
+            b64(&utf16le(&script))
+        ));
+    }
+
+    let inner = match host.mux.as_str() {
+        "herdr" => {
+            let s = shell_quote_posix(session);
+            [
+                "H=herdr".to_string(),
+                format!("command -v herdr >/dev/null 2>&1 || H=\"{}\"", HERDR_POSIX_FALLBACK),
+                format!(
+                    "if \"$H\" --session {s} agent get {p} >/dev/null 2>&1; then exec \"$H\" --session {s} agent attach {p}; fi",
+                    s = s,
+                    p = HERDR_PANE
+                ),
+                // Geen agent in de pane (afgesloten, of iets wat herdr niet kent):
+                // de sessie-TUI werkt nog steeds en je kunt er iets starten.
+                format!("exec \"$H\" --session {}", s),
+            ]
+            .join("\n")
+        }
+        "tmux" | "psmux" => {
+            if os == "windows" && host.mux == "tmux" {
+                return Err("tmux bestaat niet op Windows".into());
+            }
+            // attach-session, niet new-session: bestaat hij niet meer, dan hoort
+            // dat een fout te zijn en geen tweede lege sessie.
+            format!(
+                "exec {} attach-session -t {}",
+                host.mux,
+                shell_quote_posix(session)
+            )
+        }
+        _ => {
+            return Err(
+                "Deze machine bewaart geen sessies. Zet persistentie op herdr of tmux.".into(),
+            )
+        }
+    };
+
+    let launcher = posix_launcher(session, &inner);
+    if via_wsl {
+        Ok(format!("wsl -e sh -c \"{}\"", launcher))
+    } else {
+        Ok(launcher)
+    }
+}
+
+// Herdr's TUI tekent een eigen sidebar met workspaces en agents, plus een
+// tabbalk. In een Taurus-tab is dat dubbelop -- het venster HEEFT al tabs en een
+// agentlijst -- en het vangt bovendien de muis, zodat je in dat deel niets kunt
+// selecteren. Alleen een probleem op Windows: daar bestaat `agent attach` nog
+// niet, dus daar haakt de tab aan de sessie-TUI in plaats van rechtstreeks aan
+// de agent-terminal.
+//
+// Drie voorwaarden voordat dit aan een configbestand van iemand anders komt:
+// alleen als de sleutel er nog niet staat (jouw eigen keuze wint), altijd met
+// een back-up, en achteraf gevalideerd met herdrs eigen `config check` -- klopt
+// het niet, dan gaat de back-up terug. De sectiekop [ui] is niet optioneel:
+// zonder die kop wijst herdr de sleutels af als onbekend.
+#[tauri::command(async)]
+fn tune_herdr(host: Host) -> Result<String, String> {
+    if host.mux != "herdr" || effective_os(&host) != "windows" || host.via == "wsl" {
+        return Ok("skip".into());
+    }
+    let ps = r#"$p = Join-Path $env:APPDATA 'herdr\config.toml'
+$h = (Get-Command herdr -EA 0).Source
+if (-not $h) { $h = Join-Path $env:LOCALAPPDATA 'Programs\Herdr\bin\herdr.exe' }
+if (-not (Test-Path $h)) { 'TUNE=skip'; exit 0 }
+if (-not (Test-Path $p)) { New-Item -ItemType File -Path $p -Force | Out-Null }
+$c = @(Get-Content $p -EA SilentlyContinue)
+if ($c -match 'sidebar_start_collapsed') { 'TUNE=skip'; exit 0 }
+Copy-Item $p ($p + '.taurus.bak') -Force
+$add = @('sidebar_start_collapsed = true', 'sidebar_collapsed_mode = "hidden"', 'hide_tab_bar_when_single_tab = true')
+$idx = -1
+for ($i = 0; $i -lt $c.Count; $i++) { if ($c[$i].Trim() -eq '[ui]') { $idx = $i; break } }
+if ($idx -ge 0) {
+  $new = @()
+  for ($i = 0; $i -lt $c.Count; $i++) { $new += $c[$i]; if ($i -eq $idx) { $new += $add } }
+} else {
+  $new = $c + @('', '# Taurus: this tab already has tabs and an agent list of its own, so the', '# herdr chrome would be a second copy of both. This leaves just the pane.', '[ui]') + $add
+}
+Set-Content -Path $p -Value $new -Encoding ASCII
+if ((& $h config check 2>&1) -match 'issues found') { Copy-Item ($p + '.taurus.bak') $p -Force; 'TUNE=fail'; exit 0 }
+'TUNE=ok'"#;
+    let (out, _) = ssh_run(
+        &host,
+        &format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(ps))),
+    )?;
+    match out.lines().find_map(|l| l.trim().strip_prefix("TUNE=")) {
+        Some("ok") => Ok("ok".into()),
+        Some("skip") => Ok("skip".into()),
+        Some("fail") => Err("herdr wees de configuratie af; de back-up is teruggezet.".into()),
+        _ => Err(format!("onverwacht antwoord van de host:\n{}", out.trim())),
+    }
+}
+
+// Wat er op een host draait. Leeg agent-veld = een sessie zonder (herkende) agent;
+// die is nog steeds bruikbaar, dus wel tonen.
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct RemoteSession {
+    name: String,
+    status: String,
+    agent: String,
+    agent_status: String,
+    cwd: String,
+}
+
+// De host stuurt regels, Rust parseert. Bewust geen JSON-verwerking in de shell:
+// `pane list` is JSON en serde staat hier toch al.
+fn parse_herdr_sessions(out: &str) -> Vec<RemoteSession> {
+    let mut list: Vec<RemoteSession> = Vec::new();
+    for line in out.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("SESS|") {
+            let mut it = rest.splitn(2, '|');
+            let name = it.next().unwrap_or("").trim().to_string();
+            let status = it.next().unwrap_or("").trim().to_string();
+            if name.is_empty() {
+                continue;
+            }
+            list.push(RemoteSession { name, status, ..Default::default() });
+        } else if let Some(rest) = line.strip_prefix("JSON|") {
+            let mut it = rest.splitn(2, '|');
+            let name = it.next().unwrap_or("").trim().to_string();
+            let json = it.next().unwrap_or("");
+            let Some(s) = list.iter_mut().find(|s| s.name == name) else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { continue };
+            let Some(p) = v.pointer("/result/panes/0") else { continue };
+            let get = |k: &str| p.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+            s.cwd = get("cwd");
+            s.agent = get("agent");
+            // "unknown" is herdr's "nog niets gezien"; als status is dat ruis.
+            let st = get("agent_status");
+            s.agent_status = if st == "unknown" { String::new() } else { st };
+        }
+    }
+    list
+}
+
+fn parse_tmux_sessions(out: &str) -> Vec<RemoteSession> {
+    out.lines()
+        .filter_map(|l| {
+            let mut it = l.trim().split('|');
+            let name = it.next()?.trim().to_string();
+            if name.is_empty() {
+                return None;
+            }
+            let cwd = it.next().unwrap_or("").trim().to_string();
+            let attached = it.next().unwrap_or("").trim() == "1";
+            Some(RemoteSession {
+                name,
+                status: if attached { "attached".into() } else { "running".into() },
+                cwd,
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+// Wat draait er op die machine? Eén ssh-ronde per keer verversen.
+#[tauri::command(async)]
+fn remote_sessions(host_id: String) -> Result<Vec<RemoteSession>, String> {
+    let host = lookup_host(&host_id)?
+        .ok_or_else(|| "Sessies opsommen kan alleen op een andere machine.".to_string())?;
+    let os = effective_os(&host);
+    let via_wsl = host.via == "wsl";
+
+    let posix_script = match host.mux.as_str() {
+        "herdr" => Some(
+            "H=herdr; command -v herdr >/dev/null 2>&1 || H=\"$HOME/.local/bin/herdr\"; \
+             \"$H\" session list 2>/dev/null | awk 'NR>1 && NF>=2 {print $1\" \"$2}' | \
+             while read -r n s; do echo \"SESS|$n|$s\"; \
+             if [ \"$s\" = running ]; then printf 'JSON|%s|' \"$n\"; \
+             \"$H\" --session \"$n\" pane list 2>/dev/null | tr -d '\\r\\n'; echo \"\"; fi; done"
+                .to_string(),
+        ),
+        "tmux" | "psmux" => Some(format!(
+            "{} ls -F '#{{session_name}}|#{{session_path}}|#{{session_attached}}' 2>/dev/null || true",
+            host.mux
+        )),
+        _ => None,
+    };
+
+    let (out, _) = if host.mux == "herdr" && os == "windows" && !via_wsl {
+        let ps = r#"$h = (Get-Command herdr -EA 0).Source
+if (-not $h) { $h = Join-Path $env:LOCALAPPDATA 'Programs\Herdr\bin\herdr.exe' }
+if (-not (Test-Path $h)) { 'ERR=herdr staat niet op deze machine'; exit 0 }
+$lines = & $h session list 2>$null
+foreach ($l in ($lines | Select-Object -Skip 1)) {
+  $p = ($l.Trim() -split '\s+')
+  if ($p.Count -lt 2) { continue }
+  $n = $p[0]; $st = $p[1]
+  'SESS|' + $n + '|' + $st
+  if ($st -eq 'running') { 'JSON|' + $n + '|' + ((& $h --session $n pane list 2>$null) -join '') }
+}"#;
+        ssh_run(&host, &format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(ps))))?
+    } else {
+        let script = posix_script.ok_or_else(|| {
+            "Deze machine bewaart geen sessies. Zet persistentie op herdr of tmux.".to_string()
+        })?;
+        // Zelfde base64-truc als elders: de payload gaat door cmd.exe en/of sh,
+        // en bevat quotes, pipes en accolades.
+        let cmd = if via_wsl {
+            format!("wsl -e sh -c \"echo {} | base64 -d | sh\"", b64(script.as_bytes()))
+        } else {
+            format!("echo {} | base64 -d | sh", b64(script.as_bytes()))
+        };
+        ssh_run(&host, &cmd)?
+    };
+
+    if let Some(err) = out.lines().find_map(|l| l.trim().strip_prefix("ERR=")) {
+        return Err(err.to_string());
+    }
+    Ok(if host.mux == "herdr" {
+        parse_herdr_sessions(&out)
+    } else {
+        parse_tmux_sessions(&out)
+    })
+}
+
+// Open een tab op een sessie die al draait. Geen uuid, geen agent-vlaggen: Taurus
+// heeft dit commando niet gebouwd en kan het dus ook niet hervatten.
+#[tauri::command]
+fn attach_remote_session(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+    gen: u64,
+    host_id: String,
+    session: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let host = lookup_host(&host_id)?
+        .ok_or_else(|| "Aanhaken kan alleen op een andere machine.".to_string())?;
+    let payload = build_attach_payload(&host, &session)?;
+    let (program, args) = ssh_interactive(&host, payload)?;
+    start_pty(
+        &app,
+        &state.sessions,
+        id,
+        gen,
+        program,
+        &local_cwd_for_remote(),
+        args,
+        cols,
+        rows,
+    )
+}
+
 // ssh.exe uit System32 heeft de voorkeur boven wat er toevallig in PATH staat:
 // een Git-for-Windows of WSL-ssh in PATH gedraagt zich anders rond paden en pty.
 fn ssh_program() -> String {
@@ -2120,6 +2451,13 @@ fn wrap_remote(
         &args,
     )?;
 
+    ssh_interactive(host, payload)
+}
+
+// De ssh-aanroep om een payload met een pty op de host te draaien. Gedeeld door
+// een nieuwe sessie en door aanhaken, zodat allebei dezelfde key- en
+// host-key-behandeling krijgen.
+fn ssh_interactive(host: &Host, payload: String) -> Result<(String, Vec<String>), String> {
     // -t forceert een pty aan de andere kant; zonder pty tekent de agent-TUI niet.
     let mut a = vec!["-t".to_string()];
     // batch=false: bij een echte sessie MOET een passphrase- of wachtwoordprompt
@@ -3502,6 +3840,9 @@ pub fn run() {
             save_hosts,
             check_hosts,
             probe_host,
+            remote_sessions,
+            attach_remote_session,
+            tune_herdr,
             scp_to_host,
             survey_workspace,
             survey_remote_workspace,
@@ -3557,6 +3898,7 @@ mod tests {
             default_project: String::new(),
             os: "linux".into(),
             mux: "tmux".into(),
+            mux_auto: true,
             agent_version: String::new(),
             via: String::new(),
         }
@@ -3856,6 +4198,146 @@ mod tests {
     }
 
     #[test]
+    fn attaching_creates_nothing() {
+        // Het verschil met de launch-payload: aanhaken mag geen workspace maken
+        // en geen agent starten. Een `pane run` op een sessie die middenin een
+        // beurt zit, zou die beurt overschrijven.
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.os = "linux".into();
+        let s = build_attach_payload(&h, "taurus-h1-p-0").unwrap();
+        let inner = String::from_utf8(
+            b64_decode_for_test(s.split_whitespace().nth(1).unwrap()),
+        )
+        .unwrap();
+        assert!(!inner.contains("workspace create"), "attach maakt niets aan: {}", inner);
+        assert!(!inner.contains("pane run"), "attach start niets: {}", inner);
+        assert!(inner.contains("agent attach w1:p1"));
+        // Geen agent (afgesloten of onbekend programma): de sessie-TUI werkt nog.
+        assert!(inner.trim_end().ends_with("exec \"$H\" --session 'taurus-h1-p-0'"));
+
+        // tmux haakt aan, en maakt niet stiekem een tweede lege sessie.
+        h.mux = "tmux".into();
+        let t = build_attach_payload(&h, "werk").unwrap();
+        let ti = String::from_utf8(b64_decode_for_test(t.split_whitespace().nth(1).unwrap())).unwrap();
+        assert_eq!(ti, "exec tmux attach-session -t 'werk'");
+        assert!(!ti.contains("new-session"));
+
+        // Een host zonder multiplexer heeft niets om aan te haken.
+        h.mux = "none".into();
+        assert!(build_attach_payload(&h, "werk").is_err());
+    }
+
+    #[test]
+    fn a_session_name_from_the_host_cannot_carry_shell_syntax() {
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        for bad in ["a b", "a;rm -rf /", "$(id)", "`id`", "a|b", "../etc", ""] {
+            assert!(
+                build_attach_payload(&h, bad).is_err(),
+                "had geweigerd moeten worden: {:?}",
+                bad
+            );
+        }
+        assert!(build_attach_payload(&h, "taurus-ursu-c-users-arjen-28f85e64").is_ok());
+    }
+
+    #[test]
+    fn herdr_session_lines_become_rows_with_agent_and_cwd() {
+        let out = "SESS|taurus-a|running\n\
+                   JSON|taurus-a|{\"result\":{\"panes\":[{\"agent\":\"claude\",\"agent_status\":\"blocked\",\"cwd\":\"/srv/p\",\"pane_id\":\"w1:p1\"}]}}\n\
+                   SESS|default|stopped\n";
+        let list = parse_herdr_sessions(out);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].name, "taurus-a");
+        assert_eq!(list[0].agent, "claude");
+        assert_eq!(list[0].agent_status, "blocked");
+        assert_eq!(list[0].cwd, "/srv/p");
+        // Een gestopte sessie heeft geen pane-JSON en hoort er toch te staan.
+        assert_eq!(list[1].name, "default");
+        assert_eq!(list[1].status, "stopped");
+        assert!(list[1].agent.is_empty());
+    }
+
+    #[test]
+    fn a_pane_without_an_agent_is_still_a_row() {
+        // herdr zet "unknown" zolang hij niets gezien heeft; dat is geen status
+        // om in de UI te zetten, maar de sessie is wel bruikbaar.
+        let out = "SESS|kaal|running\n\
+                   JSON|kaal|{\"result\":{\"panes\":[{\"agent_status\":\"unknown\",\"cwd\":\"/home/a\"}]}}\n";
+        let list = parse_herdr_sessions(out);
+        assert_eq!(list.len(), 1);
+        assert!(list[0].agent.is_empty() && list[0].agent_status.is_empty());
+        assert_eq!(list[0].cwd, "/home/a");
+    }
+
+    #[test]
+    fn tmux_lines_become_rows() {
+        let list = parse_tmux_sessions("werk|/home/a/p|1\nlos|/tmp|0\n\n");
+        assert_eq!(list.len(), 2);
+        assert_eq!((list[0].name.as_str(), list[0].status.as_str()), ("werk", "attached"));
+        assert_eq!((list[1].name.as_str(), list[1].cwd.as_str()), ("los", "/tmp"));
+    }
+
+    #[test]
+    fn an_older_hosts_json_keeps_following_the_probe() {
+        // Zonder mux_auto is een host van vóór deze versie: die volgde altijd de
+        // probe, en moet dat blijven doen. Stond het veld op false, dan zou een
+        // hertest zijn mux nooit meer bijwerken -- precies verkeerd om.
+        let old = r#"[{"id":"h","nickname":"h","hostname":"x","mux":"tmux"}]"#;
+        let list: Vec<Host> = serde_json::from_str(old).expect("oude vorm moet leesbaar blijven");
+        assert!(list[0].mux_auto, "ontbrekend veld = automatisch");
+        let pinned = r#"[{"id":"h","nickname":"h","hostname":"x","mux":"none","mux_auto":false}]"#;
+        let list: Vec<Host> = serde_json::from_str(pinned).unwrap();
+        assert!(!list[0].mux_auto);
+    }
+
+    #[test]
+    fn tuning_only_touches_a_windows_herdr_host() {
+        // Op POSIX hangt de tab rechtstreeks aan de agent-terminal: geen chrome,
+        // dus niets te verstellen. Aan een configbestand van iemand anders komen
+        // zonder dat het iets oplost, is precies wat je niet wilt.
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.os = "linux".into();
+        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
+        h.os = "windows".into();
+        h.via = "wsl".into();
+        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
+        h.via = String::new();
+        h.mux = "tmux".into();
+        assert_eq!(tune_herdr(h).unwrap(), "skip");
+    }
+
+    #[test]
+    fn best_mux_prefers_herdr_and_falls_back_to_none() {
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(best_mux(&v(&["tmux", "herdr"])), "herdr");
+        assert_eq!(best_mux(&v(&["tmux", "psmux"])), "tmux");
+        assert_eq!(best_mux(&v(&["psmux"])), "psmux");
+        assert_eq!(best_mux(&[]), "none");
+    }
+
+    // Kleine base64-decoder, alleen voor de tests: de payloads reizen als base64
+    // en een assert op de bytes leest niet.
+    fn b64_decode_for_test(s: &str) -> Vec<u8> {
+        const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut acc: u32 = 0;
+        let mut bits = 0;
+        let mut out = Vec::new();
+        for c in s.bytes().filter(|c| *c != b'=') {
+            let v = T.iter().position(|t| *t == c).expect("geen base64") as u32;
+            acc = (acc << 6) | v;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((acc >> bits) as u8);
+            }
+        }
+        out
+    }
+
+    #[test]
     fn build_remote_payload_uses_base64_for_the_taurus_agent() {
         let args = vec!["-n".to_string(), r#"a "quoted" & risky task"#.to_string()];
         let s = build_remote_payload_via("taurus-agent", "windows", "", "sess1", r"C:\p", "claude", &args)
@@ -4103,9 +4585,22 @@ mod tests {
             default_project: String::new(),
             os: std::env::var("TAURUS_TEST_OS").unwrap_or_else(|_| "windows".into()),
             mux: std::env::var("TAURUS_TEST_MUX").unwrap_or_else(|_| "none".into()),
+            mux_auto: true,
             agent_version: String::new(),
             via: String::new(),
         };
+        // Met TAURUS_TEST_ATTACH=<sessienaam> print hij de AANHAAK-aanroep in
+        // plaats van de start-aanroep, zodat je die met de hand tegen een echte
+        // host kunt draaien.
+        if let Ok(session) = std::env::var("TAURUS_TEST_ATTACH") {
+            let payload = build_attach_payload(&host, &session).expect("attach payload");
+            let (prog, a) = ssh_interactive(&host, payload).expect("ssh_interactive");
+            println!("PROGRAM: {}", prog);
+            for (i, x) in a.iter().enumerate() {
+                println!("ARG[{}]: {}", i, x);
+            }
+            return;
+        }
         let cwd = std::env::var("TAURUS_TEST_CWD").unwrap_or_else(|_| r"C:\Users\arjen".into());
         // Exact het pad dat create_session loopt: agent-vlaggen eerst, dan de
         // remote wikkel eromheen.
@@ -4125,6 +4620,22 @@ mod tests {
         for (i, x) in a.iter().enumerate() {
             println!("ARG[{}]: {}", i, x);
         }
+    }
+
+    // Zet de herdr-chrome uit op een ECHTE Windows-host. Draaien met:
+    //   TAURUS_TEST_HOST=... TAURUS_TEST_USER=... TAURUS_TEST_KEY=...
+    //   cargo test tune_a_real_host -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn tune_a_real_host() {
+        let mut host = test_host();
+        host.hostname = std::env::var("TAURUS_TEST_HOST").expect("TAURUS_TEST_HOST");
+        host.user = std::env::var("TAURUS_TEST_USER").unwrap_or_default();
+        host.key_path = std::env::var("TAURUS_TEST_KEY").unwrap_or_default();
+        host.os = "windows".into();
+        host.mux = "herdr".into();
+        host.via = String::new();
+        println!("TUNE: {:?}", tune_herdr(host));
     }
 
     // Meet tegen een echte host uit het eigen netwerk. Draaien met:
@@ -4175,6 +4686,7 @@ mod tests {
             default_project: "/home/arjen/proj".into(),
             os: "linux".into(),
             mux: "tmux".into(),
+            mux_auto: true,
             agent_version: String::new(),
             via: String::new(),
         };
