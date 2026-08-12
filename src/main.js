@@ -43,11 +43,11 @@ const I18N = {
     host_ok: "Verbinding gelukt", host_reachable: "bereikbaar", host_unreachable: "onbereikbaar",
     host_no_claude: "⚠ Geen agent-CLI gevonden op deze machine — een sessie zal niet starten.",
     host_no_outbound: "⚠ Geen uitgaand HTTPS naar api.anthropic.com — een agent kan hier niet werken.",
-    host_no_mux: "ℹ Geen tmux/psmux: een sessie is niet opnieuw aan te haken.",
+    host_no_mux: "ℹ Geen herdr of tmux: een sessie is niet opnieuw aan te haken. Installeer herdr (herdr.dev) op die machine — dat werkt ook op Windows.",
     host_via: "Waar draait de agent", host_via_direct: "Rechtstreeks op de machine",
-    host_via_wsl: "In WSL (Windows-host, geeft tmux-persistentie)",
-    host_wsl_tip: "💡 WSL op deze machine heeft tmux én een agent-CLI. Kies \"In WSL\" voor sessies die een verbroken verbinding overleven — de agent werkt dan wel in Linux, met Windows-schijven onder /mnt/c.",
-    host_wsl_unusable: "In WSL gekozen, maar WSL op deze machine mist tmux of een agent-CLI. Installeer die daar, of kies \"Rechtstreeks op de machine\".",
+    host_via_wsl: "In WSL (Windows-host, geeft sessiepersistentie)",
+    host_wsl_tip: "💡 WSL op deze machine heeft een multiplexer én een agent-CLI. Kies \"In WSL\" voor sessies die een verbroken verbinding overleven — de agent werkt dan wel in Linux, met Windows-schijven onder /mnt/c.",
+    host_wsl_unusable: "In WSL gekozen, maar WSL op deze machine mist herdr of tmux, of een agent-CLI. Installeer die daar, of kies \"Rechtstreeks op de machine\".",
     dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
     dropper_sending: "Bestand overzetten naar de host…",
     dropper_sent: "Op de host gezet",
@@ -188,11 +188,11 @@ const I18N = {
     host_ok: "Connection succeeded", host_reachable: "reachable", host_unreachable: "unreachable",
     host_no_claude: "⚠ No agent CLI found on this machine — a session will not start.",
     host_no_outbound: "⚠ No outbound HTTPS to api.anthropic.com — an agent cannot work here.",
-    host_no_mux: "ℹ No tmux/psmux: a session cannot be reattached.",
+    host_no_mux: "ℹ No herdr or tmux: a session cannot be reattached. Install herdr (herdr.dev) on that machine — it works on Windows too.",
     host_via: "Where the agent runs", host_via_direct: "Directly on the machine",
-    host_via_wsl: "In WSL (Windows host, gives tmux persistence)",
-    host_wsl_tip: "💡 WSL on this machine has both tmux and an agent CLI. Pick \"In WSL\" for sessions that survive a dropped connection — the agent then works in Linux, with Windows drives under /mnt/c.",
-    host_wsl_unusable: "You picked In WSL, but WSL on this machine has no tmux or no agent CLI. Install those there, or pick \"Directly on the machine\".",
+    host_via_wsl: "In WSL (Windows host, gives session persistence)",
+    host_wsl_tip: "💡 WSL on this machine has both a multiplexer and an agent CLI. Pick \"In WSL\" for sessions that survive a dropped connection — the agent then works in Linux, with Windows drives under /mnt/c.",
+    host_wsl_unusable: "You picked In WSL, but WSL on this machine has no herdr or tmux, or no agent CLI. Install those there, or pick \"Directly on the machine\".",
     dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
     dropper_sending: "Copying file to the host…",
     dropper_sent: "Placed on the host",
@@ -984,8 +984,9 @@ async function addAndTestHost() {
     return;
   }
   host.os = p.os;
-  // Via WSL is de multiplexer die van WSL (tmux), niet die van Windows.
-  host.mux = host.via === "wsl" ? "tmux" : (p.mux || "none");
+  // Via WSL is de multiplexer die van WSL, niet die van Windows -- en dat is
+  // sinds #115 niet meer per definitie tmux.
+  host.mux = host.via === "wsl" ? (p.wslMux || "tmux") : (p.mux || "none");
   hosts.push(host);
   await invoke("save_hosts", { hosts });
   fillHostSelect();
