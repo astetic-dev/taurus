@@ -311,9 +311,13 @@ struct HostProbe {
     // Uitgaand HTTPS naar api.anthropic.com. Zonder dit kan er geen agent
     // draaien, hoe goed de rest ook werkt -- dus expliciet meten.
     outbound: bool,
-    // Alleen voor Windows-hosts: heeft WSL zowel tmux als een agent-CLI? Dan is
-    // `via: wsl` de enige route naar echte sessiepersistentie op die machine.
+    // Alleen voor Windows-hosts: heeft WSL zowel een multiplexer als een
+    // agent-CLI? Sinds herdr is `via: wsl` niet meer de enige route naar
+    // sessiepersistentie op zo'n machine, maar wel nog steeds een geldige.
     wsl_usable: bool,
+    // Welke multiplexer dat dan is ("herdr" of "tmux"), zodat een via:wsl-host
+    // niet blind op tmux wordt gezet terwijl daar herdr staat.
+    wsl_mux: String,
     error: String,
 }
 
@@ -421,7 +425,12 @@ fn probe_host(host: Host) -> HostProbe {
     // Ronde 2: inventarisatie. Op Windows via base64 UTF-16LE, zodat cmd.exe geen
     // enkel metateken te zien krijgt (dezelfde reden als bij de launch).
     let (out, _) = if p.os == "linux" {
-        let script = "command -v tmux >/dev/null 2>&1 && echo MUX=tmux || echo MUX=none; \
+        // Herdr eerst: hij geeft dezelfde persistentie als tmux plus een status
+        // die je kunt uitlezen, en hij is er op alle drie de platforms. Deze
+        // shell is GEEN login shell, dus ~/.local/bin staat niet op PATH -- het
+        // expliciete -x is daarom geen luxe maar de normale situatie.
+        let script = "if command -v herdr >/dev/null 2>&1 || [ -x \"$HOME/.local/bin/herdr\" ]; then echo MUX=herdr; \
+                      elif command -v tmux >/dev/null 2>&1; then echo MUX=tmux; else echo MUX=none; fi; \
                       (claude --version 2>/dev/null || echo '') | head -1 | sed 's/^/CLAUDE=/'; \
                       curl -sS -o /dev/null -w 'HTTP=%{http_code}' --max-time 10 https://api.anthropic.com/ 2>/dev/null || echo HTTP=000";
         match ssh_run(&host, script) {
@@ -432,7 +441,9 @@ fn probe_host(host: Host) -> HostProbe {
             }
         }
     } else {
-        let ps = r#"if (Get-Command psmux -EA 0) { 'MUX=psmux' } elseif (Test-Path "$env:USERPROFILE\.taurus\bin\taurus-agent.exe") { 'MUX=taurus-agent' } else { 'MUX=none' }
+        // Zelfde volgorde als op POSIX. De herdr-installer zet zijn map alleen in
+        // de PATH van NIEUWE sessies, dus Get-Command alleen is niet genoeg.
+        let ps = r#"if ((Get-Command herdr -EA 0) -or (Test-Path "$env:LOCALAPPDATA\Programs\Herdr\bin\herdr.exe")) { 'MUX=herdr' } elseif (Get-Command psmux -EA 0) { 'MUX=psmux' } elseif (Test-Path "$env:USERPROFILE\.taurus\bin\taurus-agent.exe") { 'MUX=taurus-agent' } else { 'MUX=none' }
 $c = Get-Command claude -EA 0
 if ($c) { 'CLAUDE=' + (& claude --version 2>&1 | Select-Object -First 1) } else { 'CLAUDE=' }
 try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -TimeoutSec 10 -UseBasicParsing; 'HTTP=' + $r.StatusCode } catch { 'HTTP=' + [int]$_.Exception.Response.StatusCode }"#;
@@ -467,15 +478,23 @@ try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -Timeo
     // route naar heraanhaken op zo'n machine zonder iets te installeren. Losse
     // ronde, want het script moet door cmd.exe EN door sh heen -- vandaar base64.
     if p.os == "windows" {
-        let inner = "command -v tmux >/dev/null 2>&1 || exit 1; \
+        let inner = "if command -v herdr >/dev/null 2>&1 || [ -x \"$HOME/.local/bin/herdr\" ]; then M=herdr; \
+                     elif command -v tmux >/dev/null 2>&1; then M=tmux; else exit 1; fi; \
                      { command -v claude >/dev/null 2>&1 || [ -x \"$HOME/.local/bin/claude\" ]; } || exit 1; \
-                     echo WSLOK";
+                     echo WSLOK=$M";
         let cmd = format!(
             "wsl -e sh -c \"echo {} | base64 -d | sh\"",
             b64(inner.as_bytes())
         );
         if let Ok((out, _)) = ssh_run(&host, &cmd) {
-            p.wsl_usable = out.contains("WSLOK");
+            if let Some(m) = out
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("WSLOK="))
+                .map(|m| m.trim().to_string())
+            {
+                p.wsl_usable = !m.is_empty();
+                p.wsl_mux = m;
+            }
         }
     }
     p
@@ -1814,6 +1833,138 @@ fn mux_session_name(host_id: &str, project_path: &str) -> String {
     )
 }
 
+// Herdr kent geen attach-or-create in een commando zoals `tmux new -A -s`:
+// `workspace create` is niet idempotent (tweemaal hetzelfde label levert twee
+// workspaces op) en workspace-id's worden niet hergebruikt, dus na sluiten van
+// w1 heet de volgende w2. Terugvinden op label zou betekenen dat een shell-
+// payload JSON moet parsen, en dat wil je niet.
+//
+// Wat herdr wel heeft is een SESSIE: een eigen namespace met een eigen server en
+// socket. Een eigen sessie per (host, project) -- dezelfde eenheid die tmux hier
+// al gebruikt -- maakt de eerste pane deterministisch w1:p1. Daarmee is de hele
+// handshake een reeks bestaanschecks op exitcode, zonder een teken JSON:
+//
+//   server draait?   zo niet: losgekoppeld starten en wachten tot de socket er is
+//   pane bestaat?    zo niet: workspace aanmaken met de juiste werkmap
+//   agent draait?    zo niet: het agent-commando in die pane starten
+//   attach
+//
+// Elke stap is los idempotent, dus een half opgezette sessie (server leeft nog,
+// agent gestopt) herstelt zichzelf bij de volgende start in plaats van een
+// tweede agent naast de eerste te zetten.
+const HERDR_PANE: &str = "w1:p1";
+
+// Waar herdr staat als hij niet op PATH staat. De probe draait geen login shell,
+// en op Windows zet de installer alleen de user-PATH voor NIEUWE sessies.
+const HERDR_POSIX_FALLBACK: &str = "$HOME/.local/bin/herdr";
+const HERDR_WIN_FALLBACK: &str = r"Programs\Herdr\bin\herdr.exe";
+
+fn herdr_posix_script(session: &str, cwd: &str, program: &str, args: &[String]) -> String {
+    // Twee quoting-lagen: eerst de commandoregel zoals de shell IN de pane hem
+    // moet lezen, daarna nog een keer omdat herdr die regel als EEN argument krijgt.
+    let mut inner = shell_quote_posix(program);
+    for a in args {
+        inner.push(' ');
+        inner.push_str(&shell_quote_posix(a));
+    }
+    let s = shell_quote_posix(session);
+    // setsid bestaat niet op macOS; nohup alleen is daar genoeg om SIGHUP bij het
+    // sluiten van de ssh-verbinding te overleven.
+    [
+        "H=herdr".to_string(),
+        format!("command -v herdr >/dev/null 2>&1 || H=\"{}\"", HERDR_POSIX_FALLBACK),
+        format!("run() {{ \"$H\" --session {} \"$@\"; }}", s),
+        "if ! run status 2>/dev/null | grep -q 'status: running'; then".to_string(),
+        format!(
+            "  if command -v setsid >/dev/null 2>&1; then setsid nohup \"$H\" --session {s} server >/dev/null 2>&1 </dev/null & else nohup \"$H\" --session {s} server >/dev/null 2>&1 </dev/null & fi",
+            s = s
+        ),
+        "  i=0".to_string(),
+        "  while [ $i -lt 20 ]; do run status 2>/dev/null | grep -q 'status: running' && break; i=$((i+1)); sleep 1; done".to_string(),
+        "fi".to_string(),
+        format!(
+            "run pane get {p} >/dev/null 2>&1 || run workspace create --cwd {c} --label {s} --no-focus >/dev/null",
+            p = HERDR_PANE,
+            c = shell_quote_posix(cwd),
+            s = s
+        ),
+        format!(
+            "if ! run agent get {p} >/dev/null 2>&1; then",
+            p = HERDR_PANE
+        ),
+        format!(
+            "  run pane run {p} {cmd} >/dev/null",
+            p = HERDR_PANE,
+            cmd = shell_quote_posix(&inner)
+        ),
+        // Gemeten: herdr herkent een agent ongeveer een seconde na de start --
+        // hij moet eerst iets getekend hebben. Zonder deze lus komt attach
+        // milliseconden te vroeg en faalt hij met "agent target not found".
+        format!(
+            "  i=0; while [ $i -lt 8 ]; do run agent get {p} >/dev/null 2>&1 && break; i=$((i+1)); sleep 1; done",
+            p = HERDR_PANE
+        ),
+        "fi".to_string(),
+        // Rechtstreeks aan de agent-terminal hangen geeft een kale tab, zonder
+        // herdr's eigen tabbalk. Herkent herdr het programma niet (agy, of een
+        // command-override), dan is er geen agent om aan te hangen en is de
+        // sessie-TUI de terugval -- een werkende tab met wat randwerk eromheen
+        // is beter dan een tab die niet opent.
+        format!(
+            "if run agent get {p} >/dev/null 2>&1; then exec \"$H\" --session {s} agent attach {p}; fi",
+            p = HERDR_PANE,
+            s = s
+        ),
+        format!("exec \"$H\" --session {}", s),
+    ]
+    .join("\n")
+}
+
+fn herdr_windows_script(session: &str, cwd: &str, program: &str, args: &[String]) -> String {
+    // In de pane draait PowerShell, dus dezelfde vorm als de kale Windows-start:
+    // de call-operator, want een gequote pad is anders geen commando.
+    let mut inner = format!("& {}", ps_quote(program));
+    for a in args {
+        inner.push(' ');
+        inner.push_str(&ps_quote(a));
+    }
+    [
+        "$h = (Get-Command herdr -EA 0).Source".to_string(),
+        format!(
+            "if (-not $h) {{ $h = Join-Path $env:LOCALAPPDATA '{}' }}",
+            HERDR_WIN_FALLBACK
+        ),
+        "if (-not (Test-Path $h)) { Write-Host 'herdr staat niet op deze machine'; exit 1 }".to_string(),
+        format!("$s = {}", ps_quote(session)),
+        "if (-not (& $h --session $s status 2>$null | Select-String 'status: running')) {".to_string(),
+        // Gemeten: een server die je met Start-Process vanuit een sshd-sessie start,
+        // wordt gekild zodra die verbinding sluit. Win32_Process.Create herparent
+        // hem buiten de sessie, en dan overleeft hij het wel.
+        "  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ('\"' + $h + '\" --session ' + $s + ' server') } | Out-Null".to_string(),
+        "  for ($i = 0; $i -lt 20; $i++) { if (& $h --session $s status 2>$null | Select-String 'status: running') { break }; Start-Sleep -Seconds 1 }".to_string(),
+        "}".to_string(),
+        format!("& $h --session $s pane get {} 2>$null | Out-Null", HERDR_PANE),
+        format!(
+            "if ($LASTEXITCODE -ne 0) {{ & $h --session $s workspace create --cwd {} --label $s --no-focus | Out-Null }}",
+            ps_quote(cwd)
+        ),
+        format!("& $h --session $s agent get {} 2>$null | Out-Null", HERDR_PANE),
+        format!(
+            "if ($LASTEXITCODE -ne 0) {{ & $h --session $s pane run {} {} | Out-Null }}",
+            HERDR_PANE,
+            ps_quote(&inner)
+        ),
+        // Gemeten tegen herdr 0.8.0-preview: `agent attach` antwoordt op Windows
+        // met "direct terminal attach is not supported on Windows yet". Daar is
+        // de sessie-TUI de enige manier om aan te haken -- dat kost een tabbalk
+        // in beeld, die de host desgewenst kan wegzetten met
+        // hide_tab_bar_when_single_tab in zijn eigen config.toml. Op POSIX
+        // hangen we wel rechtstreeks aan de agent en is die balk er niet.
+        "& $h --session $s".to_string(),
+    ]
+    .join("\n")
+}
+
 // De opdracht voor de taurus-agent gaat als base64-JSON mee in plaats van als
 // shell-argumenten. Dat haalt de remote shell volledig uit de keten: base64 is
 // [A-Za-z0-9+/=] en overleeft zowel /bin/sh als cmd.exe zonder quoting. Zonder
@@ -1859,6 +2010,21 @@ fn build_remote_payload_inner(
     args: &[String],
 ) -> Result<String, String> {
     match mux {
+        // Herdr: eigen sessie per (host, project), zie de toelichting bij
+        // HERDR_PANE. Werkt op Windows, Linux en macOS met hetzelfde model --
+        // dit is de enige waarde die heraanhaken op een Windows-host geeft
+        // zonder de omweg via WSL.
+        "herdr" => {
+            if os == "windows" {
+                let script = herdr_windows_script(session, cwd, program, args);
+                Ok(format!(
+                    "powershell -NoProfile -EncodedCommand {}",
+                    b64(&utf16le(&script))
+                ))
+            } else {
+                Ok(herdr_posix_script(session, cwd, program, args))
+            }
+        }
         // Eigen agent: geen shellquoting nodig, en hij bestaat op beide OS'en.
         "taurus-agent" => {
             let bin = if os == "windows" { AGENT_REL_WIN } else { AGENT_REL_UNIX };
@@ -3627,6 +3793,66 @@ mod tests {
         // Windows loopt via PowerShell en heeft deze starter niet.
         let w = build_remote_payload_via("none", "windows", "", "sess", r"C:\p", "claude", &[]).unwrap();
         assert!(w.starts_with("powershell -NoProfile -EncodedCommand "));
+    }
+
+    #[test]
+    fn herdr_posix_bootstraps_in_steps_that_are_each_idempotent() {
+        let args = vec!["-n".to_string(), "my session".to_string()];
+        let s = herdr_posix_script("taurus-h1-p-0", "/home/a/p", "claude", &args);
+        // Elke stap moet zelfstandig overslaan wat er al is; anders zet een half
+        // opgezette sessie er een tweede agent naast in plaats van aan te haken.
+        assert!(s.contains("run pane get w1:p1 >/dev/null 2>&1 || run workspace create --cwd '/home/a/p'"));
+        assert!(s.contains("if ! run agent get w1:p1 >/dev/null 2>&1; then"));
+        // Attach mag pas als de agent herkend IS; anders komt hij een seconde te
+        // vroeg. En wordt hij nooit herkend (agy, command-override), dan is de
+        // sessie-TUI de terugval in plaats van een tab die niet opent.
+        assert!(s.contains("while [ $i -lt 8 ]; do run agent get w1:p1"));
+        assert!(s.contains("if run agent get w1:p1 >/dev/null 2>&1; then exec \"$H\" --session 'taurus-h1-p-0' agent attach w1:p1; fi"));
+        assert!(s.trim_end().ends_with("exec \"$H\" --session 'taurus-h1-p-0'"));
+        // De sessie is de eenheid van heraanhaken, net als bij tmux.
+        assert!(s.contains("--session 'taurus-h1-p-0'"));
+        // De pane-shell moet de taak met spatie als EEN argument zien; die regel
+        // gaat op zijn beurt als EEN argument naar herdr, dus twee lagen quoting.
+        assert!(
+            s.contains(r#"run pane run w1:p1 ''\''claude'\'' '\''-n'\'' '\''my session'\''"#),
+            "taak met spatie valt uiteen: {}",
+            s
+        );
+        // macOS heeft geen setsid; dan moet nohup alleen het werk doen.
+        assert!(s.contains("command -v setsid") && s.contains("else nohup"));
+    }
+
+    #[test]
+    fn herdr_windows_detaches_the_server_from_the_ssh_session() {
+        let s = herdr_windows_script("taurus-h1-p-0", r"C:\proj", "claude", &[]);
+        // Gemeten op een echte host: met Start-Process is de server weg zodra de
+        // ssh-verbinding sluit. Win32_Process.Create herparent hem erbuiten.
+        assert!(s.contains("Win32_Process"), "server moet losgekoppeld starten: {}", s);
+        assert!(!s.contains("Start-Process"));
+        assert!(s.contains("--cwd 'C:\\proj'"));
+        // Gemeten: `agent attach` bestaat nog niet op Windows, dus daar haakt de
+        // sessie-TUI aan. Zou dit stilletjes de POSIX-vorm worden, dan opent de
+        // tab met een foutmelding in plaats van met een agent.
+        assert!(!s.contains("agent attach"), "attach werkt niet op Windows: {}", s);
+        assert!(s.trim_end().ends_with("& $h --session $s"));
+        // De pane draait PowerShell: zonder de call-operator is een gequote pad
+        // geen commando maar een string die alleen wordt afgedrukt.
+        assert!(s.contains("pane run w1:p1 '& ''claude'''"), "geen call-operator: {}", s);
+    }
+
+    #[test]
+    fn herdr_works_on_both_platforms_unlike_tmux() {
+        // Dit is de hele reden voor #115: Windows kon niet heraanhaken.
+        let w = build_remote_payload_via("herdr", "windows", "", "s", r"C:\p", "claude", &[]).unwrap();
+        assert!(w.starts_with("powershell -NoProfile -EncodedCommand "));
+        let enc = w.rsplit(' ').next().unwrap();
+        assert_eq!(enc, &b64(&utf16le(&herdr_windows_script("s", r"C:\p", "claude", &[]))));
+        // POSIX gaat door dezelfde login-shell-starter als tmux.
+        let l = build_remote_payload_via("herdr", "linux", "", "s", "/p", "claude", &[]).unwrap();
+        assert!(l.starts_with("echo ") && l.contains("exec sh -l /tmp/s.sh"));
+        // En via WSL op een Windows-host is het gewoon de POSIX-vorm.
+        let v = build_remote_payload_via("herdr", "windows", "wsl", "s", "/p", "claude", &[]).unwrap();
+        assert!(v.starts_with("wsl -e sh -c "));
     }
 
     #[test]

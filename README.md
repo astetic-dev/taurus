@@ -198,7 +198,8 @@ launch form under **Runs on**.
 Add a machine once from the 🖥 button beside the Agents heading: one connection
 test reports which OS it runs, whether an agent CLI is installed, whether the
 box can reach `api.anthropic.com` at all, and whether a session there survives a
-dropped connection. An agent then carries its machine like it carries its
+dropped connection. A host with [herdr](https://herdr.dev) installed gets that
+last one on **Windows and macOS as well**, not just where tmux exists. An agent then carries its machine like it carries its
 folder, and its tab shows a badge for where it runs.
 
 Right-click a tab or an agent card to **move an agent to another machine**,

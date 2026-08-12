@@ -60,7 +60,9 @@ the placeholder with the public key from step 1.
 >    has no BOM — piping a key through PowerShell adds both.
 > 3. Confirm the firewall allows inbound TCP 22 from the local network.
 > 4. Report: this machine's IP address, my username, whether `claude` is on
->    PATH and its version, and whether `tmux` or `psmux` exists.
+>    PATH and its version, and whether `herdr`, `tmux` or `psmux` exists.
+>    (`herdr` is the one that also gives reattach on Windows — see the herdr
+>    section below if none of them are there.)
 > 5. Check outbound HTTPS works — this is a kill switch, no outbound means no
 >    agent can run here:
 >    `curl.exe -sS -o NUL -w "%{http_code}" --max-time 10 https://api.anthropic.com/`
@@ -109,22 +111,69 @@ the placeholder with the public key from step 1.
 | `key_path` | path to the **private** key. Empty = let ssh decide (`~/.ssh/config`, agent) |
 | `default_project` | working directory **on the host**, prefilled in the launch form |
 | `os` | `windows` or `linux` — decides how the command is quoted for the remote shell |
-| `mux` | `tmux`, `psmux`, `taurus-agent` or `none` — what keeps the session alive |
+| `mux` | `herdr`, `tmux`, `psmux` or `none` — what keeps the session alive. `taurus-agent` is still accepted but superseded by `herdr` |
 | `via` | empty, or `wsl` to run the agent inside WSL on a Windows host |
 
 ## What `mux` buys you
 
 | value | effect |
 |---|---|
-| `tmux` / `psmux` | session survives a dropped connection, and reconnecting reattaches to the same agent instead of starting a second one |
+| `herdr` | same as tmux, **and it works on Windows and macOS too**. The preferred value: "Add & test" picks it whenever the host has it |
+| `tmux` / `psmux` | session survives a dropped connection, and reconnecting reattaches to the same agent instead of starting a second one. `tmux` does not exist on Windows |
 | `none` | no reattach. On **Windows** the agent still survives, because Windows' sshd does not kill the process tree when the connection drops. On **Linux** it does not — there, the transcript (`claude --resume`) is the only persistence, so you lose the in-flight turn |
+
+### herdr — the one that also works on Windows
+
+[herdr](https://herdr.dev) is an Apache-2.0 terminal runtime for coding agents: a
+background server that owns the terminals, with clients attaching and detaching.
+That is exactly what a remote tab needs, and unlike tmux it exists on all three
+platforms. Install it on the host and nothing else changes:
+
+```
+# Linux / macOS
+curl -fsSL https://herdr.dev/install.sh | sh
+# Windows
+powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"
+```
+
+Both installers verify a SHA-256 from a release manifest, install a single binary
+without root, and register no service. Then re-test the host from the 🖥 button;
+`mux` flips to `herdr` by itself.
+
+Taurus gives every (host, project) pair **its own herdr session** — a namespace
+with its own server and socket — which is the same unit tmux gets. Inside a fresh
+session the first pane is always `w1:p1`, so starting a tab is a short handshake
+of existence checks: is the server up, does the pane exist, is the agent already
+running. Each step is separately idempotent, so a half-torn-down session (server
+alive, agent gone) repairs itself on the next launch instead of putting a second
+agent next to the first.
+
+Two things are worth knowing, both measured rather than read:
+
+- **On Windows the session TUI does the attaching.** `herdr agent attach` answers
+  *"direct terminal attach is not supported on Windows yet"* (0.8.0-preview), so a
+  Windows tab attaches to the session instead, which puts herdr's own tab row in
+  the tab. Add `hide_tab_bar_when_single_tab = true` to the host's
+  `~/.config/herdr/config.toml` if that bothers you. On Linux and macOS Taurus
+  attaches to the agent terminal directly and there is no extra chrome.
+- **Windows builds are preview-only.** herdr refuses `channel set stable` there
+  until stable Windows releases exist. That is the trade for reattach on a
+  Windows host; `mux` is per host, so anything you are not comfortable with can
+  stay on `none`.
+
+If herdr does not recognise the program you launch — `agy`, or a `command`
+override that runs something else — there is no agent to attach to, and the tab
+falls back to the session view. It works; it just shows a little more chrome.
 
 ### Running in WSL (`via: wsl`)
 
-Windows has no tmux, so a Windows host normally cannot reattach. But a Windows
-host that has WSL usually already has one: pick **In WSL** in the add form and
-the agent runs there, with real tmux persistence, without installing anything.
-"Add & test" tells you whether that machine's WSL has both tmux and an agent CLI.
+Windows has no tmux, so a Windows host could not reattach — WSL was the way
+around it. **Installing herdr on the Windows side is now the simpler answer**, and
+it keeps the DROPZONE working. This route remains for a machine where you would
+rather not install anything, or where the work belongs in Linux anyway: pick
+**In WSL** in the add form and the agent runs there. "Add & test" reports whether
+that machine's WSL has both a multiplexer and an agent CLI, and which one, so a
+WSL that has herdr is not written down as tmux.
 
 What it costs:
 
