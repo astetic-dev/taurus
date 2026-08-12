@@ -49,6 +49,8 @@ const I18N = {
     host_mux_none: "Geen — sessies niet bewaren",
     host_mux_found: "gevonden: {list} — Taurus kiest {best}",
     host_mux_missing: "Deze machine heeft geen {mux}. Kies Automatisch, of installeer het daar en test opnieuw.",
+    host_herdr_tuned: "✓ herdr's eigen sidebar en tabbalk uitgezet op deze machine — die zijn dubbelop in een Taurus-tab. Geldt vanaf de volgende sessie.",
+    host_herdr_tune_failed: "ℹ herdr's sidebar kon niet uitgezet worden ({err}). De tab werkt gewoon, maar toont herdr's eigen menu ernaast.",
     attach_open: "Verbinden met een draaiende sessie…",
     attach_title: "Verbinden met een draaiende sessie",
     attach_host: "Machine", attach_refresh: "Opnieuw ophalen", attach_connect: "Verbinden",
@@ -204,6 +206,8 @@ const I18N = {
     host_mux_none: "None — do not keep sessions",
     host_mux_found: "found: {list} — Taurus picks {best}",
     host_mux_missing: "This machine has no {mux}. Pick Automatic, or install it there and test again.",
+    host_herdr_tuned: "✓ Turned off herdr's own sidebar and tab bar on this machine — a Taurus tab already has both. Applies from the next session.",
+    host_herdr_tune_failed: "ℹ Could not turn off herdr's sidebar ({err}). The tab still works; it just shows herdr's own menu beside the agent.",
     attach_open: "Connect to a running session…",
     attach_title: "Connect to a running session",
     attach_host: "Machine", attach_refresh: "Refresh", attach_connect: "Connect",
@@ -981,7 +985,7 @@ async function addAndTestHost() {
     // zelf persistentie, mét een werkende DROPZONE en zonder /mnt/c. Een
     // bestaande hosts.json met via:"wsl" blijft gewoon werken.
     via: "",
-    os: "", mux: "", agent_version: "",
+    os: "", mux: "", agent_version: "", mux_auto: !els.hfMux.value,
   };
   const wantMux = els.hfMux.value || "";
   els.hostStatusMsg.textContent = t("host_testing");
@@ -1016,12 +1020,28 @@ async function addAndTestHost() {
            : (wantMux || p.mux || "none");
   hosts.push(host);
   await invoke("save_hosts", { hosts });
+  const tuned = await tuneHerdrChrome(host);
   fillHostSelect();
   renderHostRows();
   els.hostStatusMsg.textContent = "✓ " + t("host_ok");
   els.hostStatusMsg.className = "status-msg ok";
-  showProbeReport(p);
+  showProbeReport(p, tuned);
   els.hfForm.classList.add("hidden");
+}
+
+// Op een Windows-host haakt een tab aan herdr's sessie-TUI, want `agent attach`
+// bestaat daar nog niet. Die TUI tekent een eigen sidebar en tabbalk over de
+// agent heen -- dubbelop in een venster dat dat allebei al heeft, en je kunt er
+// niets in selecteren omdat de muis naar herdr gaat. Dit zet dat uit, één keer,
+// bij het toevoegen of hertesten van de machine. Mislukt het, dan is dat geen
+// reden om de host niet op te slaan: de tab werkt ook mét chrome.
+async function tuneHerdrChrome(host) {
+  if (host.mux !== "herdr" || host.os !== "windows" || host.via === "wsl") return "";
+  try {
+    return await invoke("tune_herdr", { host });
+  } catch (e) {
+    return "err:" + e;
+  }
 }
 
 // Bestaande host opnieuw meten (bv. nadat er tmux is geïnstalleerd).
@@ -1037,8 +1057,13 @@ async function testExistingHost(i) {
   try { p = await invoke("probe_host", { host: h }); }
   catch (e) { p = { reachable: false, error: String(e) }; }
   if (p.reachable && p.authOk) {
-    hosts[i] = { ...h, os: p.os, mux: p.mux || "none" };
+    // Staat de host op Automatisch, dan volgt hij de nieuwe meting -- dat is de
+    // reden dat je hertest na het installeren van herdr. Heb je zelf iets
+    // vastgezet, dan blijft dat staan; anders draait deze knop je keuze terug.
+    const auto = h.mux_auto !== false;
+    hosts[i] = { ...h, os: p.os, mux: auto ? (p.mux || "none") : h.mux };
     await invoke("save_hosts", { hosts });
+    await tuneHerdrChrome(hosts[i]);
     fillHostSelect();
     els.hostStatusMsg.textContent = `${h.nickname}: ✓ ${t("host_ok")}`;
     els.hostStatusMsg.className = "status-msg ok";
@@ -1055,8 +1080,10 @@ async function testExistingHost(i) {
 
 // Wat de probe vond, met de twee dingen die een sessie echt blokkeren bovenaan:
 // geen agent-CLI en geen uitgaand HTTPS.
-function showProbeReport(p) {
+function showProbeReport(p, tuned) {
   const lines = [];
+  if (tuned === "ok") lines.push(t("host_herdr_tuned"));
+  else if (tuned && tuned.startsWith("err:")) lines.push(t("host_herdr_tune_failed").replace("{err}", tuned.slice(4)));
   if (p.os) lines.push(`OS: ${p.os}`);
   if (p.claude) lines.push(`agent: ${p.claude}`);
   else if (p.authOk) lines.push(t("host_no_claude"));

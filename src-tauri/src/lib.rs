@@ -148,10 +148,17 @@ struct Host {
     #[serde(default)]
     os: String,
     // Wat houdt de sessie in leven als de verbinding wegvalt:
-    // "tmux" | "psmux" | "taurus-agent" | "none". Bij "none" is het transcript
-    // de enige persistentie (claude --resume) en sterft een lopende beurt.
+    // "herdr" | "tmux" | "psmux" | "taurus-agent" | "none". Bij "none" is het
+    // transcript de enige persistentie (claude --resume) en sterft een lopende
+    // beurt.
     #[serde(default)]
     mux: String,
+    // Volgt `mux` de probe, of heb je hem zelf vastgezet? Een hertest mag een
+    // eigen keuze niet stilletjes terugdraaien -- die test doe je juist vaak
+    // NADAT je iets geinstalleerd hebt. Een oude hosts.json zonder dit veld
+    // gedraagt zich als voorheen: automatisch.
+    #[serde(default = "default_true")]
+    mux_auto: bool,
     // Versie van de taurus-agent op de host; leeg als hij er niet staat.
     #[serde(default)]
     agent_version: String,
@@ -176,6 +183,10 @@ fn effective_os(host: &Host) -> &str {
 
 fn default_ssh_port() -> u16 {
     22
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn hosts_path() -> std::path::PathBuf {
@@ -2203,6 +2214,55 @@ fn build_attach_payload(host: &Host, session: &str) -> Result<String, String> {
     }
 }
 
+// Herdr's TUI tekent een eigen sidebar met workspaces en agents, plus een
+// tabbalk. In een Taurus-tab is dat dubbelop -- het venster HEEFT al tabs en een
+// agentlijst -- en het vangt bovendien de muis, zodat je in dat deel niets kunt
+// selecteren. Alleen een probleem op Windows: daar bestaat `agent attach` nog
+// niet, dus daar haakt de tab aan de sessie-TUI in plaats van rechtstreeks aan
+// de agent-terminal.
+//
+// Drie voorwaarden voordat dit aan een configbestand van iemand anders komt:
+// alleen als de sleutel er nog niet staat (jouw eigen keuze wint), altijd met
+// een back-up, en achteraf gevalideerd met herdrs eigen `config check` -- klopt
+// het niet, dan gaat de back-up terug. De sectiekop [ui] is niet optioneel:
+// zonder die kop wijst herdr de sleutels af als onbekend.
+#[tauri::command(async)]
+fn tune_herdr(host: Host) -> Result<String, String> {
+    if host.mux != "herdr" || effective_os(&host) != "windows" || host.via == "wsl" {
+        return Ok("skip".into());
+    }
+    let ps = r#"$p = Join-Path $env:APPDATA 'herdr\config.toml'
+$h = (Get-Command herdr -EA 0).Source
+if (-not $h) { $h = Join-Path $env:LOCALAPPDATA 'Programs\Herdr\bin\herdr.exe' }
+if (-not (Test-Path $h)) { 'TUNE=skip'; exit 0 }
+if (-not (Test-Path $p)) { New-Item -ItemType File -Path $p -Force | Out-Null }
+$c = @(Get-Content $p -EA SilentlyContinue)
+if ($c -match 'sidebar_start_collapsed') { 'TUNE=skip'; exit 0 }
+Copy-Item $p ($p + '.taurus.bak') -Force
+$add = @('sidebar_start_collapsed = true', 'sidebar_collapsed_mode = "hidden"', 'hide_tab_bar_when_single_tab = true')
+$idx = -1
+for ($i = 0; $i -lt $c.Count; $i++) { if ($c[$i].Trim() -eq '[ui]') { $idx = $i; break } }
+if ($idx -ge 0) {
+  $new = @()
+  for ($i = 0; $i -lt $c.Count; $i++) { $new += $c[$i]; if ($i -eq $idx) { $new += $add } }
+} else {
+  $new = $c + @('', '# Taurus: this tab already has tabs and an agent list of its own, so the', '# herdr chrome would be a second copy of both. This leaves just the pane.', '[ui]') + $add
+}
+Set-Content -Path $p -Value $new -Encoding ASCII
+if ((& $h config check 2>&1) -match 'issues found') { Copy-Item ($p + '.taurus.bak') $p -Force; 'TUNE=fail'; exit 0 }
+'TUNE=ok'"#;
+    let (out, _) = ssh_run(
+        &host,
+        &format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(ps))),
+    )?;
+    match out.lines().find_map(|l| l.trim().strip_prefix("TUNE=")) {
+        Some("ok") => Ok("ok".into()),
+        Some("skip") => Ok("skip".into()),
+        Some("fail") => Err("herdr wees de configuratie af; de back-up is teruggezet.".into()),
+        _ => Err(format!("onverwacht antwoord van de host:\n{}", out.trim())),
+    }
+}
+
 // Wat er op een host draait. Leeg agent-veld = een sessie zonder (herkende) agent;
 // die is nog steeds bruikbaar, dus wel tonen.
 #[derive(serde::Serialize, Clone, Default)]
@@ -3782,6 +3842,7 @@ pub fn run() {
             probe_host,
             remote_sessions,
             attach_remote_session,
+            tune_herdr,
             scp_to_host,
             survey_workspace,
             survey_remote_workspace,
@@ -3837,6 +3898,7 @@ mod tests {
             default_project: String::new(),
             os: "linux".into(),
             mux: "tmux".into(),
+            mux_auto: true,
             agent_version: String::new(),
             via: String::new(),
         }
@@ -4218,6 +4280,36 @@ mod tests {
     }
 
     #[test]
+    fn an_older_hosts_json_keeps_following_the_probe() {
+        // Zonder mux_auto is een host van vóór deze versie: die volgde altijd de
+        // probe, en moet dat blijven doen. Stond het veld op false, dan zou een
+        // hertest zijn mux nooit meer bijwerken -- precies verkeerd om.
+        let old = r#"[{"id":"h","nickname":"h","hostname":"x","mux":"tmux"}]"#;
+        let list: Vec<Host> = serde_json::from_str(old).expect("oude vorm moet leesbaar blijven");
+        assert!(list[0].mux_auto, "ontbrekend veld = automatisch");
+        let pinned = r#"[{"id":"h","nickname":"h","hostname":"x","mux":"none","mux_auto":false}]"#;
+        let list: Vec<Host> = serde_json::from_str(pinned).unwrap();
+        assert!(!list[0].mux_auto);
+    }
+
+    #[test]
+    fn tuning_only_touches_a_windows_herdr_host() {
+        // Op POSIX hangt de tab rechtstreeks aan de agent-terminal: geen chrome,
+        // dus niets te verstellen. Aan een configbestand van iemand anders komen
+        // zonder dat het iets oplost, is precies wat je niet wilt.
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.os = "linux".into();
+        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
+        h.os = "windows".into();
+        h.via = "wsl".into();
+        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
+        h.via = String::new();
+        h.mux = "tmux".into();
+        assert_eq!(tune_herdr(h).unwrap(), "skip");
+    }
+
+    #[test]
     fn best_mux_prefers_herdr_and_falls_back_to_none() {
         let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(best_mux(&v(&["tmux", "herdr"])), "herdr");
@@ -4493,6 +4585,7 @@ mod tests {
             default_project: String::new(),
             os: std::env::var("TAURUS_TEST_OS").unwrap_or_else(|_| "windows".into()),
             mux: std::env::var("TAURUS_TEST_MUX").unwrap_or_else(|_| "none".into()),
+            mux_auto: true,
             agent_version: String::new(),
             via: String::new(),
         };
@@ -4527,6 +4620,22 @@ mod tests {
         for (i, x) in a.iter().enumerate() {
             println!("ARG[{}]: {}", i, x);
         }
+    }
+
+    // Zet de herdr-chrome uit op een ECHTE Windows-host. Draaien met:
+    //   TAURUS_TEST_HOST=... TAURUS_TEST_USER=... TAURUS_TEST_KEY=...
+    //   cargo test tune_a_real_host -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn tune_a_real_host() {
+        let mut host = test_host();
+        host.hostname = std::env::var("TAURUS_TEST_HOST").expect("TAURUS_TEST_HOST");
+        host.user = std::env::var("TAURUS_TEST_USER").unwrap_or_default();
+        host.key_path = std::env::var("TAURUS_TEST_KEY").unwrap_or_default();
+        host.os = "windows".into();
+        host.mux = "herdr".into();
+        host.via = String::new();
+        println!("TUNE: {:?}", tune_herdr(host));
     }
 
     // Meet tegen een echte host uit het eigen netwerk. Draaien met:
@@ -4577,6 +4686,7 @@ mod tests {
             default_project: "/home/arjen/proj".into(),
             os: "linux".into(),
             mux: "tmux".into(),
+            mux_auto: true,
             agent_version: String::new(),
             via: String::new(),
         };

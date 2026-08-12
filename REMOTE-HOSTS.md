@@ -152,10 +152,28 @@ Two things are worth knowing, both measured rather than read:
 
 - **On Windows the session TUI does the attaching.** `herdr agent attach` answers
   *"direct terminal attach is not supported on Windows yet"* (0.8.0-preview), so a
-  Windows tab attaches to the session instead, which puts herdr's own tab row in
-  the tab. Add `hide_tab_bar_when_single_tab = true` to the host's
-  `~/.config/herdr/config.toml` if that bothers you. On Linux and macOS Taurus
-  attaches to the agent terminal directly and there is no extra chrome.
+  Windows tab attaches to the session instead — and that draws herdr's own
+  sidebar (spaces, agents) and tab row inside your tab. In a window that already
+  has tabs and an agent list that is a second copy of both, and the sidebar takes
+  the mouse, so you cannot select text in it.
+
+  "Add & test" therefore turns that chrome off on Windows hosts, once, by adding
+  to the machine's `%APPDATA%\herdr\config.toml`:
+
+  ```toml
+  [ui]
+  sidebar_start_collapsed = true
+  sidebar_collapsed_mode = "hidden"
+  hide_tab_bar_when_single_tab = true
+  ```
+
+  The `[ui]` header is not optional: without it herdr rejects the keys as unknown
+  and silently ignores them. Taurus keeps a `.taurus.bak`, never touches the
+  keys if `sidebar_start_collapsed` is already set (your own choice wins), and
+  validates the result with `herdr config check` — if that reports a problem the
+  backup goes back. It applies from the next session, and only on Windows: on
+  Linux and macOS Taurus attaches to the agent terminal directly and there is no
+  chrome to hide.
 - **Windows builds are preview-only.** herdr refuses `channel set stable` there
   until stable Windows releases exist. That is the trade for reattach on a
   Windows host; `mux` is per host, so anything you are not comfortable with can
@@ -170,6 +188,8 @@ falls back to the session view. It works; it just shows a little more chrome.
 The add form has a **Session persistence** dropdown: *Automatic*, `herdr`, `tmux / psmux`, or *None*. Automatic is the default and takes whatever the test finds, preferring herdr. The test reports everything it found, not just the winner, so the choice is informed rather than a guess.
 
 Picking something the machine does not have fails the test instead of being saved — that error would otherwise surface at the first session, from a shell three layers down. *None* is always allowed: it is the honest setting for a machine where you would rather not leave an agent process running.
+
+A host you left on *Automatic* follows the probe every time you re-test it, which is the point of re-testing after installing something. A host where you picked a value keeps it: re-testing must not quietly undo your choice. That is what `mux_auto` in `hosts.json` records; an entry from before this existed counts as automatic.
 
 ### Connecting to a session that is already running
 
