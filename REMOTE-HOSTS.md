@@ -165,15 +165,32 @@ If herdr does not recognise the program you launch — `agy`, or a `command`
 override that runs something else — there is no agent to attach to, and the tab
 falls back to the session view. It works; it just shows a little more chrome.
 
+### Choosing it yourself
+
+The add form has a **Session persistence** dropdown: *Automatic*, `herdr`, `tmux / psmux`, or *None*. Automatic is the default and takes whatever the test finds, preferring herdr. The test reports everything it found, not just the winner, so the choice is informed rather than a guess.
+
+Picking something the machine does not have fails the test instead of being saved — that error would otherwise surface at the first session, from a shell three layers down. *None* is always allowed: it is the honest setting for a machine where you would rather not leave an agent process running.
+
+### Connecting to a session that is already running
+
+⇱ beside ＋ in the AGENTS sidebar opens **Connect to a running session**: pick a machine, see what is actually running on it — session name, agent and its state, working directory — and attach to one.
+
+This is the deliberate way back in. Starting an agent card the normal way only reattaches when the session name happens to match, which it does not for a session started from another workstation, from a plain terminal, or from a card that has since been renamed.
+
+Attaching creates nothing: no workspace, no `pane run`. Re-running the agent inside a session that is mid-turn would overwrite that turn. A session whose agent has exited is still listed and still attachable — you land in the pane and can start something there.
+
+Such a tab is not restartable or movable, and it is not remembered for the next start: Taurus did not build that command and cannot rebuild it. The session keeps running on the host regardless; ⇱ brings you back.
+
 ### Running in WSL (`via: wsl`)
 
+Not offered in the form any more — herdr made it unnecessary. A `hosts.json` that says `via: "wsl"` still works, so this remains available as a hand-edit for the case where the work belongs in Linux anyway.
+
 Windows has no tmux, so a Windows host could not reattach — WSL was the way
-around it. **Installing herdr on the Windows side is now the simpler answer**, and
-it keeps the DROPZONE working. This route remains for a machine where you would
-rather not install anything, or where the work belongs in Linux anyway: pick
-**In WSL** in the add form and the agent runs there. "Add & test" reports whether
-that machine's WSL has both a multiplexer and an agent CLI, and which one, so a
-WSL that has herdr is not written down as tmux.
+around it. **Installing herdr on the Windows side is now the simpler answer**: it
+keeps the DROPZONE working and the agent sees real Windows paths instead of
+`/mnt/c`. Set `"via": "wsl"` by hand on a host whose work belongs in Linux
+anyway; "Add & test" still reports whether that machine's WSL has a multiplexer
+and an agent CLI.
 
 What it costs:
 

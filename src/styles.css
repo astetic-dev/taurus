@@ -800,6 +800,10 @@ select:-webkit-autofill {
   display: flex; align-items: center; gap: 10px;
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px;
 }
+/* Gekozen rij in "verbinden met een draaiende sessie": de knop werkt op precies
+   deze regel, dus die keuze moet zichtbaar zijn zonder een extra kolom. */
+.host-row.picked { border-color: var(--accent); background: var(--bg-card-hover); }
+.host-row.picked .host-name { color: var(--accent); }
 .host-main { flex: 1; min-width: 0; }
 .host-name { font-size: 13px; }
 .host-sub { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

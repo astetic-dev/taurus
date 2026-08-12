@@ -202,6 +202,10 @@ dropped connection. A host with [herdr](https://herdr.dev) installed gets that
 last one on **Windows and macOS as well**, not just where tmux exists. An agent then carries its machine like it carries its
 folder, and its tab shows a badge for where it runs.
 
+A session on a host outlives the tab, the connection and the workstation, so **⇱
+beside ＋ asks a machine what is running on it** — session, agent, its state and
+its folder — and attaches to the one you pick.
+
 Right-click a tab or an agent card to **move an agent to another machine**,
 folder and all — with a survey of what is about to be copied, so a 512 MB
 `node_modules` does not travel unless you say so.

@@ -26,6 +26,7 @@
         <div class="section-head">
           <div class="sidebar-label dropzone-label" data-i18n="projects">Agents</div>
           <button id="hosts-btn" class="icon-btn sec-add" data-i18n-title="host_manage">🖥</button>
+          <button id="attach-btn" class="icon-btn sec-add" data-i18n-title="attach_open">⇱</button>
           <button id="add-project-btn" class="icon-btn sec-add" data-i18n-title="new_project">＋</button>
         </div>
         <div id="project-list" class="project-list"></div>
@@ -343,10 +344,12 @@
             <div class="e-pathrow"><input id="hf-key" type="text" placeholder="~/.ssh/id_ed25519" /><button id="hf-key-browse" class="e-browse">📁</button></div></div>
           <div class="e-field"><span class="e-cap" data-i18n="host_default_project">Standaard werkmap op de host</span>
             <input id="hf-project" type="text" placeholder="C:\Users\arjen  of  /home/arjen/proj" /></div>
-          <div class="e-field"><span class="e-cap" data-i18n="host_via">Waar draait de agent</span>
-            <select id="hf-via">
-              <option value="" data-i18n="host_via_direct">Rechtstreeks op de machine</option>
-              <option value="wsl" data-i18n="host_via_wsl">In WSL (Windows-host, geeft tmux-persistentie)</option>
+          <div class="e-field"><span class="e-cap" data-i18n="host_mux">Sessiepersistentie</span>
+            <select id="hf-mux">
+              <option value="" data-i18n="host_mux_auto">Automatisch — wat de test vindt</option>
+              <option value="herdr">herdr</option>
+              <option value="tmux">tmux / psmux</option>
+              <option value="none" data-i18n="host_mux_none">Geen — sessies niet bewaren</option>
             </select></div>
           <div class="modal-actions">
             <button id="hf-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
@@ -358,6 +361,26 @@
 
         <div class="modal-actions">
           <button id="host-close" class="btn-ghost" data-i18n="close">Sluiten</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Aanhaken aan een sessie die al draait op een machine ===== -->
+    <div id="attach-modal" class="modal hidden">
+      <div class="modal-box wide">
+        <h2 data-i18n="attach_title">Verbinden met een draaiende sessie</h2>
+        <div class="e-field">
+          <span class="e-cap" data-i18n="attach_host">Machine</span>
+          <div class="e-pathrow">
+            <select id="at-host"></select>
+            <button id="at-refresh" class="e-browse" data-i18n-title="attach_refresh">↻</button>
+          </div>
+        </div>
+        <div id="at-rows" class="host-rows"></div>
+        <div id="at-status" class="status-msg"></div>
+        <div class="modal-actions">
+          <button id="at-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+          <button id="at-connect" class="btn-primary" data-i18n="attach_connect">Verbinden</button>
         </div>
       </div>
     </div>

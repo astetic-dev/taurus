@@ -44,10 +44,20 @@ const I18N = {
     host_no_claude: "⚠ Geen agent-CLI gevonden op deze machine — een sessie zal niet starten.",
     host_no_outbound: "⚠ Geen uitgaand HTTPS naar api.anthropic.com — een agent kan hier niet werken.",
     host_no_mux: "ℹ Geen herdr of tmux: een sessie is niet opnieuw aan te haken. Installeer herdr (herdr.dev) op die machine — dat werkt ook op Windows.",
-    host_via: "Waar draait de agent", host_via_direct: "Rechtstreeks op de machine",
-    host_via_wsl: "In WSL (Windows-host, geeft sessiepersistentie)",
-    host_wsl_tip: "💡 WSL op deze machine heeft een multiplexer én een agent-CLI. Kies \"In WSL\" voor sessies die een verbroken verbinding overleven — de agent werkt dan wel in Linux, met Windows-schijven onder /mnt/c.",
-    host_wsl_unusable: "In WSL gekozen, maar WSL op deze machine mist herdr of tmux, of een agent-CLI. Installeer die daar, of kies \"Rechtstreeks op de machine\".",
+    host_mux: "Sessiepersistentie",
+    host_mux_auto: "Automatisch — wat de test vindt",
+    host_mux_none: "Geen — sessies niet bewaren",
+    host_mux_found: "gevonden: {list} — Taurus kiest {best}",
+    host_mux_missing: "Deze machine heeft geen {mux}. Kies Automatisch, of installeer het daar en test opnieuw.",
+    attach_open: "Verbinden met een draaiende sessie…",
+    attach_title: "Verbinden met een draaiende sessie",
+    attach_host: "Machine", attach_refresh: "Opnieuw ophalen", attach_connect: "Verbinden",
+    attach_loading: "Sessies ophalen…",
+    attach_empty: "Geen sessies op deze machine.",
+    attach_no_hosts: "Nog geen machines. Voeg er een toe met 🖥.",
+    attach_pick: "Kies eerst een sessie.",
+    attach_noagent: "geen agent",
+    attach_not_restartable: "Aangehaakte sessie: Taurus heeft dit commando niet gebouwd en kan het niet herstarten of verplaatsen.",
     dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
     dropper_sending: "Bestand overzetten naar de host…",
     dropper_sent: "Op de host gezet",
@@ -189,10 +199,20 @@ const I18N = {
     host_no_claude: "⚠ No agent CLI found on this machine — a session will not start.",
     host_no_outbound: "⚠ No outbound HTTPS to api.anthropic.com — an agent cannot work here.",
     host_no_mux: "ℹ No herdr or tmux: a session cannot be reattached. Install herdr (herdr.dev) on that machine — it works on Windows too.",
-    host_via: "Where the agent runs", host_via_direct: "Directly on the machine",
-    host_via_wsl: "In WSL (Windows host, gives session persistence)",
-    host_wsl_tip: "💡 WSL on this machine has both a multiplexer and an agent CLI. Pick \"In WSL\" for sessions that survive a dropped connection — the agent then works in Linux, with Windows drives under /mnt/c.",
-    host_wsl_unusable: "You picked In WSL, but WSL on this machine has no herdr or tmux, or no agent CLI. Install those there, or pick \"Directly on the machine\".",
+    host_mux: "Session persistence",
+    host_mux_auto: "Automatic — whatever the test finds",
+    host_mux_none: "None — do not keep sessions",
+    host_mux_found: "found: {list} — Taurus picks {best}",
+    host_mux_missing: "This machine has no {mux}. Pick Automatic, or install it there and test again.",
+    attach_open: "Connect to a running session…",
+    attach_title: "Connect to a running session",
+    attach_host: "Machine", attach_refresh: "Refresh", attach_connect: "Connect",
+    attach_loading: "Fetching sessions…",
+    attach_empty: "No sessions on this machine.",
+    attach_no_hosts: "No machines yet. Add one with 🖥.",
+    attach_pick: "Pick a session first.",
+    attach_noagent: "no agent",
+    attach_not_restartable: "Attached session: Taurus did not build this command and cannot restart or move it.",
     dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
     dropper_sending: "Copying file to the host…",
     dropper_sent: "Placed on the host",
@@ -932,7 +952,7 @@ function renderHostRows() {
 
 function openHostForm() {
   els.hfNickname.value = ""; els.hfHostname.value = ""; els.hfPort.value = "22";
-  els.hfUser.value = ""; els.hfKey.value = ""; els.hfProject.value = ""; els.hfVia.value = "";
+  els.hfUser.value = ""; els.hfKey.value = ""; els.hfProject.value = ""; els.hfMux.value = "";
   els.hostStatusMsg.textContent = ""; els.hostStatusMsg.className = "status-msg";
   els.hfReport.classList.add("hidden");
   els.hfForm.classList.remove("hidden");
@@ -957,9 +977,13 @@ async function addAndTestHost() {
     port: parseInt(els.hfPort.value, 10) || 22,
     key_path: els.hfKey.value.trim(),
     default_project: els.hfProject.value.trim(),
-    via: els.hfVia.value || "",
+    // De WSL-route wordt niet meer aangeboden: sinds #115 geeft herdr op Windows
+    // zelf persistentie, mét een werkende DROPZONE en zonder /mnt/c. Een
+    // bestaande hosts.json met via:"wsl" blijft gewoon werken.
+    via: "",
     os: "", mux: "", agent_version: "",
   };
+  const wantMux = els.hfMux.value || "";
   els.hostStatusMsg.textContent = t("host_testing");
   els.hostStatusMsg.className = "status-msg";
   els.hfReport.classList.add("hidden");
@@ -974,19 +998,22 @@ async function addAndTestHost() {
     els.hostStatusMsg.className = "status-msg err";
     return;
   }
-  // Kies je WSL, dan moet daar ook echt tmux EN een agent-CLI in zitten. Anders
-  // zou de host opgeslagen worden en pas bij de eerste sessie stukgaan, met een
-  // foutmelding uit een shell drie lagen diep.
-  if (host.via === "wsl" && !p.wslUsable) {
-    els.hostStatusMsg.textContent = "✗ " + t("host_wsl_unusable");
+  // Een expliciete keuze die de machine niet heeft, wordt niet opgeslagen: dat
+  // zou pas bij de eerste sessie stukgaan, met een foutmelding uit een shell
+  // drie lagen diep. "Geen" mag altijd -- dat is een geldige keuze, geen fout.
+  const found = p.muxes || [];
+  if (wantMux && wantMux !== "none" && !found.includes(wantMux) &&
+      !(wantMux === "tmux" && found.includes("psmux"))) {
+    els.hostStatusMsg.textContent = "✗ " + t("host_mux_missing").replace("{mux}", wantMux);
     els.hostStatusMsg.className = "status-msg err";
     showProbeReport(p);
     return;
   }
   host.os = p.os;
-  // Via WSL is de multiplexer die van WSL, niet die van Windows -- en dat is
-  // sinds #115 niet meer per definitie tmux.
-  host.mux = host.via === "wsl" ? (p.wslMux || "tmux") : (p.mux || "none");
+  // tmux in de keuzelijst dekt ook psmux: dat is dezelfde commandotaal, en welke
+  // van de twee er staat is een eigenschap van de machine, geen keuze.
+  host.mux = wantMux === "tmux" ? (found.includes("tmux") ? "tmux" : "psmux")
+           : (wantMux || p.mux || "none");
   hosts.push(host);
   await invoke("save_hosts", { hosts });
   fillHostSelect();
@@ -1035,13 +1062,114 @@ function showProbeReport(p) {
   else if (p.authOk) lines.push(t("host_no_claude"));
   if (p.authOk && !p.outbound) lines.push(t("host_no_outbound"));
   if (p.authOk && (!p.mux || p.mux === "none")) lines.push(t("host_no_mux"));
+  // Alles tonen wat er staat, niet alleen wat Taurus zou kiezen: dan is de
+  // keuzelijst hierboven geen gok maar een keuze.
+  else if (p.muxes && p.muxes.length > 1) lines.push(t("host_mux_found").replace("{list}", p.muxes.join(", ")).replace("{best}", p.mux));
   else if (p.mux) lines.push(`persistentie: ${p.mux}`);
-  // Windows zonder multiplexer maar mét een bruikbare WSL: dat is de enige route
-  // naar heraanhaken op die machine zonder iets te installeren.
-  if (p.wslUsable && (!p.mux || p.mux === "none")) lines.push(t("host_wsl_tip"));
   if (!lines.length) return;
   els.hfReport.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
   els.hfReport.classList.remove("hidden");
+}
+
+/* ---- aanhaken aan een sessie die al draait op een machine ---- */
+// Zonder dit kun je alleen bij een draaiende sessie komen door toevallig dezelfde
+// agent met dezelfde map te starten, zodat de sessienaam matcht. Sessies van een
+// ander werkstation, of van een kaart die intussen anders heet, waren onzichtbaar.
+let atSessions = [];
+let atPicked = "";
+
+function openAttachModal() {
+  atSessions = []; atPicked = "";
+  els.atRows.innerHTML = "";
+  els.atStatus.textContent = ""; els.atStatus.className = "status-msg";
+  els.atHost.innerHTML = hosts
+    .map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.nickname || h.hostname)}</option>`)
+    .join("");
+  els.attachModal.classList.remove("hidden");
+  if (!hosts.length) {
+    els.atStatus.textContent = t("attach_no_hosts");
+    els.atStatus.className = "status-msg err";
+    return;
+  }
+  loadRemoteSessions();
+}
+
+async function loadRemoteSessions() {
+  const hostId = els.atHost.value;
+  if (!hostId) return;
+  atSessions = []; atPicked = "";
+  els.atRows.innerHTML = "";
+  els.atStatus.textContent = t("attach_loading"); els.atStatus.className = "status-msg";
+  els.atRefresh.disabled = true;
+  try {
+    atSessions = await invoke("remote_sessions", { hostId });
+    els.atStatus.textContent = "";
+  } catch (e) {
+    // Onbereikbaar, of een machine die geen sessies bewaart: de reden hoort hier
+    // te staan, niet als een lege lijst die op "niets draait" lijkt.
+    els.atStatus.textContent = "✗ " + e;
+    els.atStatus.className = "status-msg err";
+  } finally {
+    els.atRefresh.disabled = false;
+  }
+  renderAttachRows();
+}
+
+function renderAttachRows() {
+  if (!atSessions.length) {
+    els.atRows.innerHTML = els.atStatus.textContent
+      ? ""
+      : `<div class="host-empty">${escapeHtml(t("attach_empty"))}</div>`;
+    return;
+  }
+  els.atRows.innerHTML = "";
+  for (const s of atSessions) {
+    // Een sessie zonder (herkende) agent is nog steeds bruikbaar -- je landt in
+    // de pane en kunt er iets starten. Dus tonen, niet verbergen.
+    const agent = s.agent ? s.agent + (s.agentStatus ? " · " + s.agentStatus : "") : t("attach_noagent");
+    const row = document.createElement("div");
+    row.className = "host-row" + (s.name === atPicked ? " picked" : "");
+    row.innerHTML = `
+      <span class="host-dot ${s.status === "running" || s.status === "attached" ? "up" : "pending"}"></span>
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(s.name)}</div>
+        <div class="host-sub">${escapeHtml(agent)}${s.cwd ? " · " + escapeHtml(s.cwd) : ""}</div>
+      </div>`;
+    row.addEventListener("click", () => { atPicked = s.name; renderAttachRows(); });
+    els.atRows.appendChild(row);
+  }
+}
+
+async function connectToRemoteSession() {
+  if (!atPicked) {
+    els.atStatus.textContent = t("attach_pick"); els.atStatus.className = "status-msg err";
+    return;
+  }
+  const hostId = els.atHost.value;
+  const meta = atSessions.find((x) => x.name === atPicked) || {};
+  // De sessie weet zelf al waar hij draait; de mapnaam leest prettiger op een tab
+  // dan een sessienaam met een hash erachter.
+  const leaf = (meta.cwd || "").split(/[\\/]/).filter(Boolean).pop();
+  const id = "s" + (++seq);
+  const session = spawnTerminal({
+    id, uuid: "", path: meta.cwd || "", title: leaf || atPicked, accent: "#7c9cff",
+    mode: "", command: "", agent: "", model: "", hostId, projectId: "",
+  });
+  // Taurus heeft dit commando niet gebouwd: herstarten/hervatten zou iets anders
+  // doen dan je verwacht, en opslaan-voor-de-volgende-start ook.
+  session.attached = true;
+  try {
+    await invoke("attach_remote_session", {
+      id, gen: session.gen, hostId, session: atPicked,
+      cols: session.term.cols, rows: session.term.rows,
+    });
+    els.attachModal.classList.add("hidden");
+    showView(id);
+  } catch (e) {
+    sessions.delete(id); session.term.dispose(); session.el.remove();
+    renderTabs();
+    els.atStatus.textContent = "✗ " + e; els.atStatus.className = "status-msg err";
+  }
 }
 
 /* ---- agent naar een andere machine verplaatsen (#102) ---- */
@@ -1998,7 +2126,11 @@ async function addAgentFromForm() {
 function persistSessionsToDisk() {
   if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
   const list = [...sessions.values()]
-    .filter((s) => !s.command)
+    // Een aangehaakte sessie heeft geen uuid en geen commando dat Taurus kent;
+    // hem hier opslaan zou bij de volgende start een resume proberen die nergens
+    // op slaat. De sessie zelf blijft op de host draaien -- je haakt gewoon
+    // opnieuw aan via ⇱.
+    .filter((s) => !s.command && !s.attached)
     .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "" }));
   invoke("save_sessions", { sessions: list }).catch(() => {});
 }
@@ -2398,15 +2530,20 @@ function openTabMenu(x, y, id) {
   // openen en de preview blijft leeg. Uitgrijzen i.p.v. stil laten mislukken.
   const off = s.hostId ? " disabled" : "";
   const why = s.hostId ? ` title="${escapeHtml(t("remote_local_only"))}"` : "";
+  // Aangehaakt aan een bestaande sessie: Taurus heeft dat commando niet gebouwd.
+  // Herstarten zou een nieuwe agent starten in plaats van deze te hervatten, en
+  // verplaatsen werkt op een agent-kaart die hier niet bestaat.
+  const att = s.attached ? " disabled" : "";
+  const attWhy = s.attached ? ` title="${escapeHtml(t("attach_not_restartable"))}"` : "";
   m.innerHTML = `
-    <div class="ctx-item" data-act="restart">${t("ctx_restart")}</div>
+    <div class="ctx-item${att}"${attWhy} data-act="restart">${t("ctx_restart")}</div>
     <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
     <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
     <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
-    <div class="ctx-item" data-act="move">${t("ctx_move")}</div>
+    <div class="ctx-item${att}"${attWhy} data-act="move">${t("ctx_move")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
-  m.querySelector('[data-act="restart"]').addEventListener("click", () => restartSession(id));
+  m.querySelector('[data-act="restart"]').addEventListener("click", () => { if (!s.attached) restartSession(id); });
   m.querySelector('[data-act="speak"]').addEventListener("click", () => {
     closeTabMenu();
     const sel = s.term.getSelection();
@@ -2416,6 +2553,7 @@ function openTabMenu(x, y, id) {
   // Verplaatsen werkt op de AGENT achter deze tab; de sessie zelf verhuist niet
   // mee, die draait waar hij draait tot je hem opnieuw start.
   m.querySelector('[data-act="move"]').addEventListener("click", () => {
+    if (s.attached) return;
     closeTabMenu();
     const p = projects.find((x) => x.path === s.path && (x.host_id || "") === (s.hostId || ""))
       || { id: "", label: s.title, path: s.path, host_id: s.hostId || "" };
@@ -3228,7 +3366,15 @@ window.addEventListener("DOMContentLoaded", () => {
     hfUser: document.querySelector("#hf-user"),
     hfKey: document.querySelector("#hf-key"),
     hfProject: document.querySelector("#hf-project"),
-    hfVia: document.querySelector("#hf-via"),
+    hfMux: document.querySelector("#hf-mux"),
+    attachBtn: document.querySelector("#attach-btn"),
+    attachModal: document.querySelector("#attach-modal"),
+    atHost: document.querySelector("#at-host"),
+    atRefresh: document.querySelector("#at-refresh"),
+    atRows: document.querySelector("#at-rows"),
+    atStatus: document.querySelector("#at-status"),
+    atCancel: document.querySelector("#at-cancel"),
+    atConnect: document.querySelector("#at-connect"),
     hfTest: document.querySelector("#hf-test"),
     hostStatusMsg: document.querySelector("#hf-status"),
     hfReport: document.querySelector("#hf-report"),
@@ -3269,6 +3415,11 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
   document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
   document.querySelector("#host-close").addEventListener("click", () => els.hostModal.classList.add("hidden"));
+  els.attachBtn.addEventListener("click", openAttachModal);
+  els.atHost.addEventListener("change", loadRemoteSessions);
+  els.atRefresh.addEventListener("click", loadRemoteSessions);
+  els.atCancel.addEventListener("click", () => els.attachModal.classList.add("hidden"));
+  els.atConnect.addEventListener("click", connectToRemoteSession);
   // Sleutelkiezer via het bestaande pick_file-command: de dialog-plugin is niet
   // vanuit JS aanroepbaar (staat niet in capabilities/default.json).
   document.querySelector("#hf-key-browse").addEventListener("click", async () => {
