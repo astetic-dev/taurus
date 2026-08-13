@@ -10,10 +10,17 @@
   --green: #5ccf9e;
   --orange: #f0a85c;
   --red: #ff6b6b;
-  /* Bereikbaar-bolletje: rustig donkergroen, niet het lichte accent-groen.
-     Een statusbolletje staat er altijd; het moet "in orde" zeggen zonder de
-     aandacht te trekken die --green (spinner, live-tab) juist wel wil. */
-  --dot-up: #2f8f63;
+  /* SIGNAALKLEUREN STAAN BUITEN DE THEMA'S -- skins.css zet ze bewust NIET.
+     Elke skin verzet --red/--green/--orange naar zijn eigen palet, en in de
+     NEXUS-huisstijl is rood juist de MERKkleur (logo, primaire knoppen). Pakt
+     een statusstip diezelfde rode, dan is niet meer te zien of rood "merk" of
+     "er is iets mis" betekent -- en dat is precies waar een signaal voor dient.
+     Vandaar eigen namen die geen enkel thema aanraakt.
+     Bereikbaar is rustig donkergroen: het staat er altijd en hoeft geen
+     aandacht te trekken zoals --green (spinner, live-tab) dat wel wil. */
+  --signal-ok: #2f8f63;
+  --signal-warn: #b8791f;
+  --signal-bad: #c62f2f;
   /* Terminal-kleuren (xterm). Skins overschrijven deze; spawnTerminal leest ze. */
   --term-bg: #14161c;
   --term-fg: #e6e8ee;
@@ -365,8 +372,8 @@ select:-webkit-autofill {
 }
 .add-agent-btn:hover { border-color: var(--accent); color: var(--accent); }
 .status-msg { margin-top: 16px; font-size: 13px; min-height: 18px; }
-.status-msg.ok { color: var(--green); }
-.status-msg.err { color: var(--red); white-space: pre-line; }
+.status-msg.ok { color: var(--signal-ok); }
+.status-msg.err { color: var(--signal-bad); white-space: pre-line; }
 
 /* ---- Terminals ---- */
 .terminals { position: absolute; inset: 0; background: var(--bg); }
@@ -705,7 +712,7 @@ select:-webkit-autofill {
 .rate-lbl { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
 .rate-slider { flex: 1; min-width: 120px; accent-color: var(--accent); }
 .stt-state { font-size: 12px; padding: 2px 0 6px; color: var(--text-dim); }
-.stt-state.ok { color: var(--green); }
+.stt-state.ok { color: var(--signal-ok); }
 .stt-state.miss { color: var(--orange); }
 #mic-btn.rec { color: #fff; background: var(--red); border-color: var(--red); animation: mic-pulse 1.2s infinite; }
 @keyframes mic-pulse { 50% { opacity: .55; } }
@@ -822,8 +829,8 @@ select:-webkit-autofill {
 /* Nog niet gemeten: hol bolletje. Een grijze stip lijkt te veel op een
    uitspraak ("grijs = ?"), terwijl dit letterlijk "nog niets bekend" is. */
 .host-dot.pending { background: transparent; border: 1px solid var(--text-dim); opacity: .5; }
-.host-dot.up { background: var(--dot-up); }
-.host-dot.down { background: var(--red); }
+.host-dot.up { background: var(--signal-ok); }
+.host-dot.down { background: var(--signal-bad); }
 .host-test, .host-del {
   background: none; border: 1px solid var(--border); color: var(--text-dim);
   border-radius: 5px; cursor: pointer; padding: 3px 8px; font-size: 12px;
@@ -838,7 +845,7 @@ select:-webkit-autofill {
   background: var(--bg-card); border: 1px solid var(--border);
   font-size: 12px; color: var(--text-dim); display: flex; flex-direction: column; gap: 3px;
 }
-.status-msg.ok { color: var(--green); }
+.status-msg.ok { color: var(--signal-ok); }
 .e-pathrow { display: flex; gap: 6px; }
 .e-pathrow .e-path { flex: 1; }
 .e-browse {
@@ -875,9 +882,9 @@ select:-webkit-autofill {
   margin-left: 6px; padding: 1px 6px; border-radius: 10px; font-size: 11px;
   border: 1px solid var(--border); color: var(--text-dim);
 }
-.peer-tag.blocked { border-color: var(--red); color: var(--red); }
+.peer-tag.blocked { border-color: var(--signal-bad); color: var(--signal-bad); }
 .peer-actions { display: flex; gap: 6px; flex: 0 0 auto; }
-.stt-state.warn { color: var(--orange); }
+.stt-state.warn { color: var(--signal-warn); }
 /* Nog niet beschikbaar: zichtbaar maar duidelijk uit. Verbergen zou de vraag
    "waar staat dat vinkje dan?" oproepen; dit laat zien dat er nog een stap voor zit. */
 .setting-group.locked { opacity: .5; }
