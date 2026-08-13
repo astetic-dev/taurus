@@ -464,6 +464,83 @@ struct HostSession {
 // GEMETEN: een client zonder eigen terminal vraagt een pty van 0x0 aan. Geef je
 // dat door (ook geklemd op 1x1), dan loopt ConPTY vast en komt het kindproces
 // nooit terug. Altijd een echte maat dus.
+// Wat de popup en het audit-spoor over een verzoek laten zien.
+//
+// De rauwe opdracht is hier waardeloos: Taurus stuurt zijn payload als
+// PowerShell -EncodedCommand van kilobytes, en dan staat er een muur base64 in
+// het venster waar iemand ja of nee op moet zeggen -- en diezelfde muur in het
+// audit-log. Wat een mens nodig heeft om te beslissen is: welk programma, in
+// welke map.
+fn describe_request(line: &str) -> String {
+    let text = decode_encoded_command(line).unwrap_or_else(|| line.to_string());
+    let cwd = find_quoted_after(&text, "--cwd");
+    let program = ["claude.exe", "claude", "agy", "herdr", "tmux"]
+        .iter()
+        .find(|p| text.contains(*p))
+        .copied();
+
+    match (program, cwd) {
+        (Some(p), Some(c)) => format!("{p} in {c}"),
+        (Some(p), None) => p.to_string(),
+        (None, Some(c)) => format!("een sessie in {c}"),
+        // Niets herkend: toon de opdracht, maar afgekapt. Een venster dat niet
+        // meer op het scherm past is geen informatie.
+        (None, None) => {
+            let t = text.trim();
+            if t.chars().count() > 160 {
+                let kort: String = t.chars().take(160).collect();
+                format!("{kort}… ({} tekens)", t.chars().count())
+            } else {
+                t.to_string()
+            }
+        }
+    }
+}
+
+// `powershell -NoProfile -EncodedCommand <base64>` -> de leesbare tekst.
+// De payload is UTF-16LE, want dat is wat PowerShell verwacht.
+fn decode_encoded_command(line: &str) -> Option<String> {
+    let idx = line.find("-EncodedCommand")?;
+    let arg = line[idx + "-EncodedCommand".len()..].split_whitespace().next()?;
+    let bytes = b64_decode(arg)?;
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|p| u16::from_le_bytes([p[0], p[1]]))
+        .collect();
+    Some(String::from_utf16_lossy(&units))
+}
+
+// De waarde achter een vlag, of die nu in enkele of dubbele quotes staat.
+fn find_quoted_after(text: &str, flag: &str) -> Option<String> {
+    let rest = text.get(text.find(flag)? + flag.len()..)?.trim_start();
+    let q = rest.chars().next()?;
+    if q != '\'' && q != '"' {
+        return rest.split_whitespace().next().map(|s| s.to_string());
+    }
+    let body = &rest[q.len_utf8()..];
+    body.find(q).map(|end| body[..end].to_string())
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut acc: u32 = 0;
+    let mut bits = 0;
+    let mut out = Vec::new();
+    for c in s.bytes() {
+        if c == b'=' {
+            break;
+        }
+        let v = T.iter().position(|&t| t == c)? as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
 fn sane_size(v: u32, fallback: u16) -> u16 {
     match u16::try_from(v).unwrap_or(0) {
         0 => fallback,
@@ -873,7 +950,7 @@ impl Handler for HostSession {
         match want_pty {
             // `ssh -t host "..."`: dit is het pad waarmee Taurus een tab opent.
             Some((cols, rows, term)) => {
-                let d = self.ask_session(&format!("een sessie: {line}")).await;
+                let d = self.ask_session(&describe_request(&line)).await;
                 if !d.permits() {
                     session.channel_failure(channel)?;
                     return Ok(());
@@ -898,7 +975,7 @@ impl Handler for HostSession {
             // Zonder pty: de probe-route. Geen popup per commando -- een enkele
             // probe is een handvol ssh-rondes, en dan is de pairing de grens.
             None => {
-                audit(&self.app, "exec", &self.peer_name(), &line);
+                audit(&self.app, "exec", &self.peer_name(), &describe_request(&line));
                 session.channel_success(channel)?;
                 let handle = session.handle();
                 tokio::task::spawn_blocking(move || {
@@ -1091,6 +1168,34 @@ mod tests {
         assert_eq!(p.port, DEFAULT_PORT);
         let kapot: HostPref = serde_json::from_str("{}").unwrap_or_default();
         assert!(!kapot.enabled);
+    }
+
+    // GEMETEN: de popup toonde een base64-payload van kilobytes, want zo stuurt
+    // Taurus zijn opdracht. Daar kan niemand ja of nee op zeggen -- en het
+    // audit-log werd er onleesbaar van. Programma + werkmap is wat je nodig hebt.
+    #[test]
+    fn a_request_is_described_in_human_terms() {
+        // Wat er echt over de lijn ging bij de eerste geslaagde sessie op ursu.
+        let script = "& $h --session $s workspace create --cwd 'C:\\Users\\arjen' --label $s\n\
+                      & $h --session $s pane run w1:p1 '& ''claude.exe'' ''--session-id'' ''22090c1f'''";
+        let utf16: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let line = format!("powershell -NoProfile -EncodedCommand {}", crate::b64(&utf16));
+
+        let d = describe_request(&line);
+        assert_eq!(d, "claude.exe in C:\\Users\\arjen");
+        assert!(!d.contains("EncodedCommand"), "{d}");
+        assert!(d.chars().count() < 80, "moet in een venster passen: {d}");
+    }
+
+    // Een gewone opdracht blijft gewoon leesbaar, en een onherkenbare lange
+    // opdracht wordt afgekapt in plaats van het venster uit te duwen.
+    #[test]
+    fn plain_commands_survive_and_long_ones_are_cut() {
+        assert_eq!(describe_request("uname -sm"), "uname -sm");
+        let lang = "x".repeat(500);
+        let d = describe_request(&lang);
+        assert!(d.contains("500 tekens"), "{d}");
+        assert!(d.chars().count() < 200, "{d}");
     }
 
     #[test]

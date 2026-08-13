@@ -1998,7 +1998,13 @@ fn herdr_windows_script(session: &str, cwd: &str, program: &str, args: &[String]
         // Gemeten: een server die je met Start-Process vanuit een sshd-sessie start,
         // wordt gekild zodra die verbinding sluit. Win32_Process.Create herparent
         // hem buiten de sessie, en dan overleeft hij het wel.
-        "  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ('\"' + $h + '\" --session ' + $s + ' server') } | Out-Null".to_string(),
+        // ShowWindow = 0 (SW_HIDE): zonder dit verschijnt er een consolevenster
+        // op het BUREAUBLAD van de host. Via sshd viel dat niet op -- die sessie
+        // is niet de interactieve desktop -- maar een Taurus-host (#121) draait
+        // wel in de sessie van de ingelogde gebruiker, en dan staat er ineens
+        // een zwart venster over zijn werk heen.
+        "  $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }".to_string(),
+        "  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ('\"' + $h + '\" --session ' + $s + ' server'); ProcessStartupInformation = $si } | Out-Null".to_string(),
         "  for ($i = 0; $i -lt 20; $i++) { if (& $h --session $s status 2>$null | Select-String 'status: running') { break }; Start-Sleep -Seconds 1 }".to_string(),
         "}".to_string(),
         format!("& $h --session $s pane get {} 2>$null | Out-Null", HERDR_PANE),
