@@ -865,6 +865,8 @@ select:-webkit-autofill {
 }
 .peer-tag.blocked { border-color: var(--red); color: var(--red); }
 .peer-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.net-row { cursor: pointer; }
+.net-row .peer-fp { color: var(--text-dim); font-size: 11px; }
 
 /* De vingerafdruk is het enige betrouwbare stuk identiteit in deze popup, dus
    die krijgt eigen nadruk -- de naam ernaast is een claim van de client. */

@@ -165,6 +165,8 @@ const I18N = {
     ssh_port: "Poort",
     ssh_hint: "Een sessie draait als jouw Windows-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
     ssh_on_lbl: "bereikbaar op poort {port}", ssh_off_lbl: "uit",
+    ssh_blocked_lbl: "aan, maar dit netwerk is niet vertrouwd — er luistert niets",
+    net_trust: "Vertrouw dit netwerk", net_none: "Geen netwerkverbinding gevonden.",
     ssh_fp_lbl: "Vingerafdruk van deze computer",
     ssh_failed: "✗ Kan niet gaan luisteren:",
     grp_peers: "Gekoppelde computers",
@@ -347,6 +349,8 @@ const I18N = {
     ssh_port: "Port",
     ssh_hint: "A session runs as your Windows account, with your rights. Every connection asks permission first; everything is recorded in an audit trail.",
     ssh_on_lbl: "reachable on port {port}", ssh_off_lbl: "off",
+    ssh_blocked_lbl: "on, but this network is not trusted — nothing is listening",
+    net_trust: "Trust this network", net_none: "No network connection found.",
     ssh_fp_lbl: "This computer's fingerprint",
     ssh_failed: "✗ Could not start listening:",
     grp_peers: "Paired computers",
@@ -2839,17 +2843,32 @@ async function refreshSshSessions() {
 
 async function refreshSshStatus() {
   try { sshStatus = await invoke("ssh_host_status"); } catch (_) { return; }
-  if (els.sshOn) els.sshOn.checked = sshStatus.running;
+  // Het vinkje toont de WENS, niet of de deur toevallig open staat: op een
+  // onbekend netwerk blijft hij aan staan en legt de regel eronder uit waarom
+  // er niets luistert. Het vinkje zichzelf zien uitzetten is verwarrender.
+  if (els.sshOn) els.sshOn.checked = sshStatus.desired;
   if (els.sshPort) els.sshPort.value = sshStatus.port || 8287;
   if (els.sshState) {
     const lbl = sshStatus.running
       ? t("ssh_on_lbl").replace("{port}", sshStatus.port)
-      : t("ssh_off_lbl");
+      : sshStatus.desired
+        ? t("ssh_blocked_lbl")
+        : t("ssh_off_lbl");
     els.sshState.innerHTML =
       `<b>${escapeHtml(lbl)}</b>` +
       (sshStatus.fingerprint
         ? `<div class="hint">${escapeHtml(t("ssh_fp_lbl"))}: <code>${escapeHtml(sshStatus.fingerprint)}</code></div>`
         : "");
+  }
+  if (els.sshNetworks) {
+    const nets = sshStatus.networks || [];
+    els.sshNetworks.innerHTML = nets.length
+      ? nets.map((n) => `<label class="peer-row net-row">
+          <span class="peer-id"><b>${escapeHtml(n.name || "?")}</b>
+            <div class="peer-fp">${escapeHtml(t("net_trust"))}</div></span>
+          <input type="checkbox" data-net="${escapeHtml(n.id)}"${n.trusted ? " checked" : ""} />
+        </label>`).join("")
+      : `<div class="hint">${escapeHtml(t("net_none"))}</div>`;
   }
 }
 
@@ -2970,7 +2989,7 @@ function saveSettingsFromForm() {
   // leeft aan de Rust-kant. Hier alleen de gewenste stand doorgeven.
   const wantSsh = els.sshOn.checked;
   const wantPort = Math.min(65535, Math.max(1024, parseInt(els.sshPort.value, 10) || 8287));
-  if (wantSsh !== sshStatus.running || (wantSsh && wantPort !== sshStatus.port)) {
+  if (wantSsh !== sshStatus.desired || (wantSsh && wantPort !== sshStatus.port)) {
     invoke("ssh_host_set", { enabled: wantSsh, port: wantPort })
       .then((s) => { sshStatus = s; })
       .catch((e) => toast(`${t("ssh_failed")} ${e}`));
@@ -3612,6 +3631,7 @@ window.addEventListener("DOMContentLoaded", () => {
     sshState: document.querySelector("#ssh-state"),
     sshPeers: document.querySelector("#ssh-peers"),
     sshSessions: document.querySelector("#ssh-sessions"),
+    sshNetworks: document.querySelector("#ssh-networks"),
     consentModal: document.querySelector("#consent-modal"),
     consentTitle: document.querySelector("#consent-title"),
     consentWho: document.querySelector("#consent-who"),
@@ -3775,6 +3795,13 @@ window.addEventListener("DOMContentLoaded", () => {
       else await invoke("ssh_peer_set", { fingerprint: fp, blocked: btn.dataset.act === "block" });
     } catch (err) { toast("✗ " + err, "err"); }
     refreshSshPeers();
+  });
+  els.sshNetworks.addEventListener("change", async (e) => {
+    const box = e.target.closest("input[data-net]");
+    if (!box) return;
+    try { sshStatus = await invoke("ssh_network_trust", { id: box.dataset.net, trusted: box.checked }); }
+    catch (err) { toast("✗ " + err, "err"); }
+    refreshSshStatus();
   });
   els.sshSessions.addEventListener("click", async (e) => {
     const btn = e.target.closest('button[data-act="kill"]');

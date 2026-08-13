@@ -3778,20 +3778,49 @@ fn kill_all_sessions(app: &tauri::AppHandle) {
 
 #[derive(serde::Serialize)]
 struct SshHostStatus {
+    // `desired` is het vinkje, `running` is of de deur ook echt open staat.
+    // Die twee lopen uiteen op een niet-vertrouwd netwerk, en dat verschil moet
+    // zichtbaar zijn -- anders lijkt het vinkje zichzelf te hebben uitgezet.
+    desired: bool,
     running: bool,
     port: u16,
     // De fingerprint van ONZE hostkey: die kan een collega vergelijken met wat
     // zijn ssh-client bij de eerste verbinding toont.
     fingerprint: String,
+    networks: Vec<sshhost::netgate::NetInfo>,
+}
+
+fn ssh_status_of(state: &AppState) -> SshHostStatus {
+    SshHostStatus {
+        desired: state.ssh.is_desired(),
+        running: state.ssh.is_running(),
+        port: *state.ssh.port.lock().unwrap(),
+        fingerprint: sshhost::host_key_fingerprint(),
+        networks: sshhost::netgate::current_networks(),
+    }
 }
 
 #[tauri::command]
 fn ssh_host_status(state: State<AppState>) -> SshHostStatus {
-    SshHostStatus {
-        running: state.ssh.is_running(),
-        port: *state.ssh.port.lock().unwrap(),
-        fingerprint: sshhost::host_key_fingerprint(),
+    ssh_status_of(&state)
+}
+
+// "Vertrouw dit netwerk". Pas daarna gaat de listener open -- en bij een
+// wisseling naar een onbekend netwerk vanzelf weer dicht.
+#[tauri::command]
+fn ssh_network_trust(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+    trusted: bool,
+) -> Result<SshHostStatus, String> {
+    sshhost::netgate::set_trusted(&id, trusted)?;
+    // Meteen laten meebewegen in plaats van tot de volgende ronde wachten.
+    if state.ssh.is_desired() {
+        let port = *state.ssh.port.lock().unwrap();
+        sshhost::set_enabled(app, state.ssh.clone(), true, port)?;
     }
+    Ok(ssh_status_of(&state))
 }
 
 // Het vinkje in Instellingen. Uit is de default en blijft de default: dit zet
@@ -3804,16 +3833,8 @@ fn ssh_host_set(
     port: Option<u16>,
 ) -> Result<SshHostStatus, String> {
     let p = port.unwrap_or(sshhost::DEFAULT_PORT);
-    if enabled {
-        sshhost::start(app, state.ssh.clone(), p)?;
-    } else {
-        sshhost::stop(&app, &state.ssh);
-    }
-    Ok(SshHostStatus {
-        running: state.ssh.is_running(),
-        port: *state.ssh.port.lock().unwrap(),
-        fingerprint: sshhost::host_key_fingerprint(),
-    })
+    sshhost::set_enabled(app, state.ssh.clone(), enabled, p)?;
+    Ok(ssh_status_of(&state))
 }
 
 // Antwoord op een popup: "deny" | "allow" | "join" | "block" | "always".
@@ -4014,6 +4035,7 @@ pub fn run() {
             stt_level,
             ssh_host_status,
             ssh_host_set,
+            ssh_network_trust,
             ssh_consent_reply,
             ssh_peers,
             ssh_peer_set,

@@ -22,6 +22,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::config_dir;
 
+pub mod netgate;
 mod sftp;
 
 // Vrij volgens het IANA-register (8283-8291 is Unassigned) en spelt TAUR op een
@@ -250,11 +251,21 @@ pub struct HostState {
     // alleen de eerste kent shutdown().
     running: StdMutex<Option<russh::server::RunningServerHandle>>,
     pub port: StdMutex<u16>,
+    // Wat de gebruiker WIL (het vinkje), los van of het nu kan. De listener
+    // staat alleen open als allebei waar zijn: gewenst EN op een vertrouwd
+    // netwerk. Zonder dat onderscheid zou een wisseling van netwerk het vinkje
+    // stilzwijgend uitzetten, en dat is precies het soort verrassing dat je in
+    // een beveiligingsinstelling niet wilt.
+    desired: std::sync::atomic::AtomicBool,
+    watching: std::sync::atomic::AtomicBool,
 }
 
 impl HostState {
     pub fn is_running(&self) -> bool {
         self.running.lock().unwrap().is_some()
+    }
+    pub fn is_desired(&self) -> bool {
+        self.desired.load(Ordering::Relaxed)
     }
 }
 
@@ -875,6 +886,61 @@ impl Handler for HostSession {
 // --------------------------------------------------------------------------
 // Starten en stoppen van de listener
 // --------------------------------------------------------------------------
+
+// Het vinkje. Zet de wens en laat de wachter beslissen of de deur ook echt open
+// mag -- die kijkt naar het netwerk.
+pub fn set_enabled(
+    app: AppHandle,
+    state: Arc<HostState>,
+    enabled: bool,
+    port: u16,
+) -> Result<(), String> {
+    state.desired.store(enabled, Ordering::Relaxed);
+    *state.port.lock().unwrap() = port;
+    if !enabled {
+        stop(&app, &state);
+        return Ok(());
+    }
+    if !netgate::on_trusted_network() {
+        // Geen fout: de wens staat aan, de deur blijft dicht. De GUI legt uit
+        // waarom, in plaats van het vinkje stiekem terug te zetten.
+        let _ = app.emit("ssh-host-changed", ());
+        watch_network(app, state);
+        return Ok(());
+    }
+    let r = start(app.clone(), state.clone(), port);
+    watch_network(app, state);
+    r
+}
+
+// Netwerkwissels volgen. Bewust pollen in plaats van een COM-event-sink: een
+// INetworkListManagerEvents-sink is veel meer code (en een extra apartment-
+// thread) voor iets waar een halve minuut vertraging niet uitmaakt -- je loopt
+// met een laptop van het ene netwerk naar het andere, niet per seconde.
+fn watch_network(app: AppHandle, state: Arc<HostState>) {
+    if state.watching.swap(true, Ordering::SeqCst) {
+        return; // er loopt er al een
+    }
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(15));
+            if !state.is_desired() {
+                state.watching.store(false, Ordering::SeqCst);
+                return;
+            }
+            let ok = netgate::on_trusted_network();
+            let running = state.is_running();
+            if ok && !running {
+                let port = *state.port.lock().unwrap();
+                audit(&app, "network-trusted", "", "listener gaat open");
+                let _ = start(app.clone(), state.clone(), port);
+            } else if !ok && running {
+                audit(&app, "network-untrusted", "", "listener gaat dicht");
+                stop(&app, &state);
+            }
+        }
+    });
+}
 
 pub fn start(app: AppHandle, state: Arc<HostState>, port: u16) -> Result<(), String> {
     if state.is_running() {

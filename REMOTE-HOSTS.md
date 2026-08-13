@@ -270,6 +270,26 @@ What it is for:
 - **Your own other machines.** A lab box or second workstation that runs Taurus anyway
   is reachable without a dedicated sshd setup.
 
+### First: trust the network
+
+The setting only takes effect on a network you have marked as trusted. Settings →
+Netwerk lists the networks this machine is on, each with a **Trust this network** box —
+tick your office LAN, leave café Wi-Fi alone. Taurus follows you around: the listener
+closes when you land on an unknown network and reopens when you are back, without you
+touching the setting. The checkbox keeps showing what you *want*; the line underneath
+says whether anything is actually listening, because a checkbox that appears to switch
+itself off is worse than one that explains itself.
+
+Networks are remembered by the GUID Windows' Network List Manager assigns them — the
+same source as the Private/Public prompt — so renaming an SSID does not lose the
+decision. Network changes are noticed by polling every 15 seconds rather than by a COM
+event sink: you walk between networks, you do not switch them every second.
+
+Be clear-eyed about what this is: a guard against *accidents*, not a security boundary.
+A hostile network can advertise a trusted network's name. Identity remains the key
+fingerprint and the consent popups; this only stops you listening somewhere you never
+meant to.
+
 ### Who gets in: pairing, then per session
 
 Consent lives in the GUI instead of in `authorized_keys`, in two steps.
