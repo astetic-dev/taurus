@@ -16,6 +16,13 @@ pub struct NetInfo {
     pub id: String,
     pub name: String,
     pub trusted: bool,
+    // Wat Windows zelf van dit netwerk vindt: "public" / "private" / "domain".
+    // Hoort in beeld VOORDAT je iets vertrouwt -- op een openbaar netwerk is
+    // "laat collega's aankloppen" zelden wat je bedoelde. Gemeten: ursu stond
+    // op public terwijl hetzelfde netwerk hier als private geldt, dus dit
+    // verschilt echt per machine.
+    #[serde(default)]
+    pub category: String,
 }
 
 fn trusted_file() -> std::path::PathBuf {
@@ -78,8 +85,15 @@ pub fn current_networks() -> Vec<NetInfo> {
             if id.is_empty() {
                 continue;
             }
+            let category = match n.GetCategory().map(|c| c.0) {
+                Ok(0) => "public",
+                Ok(1) => "private",
+                Ok(2) => "domain",
+                _ => "",
+            }
+            .to_string();
             let is_trusted = trusted.iter().any(|x| x == &id);
-            out.push(NetInfo { id, name, trusted: is_trusted });
+            out.push(NetInfo { id, name, trusted: is_trusted, category });
         }
     }
     out
@@ -105,8 +119,8 @@ mod tests {
     #[test]
     fn nothing_trusted_means_closed() {
         let nets = vec![
-            NetInfo { id: "a".into(), name: "Cafe".into(), trusted: false },
-            NetInfo { id: "b".into(), name: "Hotel".into(), trusted: false },
+            NetInfo { id: "a".into(), name: "Cafe".into(), trusted: false, category: "public".into() },
+            NetInfo { id: "b".into(), name: "Hotel".into(), trusted: false, category: "public".into() },
         ];
         assert!(!nets.iter().any(|n| n.trusted));
     }
@@ -126,8 +140,8 @@ mod tests {
     #[test]
     fn one_trusted_network_is_enough() {
         let nets = vec![
-            NetInfo { id: "a".into(), name: "Cafe".into(), trusted: false },
-            NetInfo { id: "b".into(), name: "Kantoor".into(), trusted: true },
+            NetInfo { id: "a".into(), name: "Cafe".into(), trusted: false, category: "public".into() },
+            NetInfo { id: "b".into(), name: "Kantoor".into(), trusted: true, category: "domain".into() },
         ];
         assert!(nets.iter().any(|n| n.trusted));
     }

@@ -904,6 +904,20 @@ pub fn set_enabled(
     if !netgate::on_trusted_network() {
         // Geen fout: de wens staat aan, de deur blijft dicht. De GUI legt uit
         // waarom, in plaats van het vinkje stiekem terug te zetten.
+        //
+        // Wel vastleggen: anders levert "aanzetten en er gebeurt niets" een
+        // leeg audit-log op, en dan is er niets om op terug te kijken. Precies
+        // dat kostte de eerste keer op een testmachine een half uur zoeken.
+        let namen: Vec<String> = netgate::current_networks()
+            .into_iter()
+            .map(|n| format!("{} ({})", n.name, n.category))
+            .collect();
+        audit(
+            &app,
+            "listener-geblokkeerd",
+            "",
+            &format!("netwerk niet vertrouwd: {}", namen.join(", ")),
+        );
         let _ = app.emit("ssh-host-changed", ());
         watch_network(app, state);
         return Ok(());

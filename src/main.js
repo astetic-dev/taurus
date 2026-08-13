@@ -167,6 +167,7 @@ const I18N = {
     ssh_on_lbl: "bereikbaar op poort {port}", ssh_off_lbl: "uit",
     ssh_blocked_lbl: "aan, maar dit netwerk is niet vertrouwd — er luistert niets",
     net_trust: "Vertrouw dit netwerk", net_none: "Geen netwerkverbinding gevonden.",
+    net_cat_public: "openbaar netwerk", net_cat_private: "privé-netwerk", net_cat_domain: "domein",
     ssh_fp_lbl: "Vingerafdruk van deze computer",
     ssh_failed: "✗ Kan niet gaan luisteren:",
     grp_peers: "Gekoppelde computers",
@@ -351,6 +352,7 @@ const I18N = {
     ssh_on_lbl: "reachable on port {port}", ssh_off_lbl: "off",
     ssh_blocked_lbl: "on, but this network is not trusted — nothing is listening",
     net_trust: "Trust this network", net_none: "No network connection found.",
+    net_cat_public: "public network", net_cat_private: "private network", net_cat_domain: "domain",
     ssh_fp_lbl: "This computer's fingerprint",
     ssh_failed: "✗ Could not start listening:",
     grp_peers: "Paired computers",
@@ -385,6 +387,21 @@ function applyI18n() {
 // Optionele branding uit %APPDATA%\Taurus\branding.json (via de Rust-command).
 // Lege velden = geen override, dus zonder bestand blijft alles gewoon Taurus.
 // Draait NA applyI18n zodat een ingestelde ondertitel niet overschreven wordt.
+// Draait dit exemplaar op een eigen configmap (TAURUS_CONFIG_DIR)? Dan hoort
+// dat in de titelbalk: twee identiek ogende vensters waarvan er een je echte
+// sessies draait, is vragen om in het verkeerde te typen.
+async function markTestInstance() {
+  let test = false;
+  try { test = await invoke("is_test_instance"); } catch (_) { return; }
+  if (!test) return;
+  const merk = (s) => (s.includes("⚗") ? s : `${s}  ⚗ TEST`);
+  document.title = merk(document.title || "Taurus");
+  try {
+    const w = window.__TAURI__.window.getCurrentWindow();
+    w.setTitle(merk(await w.title()));
+  } catch (_) {}
+}
+
 async function applyBranding() {
   let b;
   try { b = await invoke("branding"); } catch (_) { return; }
@@ -431,6 +448,9 @@ async function applyBranding() {
     document.title = b.windowTitle;
     try { window.__TAURI__.window.getCurrentWindow().setTitle(b.windowTitle); } catch (_) {}
   }
+  // Een testexemplaar (eigen configmap) merken we HIER, want branding zet de
+  // venstertitel na de start opnieuw en wist een markering uit Rust.
+  markTestInstance();
   // Branding mag het garble-effect uitzetten (garble:false).
   if (b.garble === false) brandGarble = false;
   // Effectieve skin: expliciete keuze in Instellingen wint, anders de
@@ -2854,6 +2874,9 @@ async function refreshSshStatus() {
       : sshStatus.desired
         ? t("ssh_blocked_lbl")
         : t("ssh_off_lbl");
+    // Gewenst maar niet luisterend is een waarschuwing, geen mededeling: je
+    // denkt dat je bereikbaar bent terwijl er niets openstaat.
+    els.sshState.className = "stt-state" + (sshStatus.running ? " ok" : sshStatus.desired ? " warn" : "");
     els.sshState.innerHTML =
       `<b>${escapeHtml(lbl)}</b>` +
       (sshStatus.fingerprint
@@ -2863,11 +2886,18 @@ async function refreshSshStatus() {
   if (els.sshNetworks) {
     const nets = sshStatus.networks || [];
     els.sshNetworks.innerHTML = nets.length
-      ? nets.map((n) => `<label class="peer-row net-row">
-          <span class="peer-id"><b>${escapeHtml(n.name || "?")}</b>
-            <div class="peer-fp">${escapeHtml(t("net_trust"))}</div></span>
-          <input type="checkbox" data-net="${escapeHtml(n.id)}"${n.trusted ? " checked" : ""} />
-        </label>`).join("")
+      ? nets.map((n) => {
+          // Wat Windows van het netwerk vindt, staat erbij: op een OPENBAAR
+          // netwerk is "laat collega's aankloppen" zelden wat je bedoelde.
+          const cat = n.category ? t(`net_cat_${n.category}`) : "";
+          const waarschuw = n.category === "public";
+          return `<label class="peer-row net-row">
+            <span class="peer-id"><b>${escapeHtml(n.name || "?")}</b>
+              ${cat ? `<span class="peer-tag${waarschuw ? " blocked" : ""}">${escapeHtml(cat)}</span>` : ""}
+              <div class="peer-fp">${escapeHtml(t("net_trust"))}</div></span>
+            <input type="checkbox" data-net="${escapeHtml(n.id)}"${n.trusted ? " checked" : ""} />
+          </label>`;
+        }).join("")
       : `<div class="hint">${escapeHtml(t("net_none"))}</div>`;
   }
 }
@@ -3843,6 +3873,9 @@ window.addEventListener("DOMContentLoaded", () => {
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);
   applyBranding();
+  // Ook los aanroepen: zonder branding.json komt applyBranding niet aan de
+  // titel toe, en dan zou een testexemplaar er ongemarkeerd bij staan.
+  markTestInstance();
   renderTabs();
   loadProjects();
   // Hosts eerst: restoreSessions moet een opgeslagen host_id kunnen opzoeken.

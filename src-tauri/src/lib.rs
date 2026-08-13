@@ -3817,6 +3817,14 @@ fn ssh_status_of(state: &AppState) -> SshHostStatus {
     }
 }
 
+// Draait dit exemplaar op een eigen configmap? De frontend zet dat in de
+// titelbalk. Niet vanuit Rust doen: branding zet de venstertitel na de start
+// opnieuw en wist zo'n markering meteen weer uit.
+#[tauri::command]
+fn is_test_instance() -> bool {
+    std::env::var("TAURUS_CONFIG_DIR").map(|s| !s.trim().is_empty()).unwrap_or(false)
+}
+
 #[tauri::command]
 fn ssh_host_status(state: State<AppState>) -> SshHostStatus {
     ssh_status_of(&state)
@@ -3988,16 +3996,6 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "windows")]
             disable_accelerator_keys(app.handle());
-            // Een testexemplaar (eigen configmap) zegt dat in zijn titelbalk.
-            // Twee identiek ogende vensters waarvan er een je echte sessies
-            // draait, is anders vragen om in het verkeerde te typen.
-            if std::env::var("TAURUS_CONFIG_DIR").is_ok() {
-                use tauri::Manager;
-                if let Some(w) = app.get_webview_window("main") {
-                    let base = w.title().unwrap_or_else(|_| "Taurus".into());
-                    let _ = w.set_title(&format!("{base}  ⚗ TEST"));
-                }
-            }
             {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
                 // F9 alleen systeembreed claimen als STT ook echt bruikbaar is
@@ -4060,6 +4058,7 @@ pub fn run() {
             stt_download,
             stt_toggle,
             stt_level,
+            is_test_instance,
             ssh_host_status,
             ssh_host_set,
             ssh_network_trust,
@@ -4895,7 +4894,6 @@ mod tests {
         assert_eq!(back.key_path, r"C:\Users\AST\.ssh\id_ed25519");
     }
 
-    #[test]
     // Een testexemplaar naast een draaiende Taurus mag NOOIT dezelfde configmap
     // pakken: dan hervat het je lopende sessies en overschrijft het ze daarna.
     #[test]

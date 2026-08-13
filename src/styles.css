@@ -10,6 +10,10 @@
   --green: #5ccf9e;
   --orange: #f0a85c;
   --red: #ff6b6b;
+  /* Bereikbaar-bolletje: rustig donkergroen, niet het lichte accent-groen.
+     Een statusbolletje staat er altijd; het moet "in orde" zeggen zonder de
+     aandacht te trekken die --green (spinner, live-tab) juist wel wil. */
+  --dot-up: #2f8f63;
   /* Terminal-kleuren (xterm). Skins overschrijven deze; spawnTerminal leest ze. */
   --term-bg: #14161c;
   --term-fg: #e6e8ee;
@@ -809,8 +813,10 @@ select:-webkit-autofill {
 .host-sub { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Bereikbaarheid: grijs zolang de check loopt, dan groen of rood. */
 .host-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--text-dim); }
-.host-dot.pending { background: var(--text-dim); opacity: .45; }
-.host-dot.up { background: var(--green); }
+/* Nog niet gemeten: hol bolletje. Een grijze stip lijkt te veel op een
+   uitspraak ("grijs = ?"), terwijl dit letterlijk "nog niets bekend" is. */
+.host-dot.pending { background: transparent; border: 1px solid var(--text-dim); opacity: .5; }
+.host-dot.up { background: var(--dot-up); }
 .host-dot.down { background: var(--red); }
 .host-test, .host-del {
   background: none; border: 1px solid var(--border); color: var(--text-dim);
@@ -865,6 +871,7 @@ select:-webkit-autofill {
 }
 .peer-tag.blocked { border-color: var(--red); color: var(--red); }
 .peer-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.stt-state.warn { color: var(--orange); }
 .net-row { cursor: pointer; }
 .net-row .peer-fp { color: var(--text-dim); font-size: 11px; }
 
