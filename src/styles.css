@@ -850,3 +850,30 @@ select:-webkit-autofill {
 }
 .toast.err { border-left-color: var(--red); }
 .toast.hidden { display: none; }
+
+/* ===== Taurus als SSH-host: gekoppelde computers + toestemming (#121) ===== */
+.peer-list { display: flex; flex-direction: column; gap: 6px; }
+.peer-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+}
+.peer-id { min-width: 0; }
+.peer-fp code { font-size: 11px; color: var(--text-dim); word-break: break-all; }
+.peer-tag {
+  margin-left: 6px; padding: 1px 6px; border-radius: 10px; font-size: 11px;
+  border: 1px solid var(--border); color: var(--text-dim);
+}
+.peer-tag.blocked { border-color: var(--red); color: var(--red); }
+.peer-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+
+/* De vingerafdruk is het enige betrouwbare stuk identiteit in deze popup, dus
+   die krijgt eigen nadruk -- de naam ernaast is een claim van de client. */
+.consent-who { font-size: 15px; font-weight: 600; margin: 4px 0 2px; }
+.consent-what { color: var(--text-dim); margin: 0 0 10px; word-break: break-word; }
+.consent-fp {
+  display: flex; align-items: baseline; gap: 8px; padding: 8px 10px; margin-bottom: 10px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; font-size: 12px;
+}
+.consent-fp code { word-break: break-all; }
+.consent-timer { margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+#consent-modal .modal-actions { justify-content: space-between; }

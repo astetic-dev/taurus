@@ -11,6 +11,9 @@ use std::sync::Mutex;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use tauri::{AppHandle, Emitter, State};
 
+// Taurus als SSH-host: inkomende sessies met toestemming in de GUI (#121).
+mod sshhost;
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct Project {
     id: String,
@@ -1445,6 +1448,8 @@ struct AppState {
     sessions: Mutex<HashMap<String, Session>>,
     // STT-opname: commando-kanaal naar de audio-thread + zichtbare status.
     stt: SttState,
+    // Inkomende SSH: listener, wachtende popups en draaiende sessies (#121).
+    ssh: std::sync::Arc<sshhost::HostState>,
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
@@ -3767,6 +3772,98 @@ fn kill_all_sessions(app: &tauri::AppHandle) {
     map.clear();
 }
 
+// --------------------------------------------------------------------------
+// Taurus als SSH-host (#121)
+// --------------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+struct SshHostStatus {
+    running: bool,
+    port: u16,
+    // De fingerprint van ONZE hostkey: die kan een collega vergelijken met wat
+    // zijn ssh-client bij de eerste verbinding toont.
+    fingerprint: String,
+}
+
+#[tauri::command]
+fn ssh_host_status(state: State<AppState>) -> SshHostStatus {
+    SshHostStatus {
+        running: state.ssh.is_running(),
+        port: *state.ssh.port.lock().unwrap(),
+        fingerprint: sshhost::host_key_fingerprint(),
+    }
+}
+
+// Het vinkje in Instellingen. Uit is de default en blijft de default: dit zet
+// een deur open op het netwerk en dat hoort een bewuste handeling te zijn.
+#[tauri::command]
+fn ssh_host_set(
+    app: AppHandle,
+    state: State<AppState>,
+    enabled: bool,
+    port: Option<u16>,
+) -> Result<SshHostStatus, String> {
+    let p = port.unwrap_or(sshhost::DEFAULT_PORT);
+    if enabled {
+        sshhost::start(app, state.ssh.clone(), p)?;
+    } else {
+        sshhost::stop(&app, &state.ssh);
+    }
+    Ok(SshHostStatus {
+        running: state.ssh.is_running(),
+        port: *state.ssh.port.lock().unwrap(),
+        fingerprint: sshhost::host_key_fingerprint(),
+    })
+}
+
+// Antwoord op een popup: "deny" | "allow" | "join" | "block" | "always".
+#[tauri::command]
+fn ssh_consent_reply(state: State<AppState>, id: String, decision: String) {
+    state.ssh.consents.reply(&id, &decision);
+}
+
+#[tauri::command]
+fn ssh_peers() -> Vec<sshhost::Peer> {
+    sshhost::read_peers()
+}
+
+// Een gekoppelde collega alsnog blokkeren trekt ook de koppeling in: anders zou
+// "geblokkeerd" nog steeds een auto-allow met zich meedragen.
+#[tauri::command]
+fn ssh_peer_set(
+    fingerprint: String,
+    blocked: Option<bool>,
+    auto_allow: Option<bool>,
+) -> Result<Vec<sshhost::Peer>, String> {
+    let mut peers = sshhost::read_peers();
+    if let Some(p) = peers.iter_mut().find(|p| p.fingerprint == fingerprint) {
+        if let Some(b) = blocked {
+            p.blocked = b;
+            if b {
+                p.auto_allow = false;
+            }
+        }
+        if let Some(a) = auto_allow {
+            p.auto_allow = a;
+        }
+    }
+    sshhost::write_peers(&peers)?;
+    Ok(peers)
+}
+
+#[tauri::command]
+fn ssh_peer_forget(fingerprint: String) -> Result<Vec<sshhost::Peer>, String> {
+    let mut peers = sshhost::read_peers();
+    peers.retain(|p| p.fingerprint != fingerprint);
+    sshhost::write_peers(&peers)?;
+    Ok(peers)
+}
+
+#[tauri::command]
+fn ssh_inbound_sessions(state: State<AppState>) -> Vec<sshhost::InboundSession> {
+    state.ssh.sessions.lock().unwrap().values().cloned().collect()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Audio-thread voor STT: cpal-streams zijn !Send, dus één eigen thread
@@ -3786,6 +3883,7 @@ pub fn run() {
                 recording: std::sync::atomic::AtomicBool::new(false),
                 level: mic_level,
             },
+            ssh: std::sync::Arc::new(sshhost::HostState::default()),
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -3875,6 +3973,13 @@ pub fn run() {
             stt_download,
             stt_toggle,
             stt_level,
+            ssh_host_status,
+            ssh_host_set,
+            ssh_consent_reply,
+            ssh_peers,
+            ssh_peer_set,
+            ssh_peer_forget,
+            ssh_inbound_sessions,
             debug_log
         ])
         .run(tauri::generate_context!())

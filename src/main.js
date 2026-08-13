@@ -159,6 +159,27 @@ const I18N = {
     stt_registry: "Modellenbibliotheek-URL", stt_refresh: "Vernieuw lijst",
     stt_failed: "✗ Transcriptie mislukt:", stt_rec: "● Opname… (laat F9 los = stop)",
     rec_idle: "Klik of F9 = dicteren", rec_listening: "● Luisteren…", rec_transcribing: "Transcriberen…",
+    tab_network: "Netwerk",
+    grp_reachable: "Bereikbaar op het netwerk",
+    ssh_enable: "Laat collega's een sessie op deze computer starten",
+    ssh_port: "Poort",
+    ssh_hint: "Een sessie draait als jouw Windows-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
+    ssh_on_lbl: "bereikbaar op poort {port}", ssh_off_lbl: "uit",
+    ssh_fp_lbl: "Vingerafdruk van deze computer",
+    ssh_failed: "✗ Kan niet gaan luisteren:",
+    grp_peers: "Gekoppelde computers",
+    peers_hint: "Identiteit is de vingerafdruk van de sleutel, niet de naam — die verzint de client zelf.",
+    peers_none: "Er is nog geen computer gekoppeld.",
+    peer_blocked: "geblokkeerd", peer_auto: "vraagt nooit",
+    peer_block: "Blokkeer", peer_unblock: "Deblokkeer", peer_forget: "Vergeet",
+    consent_pair_title: "Nieuwe computer wil verbinden",
+    consent_session_title: "Verzoek om een sessie",
+    consent_who: "{user} op {address}",
+    consent_fp: "Vingerafdruk",
+    consent_warn: "Toestaan betekent dat deze computer als jouw account mag werken, met jouw rechten en credentials.",
+    consent_remember: "Niet meer vragen voor deze computer",
+    consent_block: "Blokkeer", consent_deny: "Weiger", consent_join: "Meekijken", consent_allow: "Toestaan",
+    consent_timer: "Weigert zichzelf over {secs} s",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Agents",
@@ -316,6 +337,27 @@ const I18N = {
     stt_registry: "Model library URL", stt_refresh: "Refresh list",
     stt_failed: "✗ Transcription failed:", stt_rec: "● Recording… (release F9 to stop)",
     rec_idle: "Click or F9 to dictate", rec_listening: "● Listening…", rec_transcribing: "Transcribing…",
+    tab_network: "Network",
+    grp_reachable: "Reachable on the network",
+    ssh_enable: "Let colleagues start a session on this computer",
+    ssh_port: "Port",
+    ssh_hint: "A session runs as your Windows account, with your rights. Every connection asks permission first; everything is recorded in an audit trail.",
+    ssh_on_lbl: "reachable on port {port}", ssh_off_lbl: "off",
+    ssh_fp_lbl: "This computer's fingerprint",
+    ssh_failed: "✗ Could not start listening:",
+    grp_peers: "Paired computers",
+    peers_hint: "Identity is the key's fingerprint, not the name — the client makes that up itself.",
+    peers_none: "No computer has been paired yet.",
+    peer_blocked: "blocked", peer_auto: "never asks",
+    peer_block: "Block", peer_unblock: "Unblock", peer_forget: "Forget",
+    consent_pair_title: "New computer wants to connect",
+    consent_session_title: "Session request",
+    consent_who: "{user} at {address}",
+    consent_fp: "Fingerprint",
+    consent_warn: "Allowing means this computer may work as your account, with your rights and credentials.",
+    consent_remember: "Don't ask again for this computer",
+    consent_block: "Block", consent_deny: "Deny", consent_join: "Join", consent_allow: "Allow",
+    consent_timer: "Denies itself in {secs} s",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -2699,7 +2741,107 @@ function openSettings() {
   els.sttRegistryInput.value = settings.sttRegistry || "";
   fillSttModelSelect();
   refreshSttStatus();
+  refreshSshStatus();
+  refreshSshPeers();
   els.settingsModal.classList.remove("hidden");
+}
+
+/* ============ Taurus als SSH-host (#121) ============ */
+// De status komt van de Rust-kant, niet uit localStorage: daar staat wat de
+// listener DOET, en dat is het enige eerlijke antwoord op "ben ik bereikbaar?".
+let sshStatus = { running: false, port: 8287, fingerprint: "" };
+
+async function refreshSshStatus() {
+  try { sshStatus = await invoke("ssh_host_status"); } catch (_) { return; }
+  if (els.sshOn) els.sshOn.checked = sshStatus.running;
+  if (els.sshPort) els.sshPort.value = sshStatus.port || 8287;
+  if (els.sshState) {
+    const lbl = sshStatus.running
+      ? t("ssh_on_lbl").replace("{port}", sshStatus.port)
+      : t("ssh_off_lbl");
+    els.sshState.innerHTML =
+      `<b>${escapeHtml(lbl)}</b>` +
+      (sshStatus.fingerprint
+        ? `<div class="hint">${escapeHtml(t("ssh_fp_lbl"))}: <code>${escapeHtml(sshStatus.fingerprint)}</code></div>`
+        : "");
+  }
+}
+
+async function refreshSshPeers() {
+  if (!els.sshPeers) return;
+  let peers = [];
+  try { peers = await invoke("ssh_peers"); } catch (_) {}
+  if (!peers.length) {
+    els.sshPeers.innerHTML = `<div class="hint">${escapeHtml(t("peers_none"))}</div>`;
+    return;
+  }
+  els.sshPeers.innerHTML = peers
+    .map((p) => {
+      const tags = [];
+      if (p.blocked) tags.push(`<span class="peer-tag blocked">${escapeHtml(t("peer_blocked"))}</span>`);
+      if (p.auto_allow) tags.push(`<span class="peer-tag">${escapeHtml(t("peer_auto"))}</span>`);
+      return `<div class="peer-row" data-fp="${escapeHtml(p.fingerprint)}">
+        <div class="peer-id"><b>${escapeHtml(p.label || "?")}</b> <span class="dim">${escapeHtml(p.address || "")}</span>${tags.join("")}
+          <div class="peer-fp"><code>${escapeHtml(p.fingerprint)}</code></div></div>
+        <div class="peer-actions">
+          <button class="icon-btn" data-act="${p.blocked ? "unblock" : "block"}">${escapeHtml(t(p.blocked ? "peer_unblock" : "peer_block"))}</button>
+          <button class="icon-btn" data-act="forget">${escapeHtml(t("peer_forget"))}</button>
+        </div></div>`;
+    })
+    .join("");
+}
+
+// Toestemmingsvragen komen als event binnen en worden op volgorde afgehandeld:
+// twee popups tegelijk zou betekenen dat je per ongeluk de verkeerde beantwoordt.
+const consentQueue = [];
+let consentActive = null;
+let consentTick = null;
+
+function showNextConsent() {
+  if (consentActive || !consentQueue.length) return;
+  const req = (consentActive = consentQueue.shift());
+  const pairing = req.kind === "pair";
+  els.consentTitle.textContent = t(pairing ? "consent_pair_title" : "consent_session_title");
+  els.consentWho.textContent = t("consent_who")
+    .replace("{user}", req.user || "?")
+    .replace("{address}", req.address || "?");
+  els.consentWhat.textContent = req.what || "";
+  els.consentFp.textContent = req.fingerprint || "";
+  // Meekijken kan alleen bij een sessie: bij een pairing is er nog geen terminal.
+  els.consentJoin.classList.toggle("hidden", pairing);
+  els.consentRemember.checked = false;
+  els.consentModal.classList.remove("hidden");
+
+  let left = 45;
+  const paint = () => {
+    els.consentTimer.textContent = t("consent_timer").replace("{secs}", left);
+  };
+  paint();
+  clearInterval(consentTick);
+  consentTick = setInterval(() => {
+    left -= 1;
+    paint();
+    // De Rust-kant weigert zelf bij het verlopen; hier alleen de popup opruimen.
+    if (left <= 0) closeConsent();
+  }, 1000);
+}
+
+function closeConsent() {
+  clearInterval(consentTick);
+  consentTick = null;
+  consentActive = null;
+  els.consentModal.classList.add("hidden");
+  showNextConsent();
+}
+
+function answerConsent(decision) {
+  if (!consentActive) return;
+  const id = consentActive.id;
+  // "Niet meer vragen" is een sterkere vorm van toestaan, geen apart antwoord.
+  const d = decision === "allow" && els.consentRemember.checked ? "always" : decision;
+  invoke("ssh_consent_reply", { id, decision: d }).catch(() => {});
+  closeConsent();
+  if (d === "block" || d === "always") refreshSshPeers();
 }
 
 function fillSttModelSelect() {
@@ -2738,6 +2880,15 @@ function saveSettingsFromForm() {
   settings.sttAutoSend = els.sttAutoSend.checked;
   settings.sttModel = els.sttModelSel.value;
   settings.sttRegistry = els.sttRegistryInput.value.trim();
+  // De SSH-host staat NIET in settings.json: de listener is de waarheid, en die
+  // leeft aan de Rust-kant. Hier alleen de gewenste stand doorgeven.
+  const wantSsh = els.sshOn.checked;
+  const wantPort = Math.min(65535, Math.max(1024, parseInt(els.sshPort.value, 10) || 8287));
+  if (wantSsh !== sshStatus.running || (wantSsh && wantPort !== sshStatus.port)) {
+    invoke("ssh_host_set", { enabled: wantSsh, port: wantPort })
+      .then((s) => { sshStatus = s; })
+      .catch((e) => toast(`${t("ssh_failed")} ${e}`));
+  }
   applySkin(settings.skin);
   saveSettings();
   persistSessionsToDisk();
@@ -3369,6 +3520,23 @@ window.addEventListener("DOMContentLoaded", () => {
     sttState: document.querySelector("#stt-state"),
     sttAutoSend: document.querySelector("#set-stt-autosend"),
     sttRegistryInput: document.querySelector("#set-stt-registry"),
+    // Taurus als SSH-host (#121)
+    sshOn: document.querySelector("#set-ssh-on"),
+    sshPort: document.querySelector("#set-ssh-port"),
+    sshState: document.querySelector("#ssh-state"),
+    sshPeers: document.querySelector("#ssh-peers"),
+    consentModal: document.querySelector("#consent-modal"),
+    consentTitle: document.querySelector("#consent-title"),
+    consentWho: document.querySelector("#consent-who"),
+    consentWhat: document.querySelector("#consent-what"),
+    consentFp: document.querySelector("#consent-fingerprint"),
+    consentRemember: document.querySelector("#consent-remember"),
+    consentRememberRow: document.querySelector("#consent-remember-row"),
+    consentTimer: document.querySelector("#consent-timer"),
+    consentAllow: document.querySelector("#consent-allow"),
+    consentJoin: document.querySelector("#consent-join"),
+    consentDeny: document.querySelector("#consent-deny"),
+    consentBlock: document.querySelector("#consent-block"),
     toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
     agentInput: document.querySelector("#agent-input"),
@@ -3491,6 +3659,36 @@ window.addEventListener("DOMContentLoaded", () => {
     fillSttModelSelect();
   });
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
+
+  // --- Taurus als SSH-host (#121) ---
+  // Een verzoek komt binnen terwijl de gebruiker iets anders doet, dus de popup
+  // moet zichzelf tonen: hij is de enige plek waar het antwoord vandaan komt.
+  listen("ssh-consent", (ev) => { consentQueue.push(ev.payload || {}); showNextConsent(); });
+  // De Rust-kant heeft zelf al geweigerd (time-out); popup weghalen.
+  listen("ssh-consent-done", (ev) => {
+    const id = ev.payload;
+    if (consentActive && consentActive.id === id) closeConsent();
+    else {
+      const i = consentQueue.findIndex((c) => c.id === id);
+      if (i >= 0) consentQueue.splice(i, 1);
+    }
+  });
+  listen("ssh-host-changed", () => refreshSshStatus());
+  els.consentAllow.addEventListener("click", () => answerConsent("allow"));
+  els.consentJoin.addEventListener("click", () => answerConsent("join"));
+  els.consentDeny.addEventListener("click", () => answerConsent("deny"));
+  els.consentBlock.addEventListener("click", () => answerConsent("block"));
+  els.sshPeers.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const fp = btn.closest(".peer-row")?.dataset.fp;
+    if (!fp) return;
+    try {
+      if (btn.dataset.act === "forget") await invoke("ssh_peer_forget", { fingerprint: fp });
+      else await invoke("ssh_peer_set", { fingerprint: fp, blocked: btn.dataset.act === "block" });
+    } catch (err) { toast("✗ " + err, "err"); }
+    refreshSshPeers();
+  });
   // Tabs in het instellingen-menu + hover-uitleg per instelling.
   els.settingsModal.querySelectorAll(".stab").forEach((b) => b.addEventListener("click", () => switchSettingsTab(b.dataset.tab)));
   els.settingsModal.addEventListener("mouseover", (e) => { const row = e.target.closest("[data-help-key]"); if (row) showHelpTip(row); else hideHelpTip(); });
