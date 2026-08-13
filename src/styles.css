@@ -712,10 +712,16 @@ select:-webkit-autofill {
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 
 /* Instellingen: tab-strip + panes + hover-uitleg */
-.settings-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+/* Wrappen, niet afkappen: bij een tab erbij (Netwerk, #121) liep de rij buiten
+   het modal en was alleen "Netwe" nog leesbaar. Een tabblad dat je niet kunt
+   lezen is een tabblad dat niet bestaat. */
+.settings-tabs {
+  display: flex; flex-wrap: wrap; gap: 2px 0;
+  border-bottom: 1px solid var(--border); margin-bottom: 18px;
+}
 .stab {
   background: transparent; border: none; color: var(--text-dim);
-  padding: 8px 14px; font-size: 13px; cursor: pointer;
+  padding: 8px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .stab:hover { color: var(--text); }
@@ -872,6 +878,10 @@ select:-webkit-autofill {
 .peer-tag.blocked { border-color: var(--red); color: var(--red); }
 .peer-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 .stt-state.warn { color: var(--orange); }
+/* Nog niet beschikbaar: zichtbaar maar duidelijk uit. Verbergen zou de vraag
+   "waar staat dat vinkje dan?" oproepen; dit laat zien dat er nog een stap voor zit. */
+.setting-group.locked { opacity: .5; }
+.setting-group.locked input { cursor: not-allowed; }
 .net-row { cursor: pointer; }
 .net-row .peer-fp { color: var(--text-dim); font-size: 11px; }
 

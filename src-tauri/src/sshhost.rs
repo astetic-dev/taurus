@@ -30,9 +30,14 @@ mod sftp;
 pub const DEFAULT_PORT: u16 = 8287;
 
 // Zo lang mag een popup open staan voordat hij zichzelf als "deny" beantwoordt.
-// Ruim binnen wat een ssh-client uitzit, en kort genoeg dat een vergeten popup
-// geen sleutel openzet.
-const CONSENT_TIMEOUT_SECS: u64 = 45;
+//
+// GEMETEN op een echte tweede machine: met 45 seconden liep de eerste poging
+// vanzelf op weigeren, omdat degene die verbindt naar ZIJN scherm kijkt en de
+// popup op de andere machine staat. Twee minuten is genoeg om erheen te lopen
+// en kort genoeg dat een vergeten popup geen deur open laat staan. Een
+// wachtende popup blokkeert bovendien alleen die ene verbinding, en de
+// ssh-client zit de auth-fase gewoon uit.
+const CONSENT_TIMEOUT_SECS: u64 = 120;
 
 // --------------------------------------------------------------------------
 // peers.json -- wie mag er aankloppen
@@ -196,6 +201,15 @@ impl Consents {
         let mut ev = payload;
         ev["id"] = serde_json::Value::String(id.clone());
         ev["kind"] = serde_json::Value::String(kind.to_string());
+        // De aftelling komt hiervandaan, zodat de popup en de server niet uit
+        // elkaar kunnen lopen: een teller die 0 zegt terwijl de server nog
+        // wacht (of andersom) is erger dan geen teller.
+        ev["timeout"] = serde_json::Value::from(CONSENT_TIMEOUT_SECS);
+        let wie = format!(
+            "{}@{}",
+            ev["user"].as_str().unwrap_or(""),
+            ev["address"].as_str().unwrap_or("")
+        );
         if app.emit("ssh-consent", &ev).is_err() {
             self.waiting.lock().unwrap().remove(&id);
             return Decision::Deny;
@@ -209,7 +223,13 @@ impl Consents {
         {
             Ok(Ok(d)) => d,
             // Time-out of een gesloten kanaal (venster weg): allebei deny.
-            _ => Decision::Deny,
+            // Apart vastleggen: "niemand heeft gekeken" is iets anders dan
+            // "iemand heeft nee gezegd", en zonder dat onderscheid zoek je je
+            // suf waarom een verbinding geweigerd werd.
+            _ => {
+                audit(app, "consent-timeout", &wie, kind);
+                Decision::Deny
+            }
         };
         self.waiting.lock().unwrap().remove(&id);
         // De popup weghalen als hij vanzelf verliep.

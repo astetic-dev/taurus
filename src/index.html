@@ -300,14 +300,19 @@
 
           <!-- Netwerk: dit werkstation bereikbaar maken voor collega's (#121) -->
           <div class="spane" data-pane="network">
+            <!-- Eerst het netwerk vertrouwen; pas daarna komt de rest vrij. -->
             <div class="setting-group">
+              <h3 data-i18n="grp_network">Netwerk</h3>
+              <div id="ssh-networks" class="peer-list"></div>
+              <div class="hint" data-i18n="net_hint">Alleen op een vertrouwd netwerk kan deze computer bereikbaar zijn. Wissel je van netwerk, dan gaat het vanzelf weer dicht.</div>
+            </div>
+            <div class="setting-group" id="ssh-reach-group">
               <h3 data-i18n="grp_reachable">Bereikbaar op het netwerk</h3>
-              <label class="srow check" data-help-key="help_ssh_on"><input id="set-ssh-on" type="checkbox" /> <span data-i18n="ssh_enable">Laat collega's een sessie op deze computer starten</span></label>
+              <label class="srow check" data-help-key="help_ssh_on"><input id="set-ssh-on" type="checkbox" /> <span data-i18n="ssh_enable">Laat anderen op dit netwerk een sessie op deze computer starten</span></label>
               <label class="srow" data-help-key="help_ssh_port"><span data-i18n="ssh_port">Poort</span>
                 <input id="set-ssh-port" type="number" min="1024" max="65535" />
               </label>
               <div id="ssh-state" class="stt-state"></div>
-              <div id="ssh-networks" class="peer-list"></div>
               <div class="hint" data-i18n="ssh_hint">Een sessie draait als jouw Windows-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.</div>
             </div>
             <div class="setting-group">

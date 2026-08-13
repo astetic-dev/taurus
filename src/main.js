@@ -161,7 +161,10 @@ const I18N = {
     rec_idle: "Klik of F9 = dicteren", rec_listening: "● Luisteren…", rec_transcribing: "Transcriberen…",
     tab_network: "Netwerk",
     grp_reachable: "Bereikbaar op het netwerk",
-    ssh_enable: "Laat collega's een sessie op deze computer starten",
+    ssh_enable: "Laat anderen op dit netwerk een sessie op deze computer starten",
+    grp_network: "Netwerk",
+    net_hint: "Alleen op een vertrouwd netwerk kan deze computer bereikbaar zijn. Wissel je van netwerk, dan gaat het vanzelf weer dicht.",
+    ssh_need_trust: "vertrouw eerst een netwerk hierboven",
     ssh_port: "Poort",
     ssh_hint: "Een sessie draait als jouw Windows-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
     ssh_on_lbl: "bereikbaar op poort {port}", ssh_off_lbl: "uit",
@@ -346,7 +349,10 @@ const I18N = {
     rec_idle: "Click or F9 to dictate", rec_listening: "● Listening…", rec_transcribing: "Transcribing…",
     tab_network: "Network",
     grp_reachable: "Reachable on the network",
-    ssh_enable: "Let colleagues start a session on this computer",
+    ssh_enable: "Let others on this network start a session on this computer",
+    grp_network: "Network",
+    net_hint: "This computer can only be reachable on a trusted network. Switch networks and it closes again by itself.",
+    ssh_need_trust: "trust a network above first",
     ssh_port: "Port",
     ssh_hint: "A session runs as your Windows account, with your rights. Every connection asks permission first; everything is recorded in an audit trail.",
     ssh_on_lbl: "reachable on port {port}", ssh_off_lbl: "off",
@@ -2866,14 +2872,23 @@ async function refreshSshStatus() {
   // Het vinkje toont de WENS, niet of de deur toevallig open staat: op een
   // onbekend netwerk blijft hij aan staan en legt de regel eronder uit waarom
   // er niets luistert. Het vinkje zichzelf zien uitzetten is verwarrender.
-  if (els.sshOn) els.sshOn.checked = sshStatus.desired;
-  if (els.sshPort) els.sshPort.value = sshStatus.port || 8287;
+  const nets = sshStatus.networks || [];
+  // Het netwerk vertrouwen is de VOORWAARDE, niet een detail ernaast: zolang
+  // niets vertrouwd is, valt er niets aan te zetten. Anders zet je een vinkje
+  // aan waar niets van gebeurt -- dat leest als een kapotte functie.
+  const netTrusted = nets.some((n) => n.trusted);
+  if (els.sshOn) { els.sshOn.checked = sshStatus.desired; els.sshOn.disabled = !netTrusted; }
+  if (els.sshPort) { els.sshPort.value = sshStatus.port || 8287; els.sshPort.disabled = !netTrusted; }
+  const groep = document.querySelector("#ssh-reach-group");
+  if (groep) groep.classList.toggle("locked", !netTrusted);
   if (els.sshState) {
     const lbl = sshStatus.running
       ? t("ssh_on_lbl").replace("{port}", sshStatus.port)
-      : sshStatus.desired
-        ? t("ssh_blocked_lbl")
-        : t("ssh_off_lbl");
+      : !netTrusted
+        ? t("ssh_need_trust")
+        : sshStatus.desired
+          ? t("ssh_blocked_lbl")
+          : t("ssh_off_lbl");
     // Gewenst maar niet luisterend is een waarschuwing, geen mededeling: je
     // denkt dat je bereikbaar bent terwijl er niets openstaat.
     els.sshState.className = "stt-state" + (sshStatus.running ? " ok" : sshStatus.desired ? " warn" : "");
@@ -2884,7 +2899,6 @@ async function refreshSshStatus() {
         : "");
   }
   if (els.sshNetworks) {
-    const nets = sshStatus.networks || [];
     els.sshNetworks.innerHTML = nets.length
       ? nets.map((n) => {
           // Wat Windows van het netwerk vindt, staat erbij: op een OPENBAAR
@@ -2947,7 +2961,8 @@ function showNextConsent() {
   els.consentRemember.checked = false;
   els.consentModal.classList.remove("hidden");
 
-  let left = 45;
+  // Uit de backend, zodat teller en server niet uit elkaar lopen.
+  let left = req.timeout || 45;
   const paint = () => {
     els.consentTimer.textContent = t("consent_timer").replace("{secs}", left);
   };
