@@ -70,6 +70,39 @@ fn peers_file() -> std::path::PathBuf {
     config_dir().join("peers.json")
 }
 
+// De stand van het vinkje overleeft een herstart. "Uit tenzij je het aanzet"
+// gaat over de DEFAULT, niet over elke keer opnieuw moeten aanvinken -- dat
+// laatste leert mensen alleen maar om het klakkeloos aan te klikken.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HostPref {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl Default for HostPref {
+    fn default() -> Self {
+        HostPref { enabled: false, port: DEFAULT_PORT }
+    }
+}
+
+fn pref_file() -> std::path::PathBuf {
+    config_dir().join("ssh-host.json")
+}
+
+pub fn read_pref() -> HostPref {
+    std::fs::read_to_string(pref_file())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+fn write_pref(p: &HostPref) {
+    let _ = std::fs::create_dir_all(config_dir());
+    if let Ok(txt) = serde_json::to_string_pretty(p) {
+        let _ = std::fs::write(pref_file(), txt);
+    }
+}
+
 pub fn read_peers() -> Vec<Peer> {
     std::fs::read_to_string(peers_file())
         .ok()
@@ -917,6 +950,7 @@ pub fn set_enabled(
 ) -> Result<(), String> {
     state.desired.store(enabled, Ordering::Relaxed);
     *state.port.lock().unwrap() = port;
+    write_pref(&HostPref { enabled, port });
     if !enabled {
         stop(&app, &state);
         return Ok(());
@@ -1046,6 +1080,17 @@ mod tests {
         assert_eq!(sane_size(120, 80), 120);
         // Groter dan u16 is onzin van de client; val terug in plaats van af te kappen.
         assert_eq!(sane_size(100_000, 80), 80);
+    }
+
+    // Verse installatie = dicht. De default mag nooit "aan" worden doordat het
+    // bestand ontbreekt of stuk is.
+    #[test]
+    fn default_pref_is_closed() {
+        let p = HostPref::default();
+        assert!(!p.enabled);
+        assert_eq!(p.port, DEFAULT_PORT);
+        let kapot: HostPref = serde_json::from_str("{}").unwrap_or_default();
+        assert!(!kapot.enabled);
     }
 
     #[test]

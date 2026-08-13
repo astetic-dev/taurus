@@ -3996,6 +3996,21 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "windows")]
             disable_accelerator_keys(app.handle());
+            // Stond de SSH-host aan toen je Taurus afsloot? Dan weer aan -- de
+            // netwerk-gate beslist alsnog of er echt geluisterd wordt. Zonder
+            // dit moest je na elke start opnieuw aanvinken.
+            {
+                use tauri::Manager;
+                let pref = sshhost::read_pref();
+                if pref.enabled {
+                    let st = app.state::<AppState>();
+                    if let Err(e) =
+                        sshhost::set_enabled(app.handle().clone(), st.ssh.clone(), true, pref.port)
+                    {
+                        debug_log(format!("ssh-host bij opstarten: {e}"));
+                    }
+                }
+            }
             {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
                 // F9 alleen systeembreed claimen als STT ook echt bruikbaar is
