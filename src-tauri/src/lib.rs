@@ -51,12 +51,29 @@ fn default_projects() -> Vec<Project> {
 
 // Per-gebruiker config: %APPDATA%\Taurus\projects.json (schrijfbaar, geen
 // hardcoded dev-pad, werkt na installatie).
+//
+// TAURUS_CONFIG_DIR verlegt de HELE configmap. Bedoeld om een testexemplaar
+// naast een draaiende Taurus te zetten: die deelt anders sessions.json, en dan
+// hervat de tweede jouw lopende sessies en overschrijft ze daarna ook nog.
+// Bewust een eigen variabele en niet APPDATA verbuigen: APPDATA erven de
+// agents mee, en dan zoekt claude zijn credentials op de verkeerde plek.
 fn config_dir() -> std::path::PathBuf {
-    let base = std::env::var("APPDATA")
-        .ok()
+    resolve_config_dir(
+        std::env::var("TAURUS_CONFIG_DIR").ok(),
+        std::env::var("APPDATA").ok(),
+    )
+}
+
+// Apart gehouden zodat de keuze te testen is zonder aan de omgeving te zitten:
+// env-variabelen zijn procesbreed en tests draaien parallel.
+fn resolve_config_dir(override_dir: Option<String>, appdata: Option<String>) -> std::path::PathBuf {
+    if let Some(dir) = override_dir.filter(|s| !s.trim().is_empty()) {
+        return std::path::PathBuf::from(dir.trim());
+    }
+    appdata
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    base.join("Taurus")
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("Taurus")
 }
 fn config_path() -> std::path::PathBuf {
     config_dir().join("projects.json")
@@ -3971,6 +3988,16 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "windows")]
             disable_accelerator_keys(app.handle());
+            // Een testexemplaar (eigen configmap) zegt dat in zijn titelbalk.
+            // Twee identiek ogende vensters waarvan er een je echte sessies
+            // draait, is anders vragen om in het verkeerde te typen.
+            if std::env::var("TAURUS_CONFIG_DIR").is_ok() {
+                use tauri::Manager;
+                if let Some(w) = app.get_webview_window("main") {
+                    let base = w.title().unwrap_or_else(|_| "Taurus".into());
+                    let _ = w.set_title(&format!("{base}  ⚗ TEST"));
+                }
+            }
             {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
                 // F9 alleen systeembreed claimen als STT ook echt bruikbaar is
@@ -4866,6 +4893,31 @@ mod tests {
         assert_eq!(back.hostname, "work.tail.net");
         assert_eq!(back.mux, "tmux");
         assert_eq!(back.key_path, r"C:\Users\AST\.ssh\id_ed25519");
+    }
+
+    #[test]
+    // Een testexemplaar naast een draaiende Taurus mag NOOIT dezelfde configmap
+    // pakken: dan hervat het je lopende sessies en overschrijft het ze daarna.
+    #[test]
+    fn config_dir_override_wins_over_appdata() {
+        let d = resolve_config_dir(Some(r"C:\Temp\TaurusTest".into()), Some(r"C:\Users\x\AppData\Roaming".into()));
+        assert_eq!(d, std::path::PathBuf::from(r"C:\Temp\TaurusTest"));
+        // Geen "Taurus" eronder plakken: de opgegeven map IS de configmap.
+        assert!(!d.ends_with("Taurus"));
+    }
+
+    #[test]
+    fn config_dir_falls_back_to_appdata() {
+        let d = resolve_config_dir(None, Some(r"C:\Users\x\AppData\Roaming".into()));
+        assert_eq!(d, std::path::PathBuf::from(r"C:\Users\x\AppData\Roaming\Taurus"));
+    }
+
+    // Een lege of witruimte-variabele is per ongeluk gezet, niet bedoeld als
+    // "gebruik de huidige map".
+    #[test]
+    fn empty_override_is_ignored() {
+        let d = resolve_config_dir(Some("   ".into()), Some(r"C:\Users\x\AppData\Roaming".into()));
+        assert_eq!(d, std::path::PathBuf::from(r"C:\Users\x\AppData\Roaming\Taurus"));
     }
 
     #[test]
