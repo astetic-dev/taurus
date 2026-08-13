@@ -3864,6 +3864,45 @@ fn ssh_inbound_sessions(state: State<AppState>) -> Vec<sshhost::InboundSession> 
     state.ssh.sessions.lock().unwrap().values().cloned().collect()
 }
 
+// JOIN: de lokale tab typt in dezelfde terminal als de collega. Twee
+// toetsenborden op één agent -- dat is precies de bedoeling, dus hier zit geen
+// "wie is aan de beurt"-logica.
+#[tauri::command]
+fn ssh_mirror_write(state: State<AppState>, id: String, data: String) {
+    let io = state.ssh.io.lock().unwrap().get(&id).cloned();
+    if let Some(io) = io {
+        io.write(data.as_bytes());
+    }
+}
+
+// Twee vensters op één terminal: de kleinste maat wint (zoals tmux).
+#[tauri::command]
+fn ssh_mirror_resize(state: State<AppState>, id: String, cols: u16, rows: u16) {
+    let io = state.ssh.io.lock().unwrap().get(&id).cloned();
+    if let Some(io) = io {
+        io.set_local_size(cols, rows);
+    }
+}
+
+// De spiegel-tab sluiten stopt alleen het meekijken; de sessie van de collega
+// loopt door. Afkappen is een aparte, expliciete handeling (ssh_kill_session).
+#[tauri::command]
+fn ssh_mirror_detach(state: State<AppState>, id: String) {
+    let io = state.ssh.io.lock().unwrap().get(&id).cloned();
+    if let Some(io) = io {
+        io.drop_local();
+    }
+}
+
+#[tauri::command]
+fn ssh_kill_session(app: AppHandle, state: State<AppState>, id: String) {
+    let io = state.ssh.io.lock().unwrap().get(&id).cloned();
+    if let Some(io) = io {
+        sshhost::audit(&app, "session-kill", &id, "door de lokale gebruiker");
+        io.kill();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Audio-thread voor STT: cpal-streams zijn !Send, dus één eigen thread
@@ -3980,6 +4019,10 @@ pub fn run() {
             ssh_peer_set,
             ssh_peer_forget,
             ssh_inbound_sessions,
+            ssh_mirror_write,
+            ssh_mirror_resize,
+            ssh_mirror_detach,
+            ssh_kill_session,
             debug_log
         ])
         .run(tauri::generate_context!())

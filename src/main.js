@@ -180,6 +180,10 @@ const I18N = {
     consent_remember: "Niet meer vragen voor deze computer",
     consent_block: "Blokkeer", consent_deny: "Weiger", consent_join: "Meekijken", consent_allow: "Toestaan",
     consent_timer: "Weigert zichzelf over {secs} s",
+    grp_inbound: "Draait nu op deze computer",
+    inbound_none: "Er draait niets namens iemand anders.",
+    inbound_joined: "je kijkt mee", inbound_stop: "Stop",
+    join_tab: "Meekijken",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Agents",
@@ -358,6 +362,10 @@ const I18N = {
     consent_remember: "Don't ask again for this computer",
     consent_block: "Block", consent_deny: "Deny", consent_join: "Join", consent_allow: "Allow",
     consent_timer: "Denies itself in {secs} s",
+    grp_inbound: "Running on this computer right now",
+    inbound_none: "Nothing is running on someone else's behalf.",
+    inbound_joined: "you are watching", inbound_stop: "Stop",
+    join_tab: "Joined session",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -1900,7 +1908,7 @@ function showView(target) {
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId, mirror }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -2000,14 +2008,22 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     // Van welke agentkaart komt deze sessie (#90)? Leeg = losse sessie, via
     // map-verkennen gestart. Bepaalt onder welke tab hij gebundeld wordt.
     projectId: projectId || "",
+    // Gevuld = deze tab kijkt mee met een INKOMENDE sessie van een collega
+    // (JOIN, #121). Er is geen eigen proces: toetsen en maat gaan naar diens
+    // terminal, en sluiten stopt alleen het meekijken.
+    mirror: mirror || "",
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
   };
   sessions.set(id, session);
 
-  term.onData((d) => invoke("write_session", { id, data: d }));
-  term.onResize(({ cols, rows }) => invoke("resize_session", { id, cols, rows }));
+  term.onData((d) => session.mirror
+    ? invoke("ssh_mirror_write", { id: session.mirror, data: d })
+    : invoke("write_session", { id, data: d }));
+  term.onResize(({ cols, rows }) => session.mirror
+    ? invoke("ssh_mirror_resize", { id: session.mirror, cols, rows })
+    : invoke("resize_session", { id, cols, rows }));
   // Kopieren bij selectie via xterm's onSelectionChange (vuurt betrouwbaar; een
   // DOM mouseup op het paneel komt niet door xterm's eigen muis-afhandeling).
   // We leggen de laatste niet-lege selectie vast en kopieren met een korte
@@ -2199,7 +2215,9 @@ function persistSessionsToDisk() {
     // hem hier opslaan zou bij de volgende start een resume proberen die nergens
     // op slaat. De sessie zelf blijft op de host draaien -- je haakt gewoon
     // opnieuw aan via ⇱.
-    .filter((s) => !s.command && !s.attached)
+    // Een spiegel-tab (JOIN) hoort er ook niet in: die heeft geen eigen proces
+    // en bij de volgende start bestaat de sessie van de collega niet meer.
+    .filter((s) => !s.command && !s.attached && !s.mirror)
     .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "" }));
   invoke("save_sessions", { sessions: list }).catch(() => {});
 }
@@ -2275,7 +2293,9 @@ function toast(msg, kind) {
 async function closeSession(id) {
   const s = sessions.get(id);
   if (!s) return;
-  await invoke("close_session", { id });
+  // Meekijken stoppen mag de sessie van de collega niet afbreken.
+  if (s.mirror) await invoke("ssh_mirror_detach", { id: s.mirror }).catch(() => {});
+  else await invoke("close_session", { id });
   s.term.dispose(); s.el.remove(); sessions.delete(id);
   persistSessionsToDisk();
   if (current === id) showView([...sessions.keys()].pop() || "new"); else renderTabs();
@@ -2288,7 +2308,11 @@ function applyLayout(s) {
 }
 function refitTerm(s) {
   if (s.previewMode === "full") return;
-  requestAnimationFrame(() => { try { s.fit.fit(); } catch (_) {} invoke("resize_session", { id: s.id, cols: s.term.cols, rows: s.term.rows }); });
+  requestAnimationFrame(() => {
+    try { s.fit.fit(); } catch (_) {}
+    if (s.mirror) invoke("ssh_mirror_resize", { id: s.mirror, cols: s.term.cols, rows: s.term.rows });
+    else invoke("resize_session", { id: s.id, cols: s.term.cols, rows: s.term.rows });
+  });
 }
 async function openPreview(id) {
   closeTabMenu();
@@ -2538,6 +2562,48 @@ listen("pty-output", (event) => {
   }
   if (render) renderTabs();
 });
+// JOIN (#121): dezelfde bytes die naar de collega gaan, ook hier tekenen. De
+// tab ontstaat zodra de eerste output komt -- dat is het moment waarop er echt
+// iets te zien is, en de sessie-id is dan bekend.
+const mirrorTabs = new Map(); // inkomende sessie-id -> lokale tab-id
+listen("ssh-mirror-output", (event) => {
+  const [sid, data] = event.payload;
+  let tabId = mirrorTabs.get(sid);
+  if (!tabId || !sessions.has(tabId)) {
+    tabId = `join-${sid}`;
+    mirrorTabs.set(sid, tabId);
+    const inbound = (sshSessions.find((x) => x.id === sid) || {});
+    spawnTerminal({
+      id: tabId,
+      uuid: "",
+      path: "",
+      title: `👥 ${inbound.label || t("join_tab")}`,
+      accent: "",
+      mode: "default",
+      command: "",
+      agent: "",
+      model: "",
+      hostId: "",
+      projectId: "",
+      mirror: sid,
+    });
+    showView(tabId);
+  }
+  const s = sessions.get(tabId);
+  if (s) s.term.write(Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
+});
+listen("ssh-mirror-exit", (event) => {
+  const sid = event.payload;
+  const tabId = mirrorTabs.get(sid);
+  mirrorTabs.delete(sid);
+  const s = tabId && sessions.get(tabId);
+  if (!s) return;
+  s.exited = true; s.working = false; s.status = null;
+  s.term.write(`\r\n\x1b[2m${t("ended")}\x1b[0m\r\n`);
+  renderTabs();
+});
+listen("ssh-sessions-changed", () => refreshSshSessions());
+
 listen("pty-exit", (event) => {
   const [sid, gen] = event.payload;
   const s = sessions.get(sid);
@@ -2743,6 +2809,7 @@ function openSettings() {
   refreshSttStatus();
   refreshSshStatus();
   refreshSshPeers();
+  refreshSshSessions();
   els.settingsModal.classList.remove("hidden");
 }
 
@@ -2750,6 +2817,25 @@ function openSettings() {
 // De status komt van de Rust-kant, niet uit localStorage: daar staat wat de
 // listener DOET, en dat is het enige eerlijke antwoord op "ben ik bereikbaar?".
 let sshStatus = { running: false, port: 8287, fingerprint: "" };
+// Wat er NU op deze computer draait namens iemand anders. Zichtbaarheid is een
+// van de drie echte knoppen; zonder deze lijst weet je niet wat je toestond.
+let sshSessions = [];
+
+async function refreshSshSessions() {
+  try { sshSessions = await invoke("ssh_inbound_sessions"); } catch (_) { return; }
+  if (!els.sshSessions) return;
+  if (!sshSessions.length) {
+    els.sshSessions.innerHTML = `<div class="hint">${escapeHtml(t("inbound_none"))}</div>`;
+    return;
+  }
+  els.sshSessions.innerHTML = sshSessions
+    .map((s) => `<div class="peer-row" data-sid="${escapeHtml(s.id)}">
+      <div class="peer-id"><b>${escapeHtml(s.label)}</b>${s.mirrored ? ` <span class="peer-tag">${escapeHtml(t("inbound_joined"))}</span>` : ""}
+        <div class="peer-fp"><code>${escapeHtml(s.what)}</code></div></div>
+      <div class="peer-actions"><button class="icon-btn" data-act="kill">${escapeHtml(t("inbound_stop"))}</button></div>
+    </div>`)
+    .join("");
+}
 
 async function refreshSshStatus() {
   try { sshStatus = await invoke("ssh_host_status"); } catch (_) { return; }
@@ -3525,6 +3611,7 @@ window.addEventListener("DOMContentLoaded", () => {
     sshPort: document.querySelector("#set-ssh-port"),
     sshState: document.querySelector("#ssh-state"),
     sshPeers: document.querySelector("#ssh-peers"),
+    sshSessions: document.querySelector("#ssh-sessions"),
     consentModal: document.querySelector("#consent-modal"),
     consentTitle: document.querySelector("#consent-title"),
     consentWho: document.querySelector("#consent-who"),
@@ -3688,6 +3775,14 @@ window.addEventListener("DOMContentLoaded", () => {
       else await invoke("ssh_peer_set", { fingerprint: fp, blocked: btn.dataset.act === "block" });
     } catch (err) { toast("✗ " + err, "err"); }
     refreshSshPeers();
+  });
+  els.sshSessions.addEventListener("click", async (e) => {
+    const btn = e.target.closest('button[data-act="kill"]');
+    if (!btn) return;
+    const sid = btn.closest(".peer-row")?.dataset.sid;
+    if (!sid) return;
+    try { await invoke("ssh_kill_session", { id: sid }); } catch (err) { toast("✗ " + err, "err"); }
+    refreshSshSessions();
   });
   // Tabs in het instellingen-menu + hover-uitleg per instelling.
   els.settingsModal.querySelectorAll(".stab").forEach((b) => b.addEventListener("click", () => switchSettingsTab(b.dataset.tab)));

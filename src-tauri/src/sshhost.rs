@@ -242,6 +242,9 @@ pub struct InboundSession {
 pub struct HostState {
     pub consents: Consents,
     pub sessions: StdMutex<HashMap<String, InboundSession>>,
+    // De terminals zelf, zodat een lokale JOIN-tab erin kan typen en de lokale
+    // gebruiker een sessie kan afkappen.
+    pub io: StdMutex<HashMap<String, Arc<SessionIo>>>,
     // Handle om de listener te stoppen; None = staat uit. Let op: dit is de
     // handle van de SERVER (RunningServerHandle), niet die van een sessie --
     // alleen de eerste kent shutdown().
@@ -303,6 +306,7 @@ impl russh::server::Server for TaurusHost {
             fingerprint: String::new(),
             auto_allow: false,
             ptys: Default::default(),
+            chan_session: Default::default(),
             pty_req: Default::default(),
             channels: Default::default(),
             sftp_channels: Default::default(),
@@ -320,9 +324,61 @@ impl russh::server::Server for TaurusHost {
     }
 }
 
-struct PtyEntry {
-    writer: Option<Box<dyn Write + Send>>,
-    master: Box<dyn portable_pty::MasterPty + Send>,
+// Eén draaiende terminal, gedeeld door twee kanten: de SSH-client die hem
+// startte en (bij JOIN) een lokale tab. Beide schrijven in dezelfde writer, dus
+// twee toetsenborden op één agent -- dat IS de functie.
+pub struct SessionIo {
+    writer: StdMutex<Option<Box<dyn Write + Send>>>,
+    master: StdMutex<Box<dyn portable_pty::MasterPty + Send>>,
+    killer: StdMutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
+    // Twee vensters op één terminal hebben zelden dezelfde maat. De kleinste
+    // wint, zoals tmux: dan valt er bij de ander hooguit ruimte weg in plaats
+    // van tekst buiten beeld.
+    remote: StdMutex<(u16, u16)>,
+    local: StdMutex<Option<(u16, u16)>>,
+}
+
+impl SessionIo {
+    pub fn write(&self, data: &[u8]) {
+        if let Some(w) = self.writer.lock().unwrap().as_mut() {
+            let _ = w.write_all(data);
+            let _ = w.flush();
+        }
+    }
+
+    fn apply_size(&self) {
+        let (rc, rr) = *self.remote.lock().unwrap();
+        let (c, r) = match *self.local.lock().unwrap() {
+            Some((lc, lr)) => (rc.min(lc), rr.min(lr)),
+            None => (rc, rr),
+        };
+        let _ = self.master.lock().unwrap().resize(PtySize {
+            rows: r.max(1),
+            cols: c.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        });
+    }
+
+    pub fn set_remote_size(&self, cols: u16, rows: u16) {
+        *self.remote.lock().unwrap() = (cols, rows);
+        self.apply_size();
+    }
+
+    pub fn set_local_size(&self, cols: u16, rows: u16) {
+        *self.local.lock().unwrap() = Some((cols, rows));
+        self.apply_size();
+    }
+
+    // De lokale gebruiker kijkt niet meer mee; de sessie zelf loopt door.
+    pub fn drop_local(&self) {
+        *self.local.lock().unwrap() = None;
+        self.apply_size();
+    }
+
+    pub fn kill(&self) {
+        let _ = self.killer.lock().unwrap().kill();
+    }
 }
 
 struct HostSession {
@@ -332,7 +388,10 @@ struct HostSession {
     user: String,
     fingerprint: String,
     auto_allow: bool,
-    ptys: Arc<StdMutex<HashMap<ChannelId, PtyEntry>>>,
+    ptys: Arc<StdMutex<HashMap<ChannelId, Arc<SessionIo>>>>,
+    // Welk kanaal hoort bij welke sessie-id, zodat opruimen bij channel_close
+    // ook de gedeelde kant (de JOIN-registratie) meeneemt.
+    chan_session: Arc<StdMutex<HashMap<ChannelId, String>>>,
     pty_req: Arc<StdMutex<HashMap<ChannelId, (u16, u16, String)>>>,
     channels: Arc<tokio::sync::Mutex<HashMap<ChannelId, Channel<Msg>>>>,
     sftp_channels: Arc<StdMutex<HashSet<ChannelId>>>,
@@ -433,6 +492,16 @@ impl HostSession {
 
         let mut reader = pair.master.try_clone_reader().map_err(|e| format!("reader: {e}"))?;
         let writer = pair.master.take_writer().map_err(|e| format!("writer: {e}"))?;
+        // Losse killer, want `child` verhuist zo naar de wacht-thread.
+        let killer = child.clone_killer();
+
+        let io = Arc::new(SessionIo {
+            writer: StdMutex::new(Some(writer)),
+            master: StdMutex::new(pair.master),
+            killer: StdMutex::new(killer),
+            remote: StdMutex::new((cols, rows)),
+            local: StdMutex::new(None),
+        });
 
         let session_id = format!("in-{}-{}", channel, now_iso());
         let mut transcript = Transcript::open(&session_id);
@@ -472,6 +541,7 @@ impl HostSession {
         std::thread::spawn(move || {
             let code = child.wait().map(|s| s.exit_code()).unwrap_or(1);
             state2.sessions.lock().unwrap().remove(&sid2);
+            state2.io.lock().unwrap().remove(&sid2);
             let _ = app2.emit("ssh-sessions-changed", ());
             let _ = app2.emit("ssh-mirror-exit", sid2);
             rt2.block_on(async move {
@@ -484,19 +554,18 @@ impl HostSession {
         self.state.sessions.lock().unwrap().insert(
             session_id.clone(),
             InboundSession {
-                id: session_id,
+                id: session_id.clone(),
                 peer: self.fingerprint.clone(),
                 label: self.peer_name(),
                 what: cmd.unwrap_or("shell").to_string(),
                 mirrored: mirror,
             },
         );
+        self.state.io.lock().unwrap().insert(session_id.clone(), io.clone());
+        self.chan_session.lock().unwrap().insert(channel, session_id);
         let _ = self.app.emit("ssh-sessions-changed", ());
 
-        self.ptys
-            .lock()
-            .unwrap()
-            .insert(channel, PtyEntry { writer: Some(writer), master: pair.master });
+        self.ptys.lock().unwrap().insert(channel, io);
         Ok(())
     }
 }
@@ -617,13 +686,9 @@ impl Handler for HostSession {
         _ph: u32,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        if let Some(p) = self.ptys.lock().unwrap().get(&channel) {
-            let _ = p.master.resize(PtySize {
-                rows: sane_size(row_height, 24),
-                cols: sane_size(col_width, 80),
-                pixel_width: 0,
-                pixel_height: 0,
-            });
+        let io = self.ptys.lock().unwrap().get(&channel).cloned();
+        if let Some(io) = io {
+            io.set_remote_size(sane_size(col_width, 80), sane_size(row_height, 24));
         }
         session.channel_success(channel)?;
         Ok(())
@@ -635,10 +700,9 @@ impl Handler for HostSession {
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let mut m = self.ptys.lock().unwrap();
-        if let Some(w) = m.get_mut(&channel).and_then(|p| p.writer.as_mut()) {
-            let _ = w.write_all(data);
-            let _ = w.flush();
+        let io = self.ptys.lock().unwrap().get(&channel).cloned();
+        if let Some(io) = io {
+            io.write(data);
         }
         Ok(())
     }
@@ -671,6 +735,10 @@ impl Handler for HostSession {
         self.ptys.lock().unwrap().remove(&channel);
         self.pty_req.lock().unwrap().remove(&channel);
         self.channels.lock().await.remove(&channel);
+        // De sessie zelf blijft draaien tot het kindproces stopt -- Taurus is de
+        // mux voor inkomende sessies, dus een verbroken verbinding kost niets.
+        // Alleen de koppeling kanaal->sessie is nu betekenisloos.
+        self.chan_session.lock().unwrap().remove(&channel);
         Ok(())
     }
 

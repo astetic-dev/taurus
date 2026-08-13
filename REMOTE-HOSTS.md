@@ -293,6 +293,24 @@ access.
 The name in the popup is a claim the client makes up; the **fingerprint** is the only
 identity. That is why it is shown, and why Deny is the default outcome.
 
+### Join — two keyboards, one agent
+
+**Join** is Allow plus a tab on your own screen showing that same session. It is not a
+screen share: Taurus owns the terminal, so both sides read and write the *same* one.
+Whatever the colleague types appears in your tab, and whatever you type lands in their
+session. That is the point — for pair-working with an agent, and for guiding someone who
+does not know the tool yet.
+
+The tab appears as soon as the session produces output, marked 👥. Two windows rarely
+have the same size, so the **smaller one wins**, the way tmux handles it: someone loses
+empty space rather than having text run off screen.
+
+Closing the joined tab only stops you watching; the colleague's session continues. It is
+not remembered across restarts either — there is no command Taurus could replay to
+rebuild it. Ending the session itself is a separate, deliberate action: Settings →
+Netwerk → *Running on this computer right now* → **Stop**, which also lists every
+inbound session whether you joined it or not.
+
 ### What is *not* restricted, and what replaces it
 
 There is no command filter, and that is a decision rather than an omission. The session
