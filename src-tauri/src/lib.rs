@@ -2250,8 +2250,15 @@ fn build_attach_payload(host: &Host, session: &str) -> Result<String, String> {
 // zonder die kop wijst herdr de sleutels af als onbekend.
 #[tauri::command(async)]
 fn tune_herdr(host: Host) -> Result<String, String> {
-    if host.mux != "herdr" || effective_os(&host) != "windows" || host.via == "wsl" {
+    if host.mux != "herdr" {
         return Ok("skip".into());
+    }
+    // GEMETEN op ursu-wsl: de aanname dat er op Linux/macOS "geen chrome te
+    // verbergen is" klopt alleen zolang er een agent in de pane draait. Zodra
+    // die weg is, valt build_attach_payload terug op de sessie-TUI -- en dan
+    // krijg je daar precies dezelfde dubbele sidebar en tabbalk als op Windows.
+    if effective_os(&host) != "windows" || host.via == "wsl" {
+        return tune_herdr_posix(&host);
     }
     let ps = r#"$p = Join-Path $env:APPDATA 'herdr\config.toml'
 $h = (Get-Command herdr -EA 0).Source
@@ -2283,6 +2290,48 @@ if ((& $h config check 2>&1) -match 'issues found') { Copy-Item ($p + '.taurus.b
         Some("fail") => Err("herdr wees de configuratie af; de back-up is teruggezet.".into()),
         _ => Err(format!("onverwacht antwoord van de host:\n{}", out.trim())),
     }
+}
+
+// Dezelfde ingreep op een POSIX-host. Config staat daar in
+// $XDG_CONFIG_HOME/herdr/config.toml (gemeten: ~/.config/herdr/config.toml).
+//
+// Het script gaat base64-gecodeerd de lijn over. Anders moet elke quote drie
+// parse-rondes overleven (PowerShell -> ssh -> remote sh) en dat is precies
+// waar de payload-code elders ook al op stukliep; zo is er maar EEN vorm.
+fn tune_herdr_posix(host: &Host) -> Result<String, String> {
+    let (out, _) = ssh_run(host, &herdr_tune_posix_command())?;
+    match out.lines().find_map(|l| l.trim().strip_prefix("TUNE=")) {
+        Some("ok") => Ok("ok".into()),
+        Some("skip") => Ok("skip".into()),
+        Some("fail") => Err("herdr wees de configuratie af; de back-up is teruggezet.".into()),
+        _ => Err(format!("onverwacht antwoord van de host:\n{}", out.trim())),
+    }
+}
+
+// Los van de aanroep zodat de vorm te testen is zonder een host nodig te hebben.
+fn herdr_tune_posix_command() -> String {
+    let script = r#"if command -v herdr >/dev/null 2>&1; then H=herdr
+elif [ -x "$HOME/.local/bin/herdr" ]; then H="$HOME/.local/bin/herdr"
+else echo TUNE=skip; exit 0
+fi
+D="${XDG_CONFIG_HOME:-$HOME/.config}/herdr"
+P="$D/config.toml"
+mkdir -p "$D"
+[ -f "$P" ] || : > "$P"
+if grep -q sidebar_start_collapsed "$P"; then echo TUNE=skip; exit 0; fi
+cp "$P" "$P.taurus.bak"
+if grep -q "^\[ui\]" "$P"; then
+  awk 'BEGIN{d=0} {print} /^\[ui\]/ && d==0 {print "sidebar_start_collapsed = true"; print "sidebar_collapsed_mode = \"hidden\""; print "hide_tab_bar_when_single_tab = true"; d=1}' "$P" > "$P.taurus.new" && mv "$P.taurus.new" "$P"
+else
+  printf '\n[ui]\nsidebar_start_collapsed = true\nsidebar_collapsed_mode = "hidden"\nhide_tab_bar_when_single_tab = true\n' >> "$P"
+fi
+if "$H" config check 2>&1 | grep -qi "issues found"; then cp "$P.taurus.bak" "$P"; echo TUNE=fail; exit 0; fi
+echo TUNE=ok"#;
+    // macOS' base64 kent -d niet altijd; even proberen welke variant werkt.
+    format!(
+        "if echo | base64 -d >/dev/null 2>&1; then DEC=\"base64 -d\"; else DEC=\"base64 -D\"; fi; echo {} | $DEC | sh",
+        b64(script.as_bytes())
+    )
 }
 
 // Wat er op een host draait. Leeg agent-veld = een sessie zonder (herkende) agent;
@@ -4503,21 +4552,53 @@ mod tests {
         assert!(!list[0].mux_auto);
     }
 
+    // Zonder herdr is er geen chrome om te verbergen, en dan hoort Taurus van
+    // andermans configbestand af te blijven.
     #[test]
-    fn tuning_only_touches_a_windows_herdr_host() {
-        // Op POSIX hangt de tab rechtstreeks aan de agent-terminal: geen chrome,
-        // dus niets te verstellen. Aan een configbestand van iemand anders komen
-        // zonder dat het iets oplost, is precies wat je niet wilt.
+    fn tuning_is_only_for_herdr_hosts() {
         let mut h = test_host();
-        h.mux = "herdr".into();
-        h.os = "linux".into();
-        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
-        h.os = "windows".into();
-        h.via = "wsl".into();
-        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
-        h.via = String::new();
         h.mux = "tmux".into();
+        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
+        h.mux = "none".into();
         assert_eq!(tune_herdr(h).unwrap(), "skip");
+    }
+
+    // Handmatig: `cargo test -- --ignored --nocapture toon_herdr` drukt het
+    // commando af dat naar een POSIX-host gaat, zodat je het tegen een echte
+    // machine kunt houden zonder de app te starten.
+    #[test]
+    #[ignore]
+    fn toon_herdr_tune_commando() {
+        println!("{}", herdr_tune_posix_command());
+    }
+
+    // GEMETEN op ursu-wsl: een POSIX-host valt WEL terug op de sessie-TUI zodra
+    // er geen agent in de pane draait, en dan staat daar dezelfde dubbele
+    // sidebar als op Windows. Deze test legt vast dat de ingreep daar nu ook
+    // gebeurt -- en dat hij net zo voorzichtig is als de Windows-variant.
+    #[test]
+    fn posix_tuning_is_reversible_and_validated() {
+        let cmd = herdr_tune_posix_command();
+        // Alles na de laatste "echo " tot de pipe is de base64-payload.
+        let payload = cmd
+            .rsplit("echo ")
+            .next()
+            .and_then(|rest| rest.split(' ').next())
+            .expect("base64-deel");
+        let script = String::from_utf8(b64_decode_for_test(payload)).expect("script is tekst");
+
+        assert!(script.contains("sidebar_start_collapsed = true"), "{script}");
+        assert!(script.contains("sidebar_collapsed_mode = \"hidden\""), "{script}");
+        assert!(script.contains("hide_tab_bar_when_single_tab = true"), "{script}");
+        // Eigen keuze van de gebruiker wint: al ingesteld = niet aankomen.
+        assert!(script.contains("if grep -q sidebar_start_collapsed"), "{script}");
+        // Back-up voor, terugzetten als herdr de config afkeurt.
+        assert!(script.contains("taurus.bak"), "{script}");
+        assert!(script.contains("config check"), "{script}");
+        assert!(script.contains("TUNE=fail"), "{script}");
+        // Een bestaande [ui]-tabel krijgt de sleutels erbij; een tweede [ui]
+        // zou ongeldige TOML zijn.
+        assert!(script.contains("grep -q \"^\\[ui\\]\""), "{script}");
     }
 
     #[test]

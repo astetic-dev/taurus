@@ -171,9 +171,15 @@ Two things are worth knowing, both measured rather than read:
   and silently ignores them. Taurus keeps a `.taurus.bak`, never touches the
   keys if `sidebar_start_collapsed` is already set (your own choice wins), and
   validates the result with `herdr config check` — if that reports a problem the
-  backup goes back. It applies from the next session, and only on Windows: on
-  Linux and macOS Taurus attaches to the agent terminal directly and there is no
-  chrome to hide.
+  backup goes back.
+
+  **This happens on Linux and macOS too** (`~/.config/herdr/config.toml`), and
+  for the same reason. Attaching goes straight to the agent terminal only while
+  an agent is actually running in the pane; once it has exited — the normal
+  state of a session you come back to, and what ⇱ lists as *"no agent"* — the
+  tab falls back to the session view and the chrome is right back. herdr reads
+  the config when a session starts, so a session that is already running keeps
+  its chrome until it is recreated.
 - **Windows builds are preview-only.** herdr refuses `channel set stable` there
   until stable Windows releases exist. That is the trade for reattach on a
   Windows host; `mux` is per host, so anything you are not comfortable with can

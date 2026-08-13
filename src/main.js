@@ -1116,7 +1116,9 @@ async function addAndTestHost() {
 // bij het toevoegen of hertesten van de machine. Mislukt het, dan is dat geen
 // reden om de host niet op te slaan: de tab werkt ook mét chrome.
 async function tuneHerdrChrome(host) {
-  if (host.mux !== "herdr" || host.os !== "windows" || host.via === "wsl") return "";
+  // Ook op Linux/macOS: zodra er geen agent in de pane draait valt de tab terug
+  // op herdr's sessie-TUI, en dan is daar dezelfde dubbele chrome te verbergen.
+  if (host.mux !== "herdr") return "";
   try {
     return await invoke("tune_herdr", { host });
   } catch (e) {
