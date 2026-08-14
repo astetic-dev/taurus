@@ -20,7 +20,17 @@ const I18N = {
     grp_screen: "Scherm", set_font: "Lettergrootte", set_scroll: "Scrollback (regels)", set_cursor: "Cursor knippert",
     grp_html: "HTML-preview", html_split: "Naast de terminal (split)", html_full: "Volledig (verberg terminal)",
     set_fullpaths: "Vraag Claude volledige paden te tonen (klikbaar)",
-    launch_mode: "Modus", mode_default: "Standaard", mode_plan: "Plan-modus", mode_auto: "Auto (accepteert acties)",
+    launch_mode: "Modus",
+    // Labels zeggen wat de modus DOET, niet hoe hij heet. De teksten volgen wat de
+    // CLI er zelf over zegt (#130).
+    mode_inherit: "Zoals in je eigen instellingen",
+    mode_manual: "Vraagt het per stap",
+    mode_accept_edits: "Bewerkt bestanden zelf, vraagt voor de rest",
+    mode_plan: "Alleen plannen, voert niets uit",
+    mode_auto: "Model beoordeelt elk verzoek",
+    mode_dont_ask: "Vraagt nooit; wat niet vooraf mag, gaat niet door",
+    mode_bypass: "Geen enkele controle (eenmalig te aanvaarden, beleid kan het blokkeren)",
+    mode_default: "Standaard",
     mode_sandbox: "Sandbox (beperkte rechten)",
     launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
     launch_model: "Model", model_ph: "standaard",
@@ -38,6 +48,44 @@ const I18N = {
     host_key: "SSH-key (leeg = ssh kiest zelf)", host_default_project: "Standaard werkmap op de host",
     host_add_test: "Toevoegen & testen", host_testing: "Verbinden…", host_retest: "Opnieuw testen",
     host_del: "Verwijderen", close: "Sluiten",
+    machine_new: "Nieuwe agent…",
+    machine_new_hint: "Open het startformulier met de werkmap van deze machine ingevuld.",
+    machine_connect: "Verbinden",
+    machine_no_default: "{machine} heeft geen standaard werkmap. Vul die in bij de machine — een sessie elders moet weten waar hij begint.",
+    route_preferred: "voorkeur",
+    machine_agents: "⇱ agents",
+    machine_agents_hint: "Toon welke agents op deze machine draaien.",
+    agents_none: "Geen agent aan het werk — niets om mee te verbinden. Start er een met ＋ Nieuwe agent.",
+    agents_leftovers: "{n} lege sessie(s) die Taurus liet staan",
+    agents_clean: "Opruimen",
+    agent_local: "in Taurus daar",
+    agent_local_hint: "Deze agent draait in de Taurus op die machine. Zichtbaar, maar er is nog geen kanaal om hem hiervandaan over te nemen.",
+    session_attach: "Aanhaken",
+    session_stop_hint: "Deze sessie beëindigen op de andere machine",
+    session_stop_sure: "zeker weten?",
+    persist_ask: "Vragen welke sessies je opent",
+    persist_silent: "Stil hervatten wat openstond",
+    persist_clean: "Schoon beginnen",
+    restore_title: "Vorige sessies openen?",
+    restore_lead: "Aangevinkt is wat openstond toen Taurus sloot. Daaronder staat wat er eerder is geweest — die blijft bewaard, ook als je hem nu niet opent.",
+    restore_none: "Niets openen", restore_go: "Openen",
+    resume_no_host: "machine bestaat niet meer",
+    resume_no_transcript: "geen transcript gevonden",
+    resume_old: "{days} dagen oud",
+    ago_now: "zojuist", ago_min: "{n} min geleden", ago_hour: "{n} uur geleden", ago_day: "{n} dagen geleden",
+    hosts_known: "Bekende machines",
+    found_title: "Iemand vraagt hulp",
+    help_from: "{user} op {machine} vraagt hulp bij",
+    help_join: "Meedoen",
+    help_asked: "Je vraag om hulp bij {title} staat op het netwerk.",
+    help_asking: "Je vraagt hulp bij {title} — zichtbaar op het vertrouwde netwerk.",
+    help_withdraw: "Intrekken",
+    ctx_help: "✋ Vraag om hulp bij deze agent",
+    found_firewall: "Taurus heeft nog geen eigen firewall-uitzondering. Zonder die regels ziet niemand je, en kan niemand aankloppen.",
+    found_firewall_fix: "Firewall-regels aanmaken (vraagt om beheerdersrechten)",
+    found_firewall_blocked: "Windows blokkeert taurus.exe met {n} eigen regel(s) - waarschijnlijk van een weggeklikte Defender-vraag. Zo'n blokkade wint van elke uitzondering, dus die moet eerst weg.",
+    found_firewall_unblock: "Blokkade weghalen en regels aanmaken (vraagt om beheerdersrechten)",
+    found_firewall_busy: "Bezig - dit duurt een paar seconden…",
     host_need_fields: "Naam, hostnaam en gebruikersnaam zijn verplicht.",
     host_none: "Nog geen machines. Voeg er een toe om een agent elders te draaien.",
     host_ok: "Verbinding gelukt", host_reachable: "bereikbaar", host_unreachable: "onbereikbaar",
@@ -51,14 +99,16 @@ const I18N = {
     host_mux_missing: "Deze machine heeft geen {mux}. Kies Automatisch, of installeer het daar en test opnieuw.",
     host_herdr_tuned: "✓ herdr's eigen sidebar en tabbalk uitgezet op deze machine — die zijn dubbelop in een Taurus-tab. Geldt vanaf de volgende sessie.",
     host_herdr_tune_failed: "ℹ herdr's sidebar kon niet uitgezet worden ({err}). De tab werkt gewoon, maar toont herdr's eigen menu ernaast.",
-    attach_open: "Verbinden met een draaiende sessie…",
-    attach_title: "Verbinden met een draaiende sessie",
-    attach_host: "Machine", attach_refresh: "Opnieuw ophalen", attach_connect: "Verbinden",
+    attach_open: "Openen",
+    attach_menu: "Verder werken…",
+    attach_title: "Verder werken",
+    attach_lead: "Alleen jouw eigen computer en de machines die je zelf hebt ingericht.",
+    attach_local: "Op deze computer", attach_mine: "Op jouw machines",
+    attach_no_local: "Geen eerdere sessies op deze computer.",
+    agents_none_short: "geen agent",
+    attach_refresh: "↻ Opnieuw ophalen",
     attach_loading: "Sessies ophalen…",
-    attach_empty: "Geen sessies op deze machine.",
     attach_no_hosts: "Nog geen machines. Voeg er een toe met 🖥.",
-    attach_pick: "Kies eerst een sessie.",
-    attach_noagent: "geen agent",
     attach_not_restartable: "Aangehaakte sessie: Taurus heeft dit commando niet gebouwd en kan het niet herstarten of verplaatsen.",
     dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
     dropper_sending: "Bestand overzetten naar de host…",
@@ -108,7 +158,7 @@ const I18N = {
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
-    grp_sessions: "Sessies", set_persist: "Sessies onthouden en bij opstarten hervatten",
+    grp_sessions: "Sessies", set_persist: "Bij opstarten",
     tab_general: "Algemeen", tab_theme: "Thema", tab_html: "HTML-preview", tab_terminal: "Terminal", tab_voice: "Spraak",
     help_default: "Beweeg over een instelling voor uitleg.",
     help_lang: "Taal van de interface: Nederlands of Engels. Wijziging is zichtbaar na Opslaan.",
@@ -184,6 +234,8 @@ const I18N = {
     consent_fp: "Vingerafdruk",
     consent_warn: "Toestaan betekent dat deze computer als jouw account mag werken, met jouw rechten en credentials.",
     consent_remember: "Niet meer vragen voor deze computer",
+    consent_full: "Vol beheer: de agent zonder rem",
+    consent_full_warn: "Met vol beheer draait de agent op jouw account in zijn eigen modus, zonder dat er iemand meekijkt. Zonder het vinkje start hij in de map waar hij begint en vraagt hij het per stap. Dat is het permissiemodel van de agent, geen grens van het besturingssysteem.",
     consent_block: "Blokkeer", consent_deny: "Weiger", consent_join: "Meekijken", consent_allow: "Toestaan",
     consent_timer: "Weigert zichzelf over {secs} s",
     grp_inbound: "Draait nu op deze computer",
@@ -208,7 +260,15 @@ const I18N = {
     grp_screen: "Screen", set_font: "Font size", set_scroll: "Scrollback (lines)", set_cursor: "Cursor blinks",
     grp_html: "HTML preview", html_split: "Beside the terminal (split)", html_full: "Full (hide terminal)",
     set_fullpaths: "Ask Claude to print full paths (clickable)",
-    launch_mode: "Mode", mode_default: "Default", mode_plan: "Plan mode", mode_auto: "Auto (accepts actions)",
+    launch_mode: "Mode",
+    mode_inherit: "Whatever your own settings say",
+    mode_manual: "Asks before each step",
+    mode_accept_edits: "Edits files itself, asks for the rest",
+    mode_plan: "Plans only, executes nothing",
+    mode_auto: "A model judges every request",
+    mode_dont_ask: "Never asks; anything not pre-approved does not happen",
+    mode_bypass: "No checks at all (accept once; policy can block it)",
+    mode_default: "Default",
     mode_sandbox: "Sandbox (restricted)",
     launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
     launch_model: "Model", model_ph: "default",
@@ -226,6 +286,44 @@ const I18N = {
     host_key: "SSH key (empty = let ssh decide)", host_default_project: "Default working directory on the host",
     host_add_test: "Add & test", host_testing: "Connecting…", host_retest: "Test again",
     host_del: "Remove", close: "Close",
+    machine_new: "New agent…",
+    machine_new_hint: "Opens the launch form with this machine's working directory filled in.",
+    machine_connect: "Connect",
+    machine_no_default: "{machine} has no default working directory. Set one on the machine — a session elsewhere has to know where it starts.",
+    route_preferred: "preferred",
+    machine_agents: "⇱ agents",
+    machine_agents_hint: "Show which agents are running on this machine.",
+    agents_none: "No agent at work — nothing to connect to. Start one with ＋ New agent.",
+    agents_leftovers: "{n} empty session(s) Taurus left behind",
+    agents_clean: "Clean up",
+    agent_local: "in Taurus there",
+    agent_local_hint: "This agent runs in the Taurus on that machine. Visible, but there is no channel yet to take it over from here.",
+    session_attach: "Attach",
+    session_stop_hint: "End this session on the other machine",
+    session_stop_sure: "are you sure?",
+    persist_ask: "Ask which sessions to open",
+    persist_silent: "Silently resume what was open",
+    persist_clean: "Start clean",
+    restore_title: "Reopen previous sessions?",
+    restore_lead: "Ticked is what was open when Taurus closed. Below that is what came before — it stays in the history whether you open it now or not.",
+    restore_none: "Open nothing", restore_go: "Open",
+    resume_no_host: "machine no longer exists",
+    resume_no_transcript: "no transcript found",
+    resume_old: "{days} days old",
+    ago_now: "just now", ago_min: "{n} min ago", ago_hour: "{n} h ago", ago_day: "{n} days ago",
+    hosts_known: "Known machines",
+    found_title: "Someone is asking for help",
+    help_from: "{user} on {machine} needs help with",
+    help_join: "Join",
+    help_asked: "Your request for help with {title} is on the network.",
+    help_asking: "You are asking for help with {title} — visible on the trusted network.",
+    help_withdraw: "Withdraw",
+    ctx_help: "✋ Ask for help with this agent",
+    found_firewall: "Taurus has no firewall exception of its own yet. Without those rules nobody sees you, and nobody can knock.",
+    found_firewall_fix: "Create firewall rules (asks for administrator rights)",
+    found_firewall_blocked: "Windows blocks taurus.exe with {n} rule(s) of its own - most likely from a dismissed Defender prompt. A block beats any exception, so that has to go first.",
+    found_firewall_unblock: "Remove the block and create the rules (asks for administrator rights)",
+    found_firewall_busy: "Working - this takes a few seconds…",
     host_need_fields: "Name, hostname and username are required.",
     host_none: "No machines yet. Add one to run an agent elsewhere.",
     host_ok: "Connection succeeded", host_reachable: "reachable", host_unreachable: "unreachable",
@@ -239,14 +337,16 @@ const I18N = {
     host_mux_missing: "This machine has no {mux}. Pick Automatic, or install it there and test again.",
     host_herdr_tuned: "✓ Turned off herdr's own sidebar and tab bar on this machine — a Taurus tab already has both. Applies from the next session.",
     host_herdr_tune_failed: "ℹ Could not turn off herdr's sidebar ({err}). The tab still works; it just shows herdr's own menu beside the agent.",
-    attach_open: "Connect to a running session…",
-    attach_title: "Connect to a running session",
-    attach_host: "Machine", attach_refresh: "Refresh", attach_connect: "Connect",
+    attach_open: "Open",
+    attach_menu: "Continue working…",
+    attach_title: "Continue working",
+    attach_lead: "Only your own computer and the machines you configured yourself.",
+    attach_local: "On this computer", attach_mine: "On your machines",
+    attach_no_local: "No earlier sessions on this computer.",
+    agents_none_short: "no agent",
+    attach_refresh: "↻ Refresh",
     attach_loading: "Fetching sessions…",
-    attach_empty: "No sessions on this machine.",
     attach_no_hosts: "No machines yet. Add one with 🖥.",
-    attach_pick: "Pick a session first.",
-    attach_noagent: "no agent",
     attach_not_restartable: "Attached session: Taurus did not build this command and cannot restart or move it.",
     dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
     dropper_sending: "Copying file to the host…",
@@ -296,7 +396,7 @@ const I18N = {
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
-    grp_sessions: "Sessions", set_persist: "Remember sessions and resume on startup",
+    grp_sessions: "Sessions", set_persist: "On startup",
     tab_general: "General", tab_theme: "Theme", tab_html: "HTML preview", tab_terminal: "Terminal", tab_voice: "Voice",
     help_default: "Hover a setting for an explanation.",
     help_lang: "Interface language: Dutch or English. Applies right after you Save.",
@@ -372,6 +472,8 @@ const I18N = {
     consent_fp: "Fingerprint",
     consent_warn: "Allowing means this computer may work as your account, with your rights and credentials.",
     consent_remember: "Don't ask again for this computer",
+    consent_full: "Full control: the agent with no brake",
+    consent_full_warn: "Full control runs the agent on your account in its own mode, with nobody watching. Without the tick it starts in the folder it begins in and asks before each step. That is the agent's permission model, not a boundary of the operating system.",
     consent_block: "Block", consent_deny: "Deny", consent_join: "Join", consent_allow: "Allow",
     consent_timer: "Denies itself in {secs} s",
     grp_inbound: "Running on this computer right now",
@@ -650,15 +752,32 @@ function updateModelDatalist(dl, agent) {
   refreshLiveModels(agent).then((fresh) => { if (fresh) fillModelDatalist(dl, agent); });
 }
 
-// Modus-opties verschillen per agent. claude: --permission-mode default/plan/auto.
+// Modus-opties verschillen per agent.
+//
+// claude 2.1.232 accepteert er ZES: acceptEdits, auto, bypassPermissions, manual,
+// dontAsk, plan. Taurus bood er drie aan, met de oude woordenschat -- "default"
+// heet in de CLI inmiddels "manual" (#130). GEMETEN: `default` wordt nog wél
+// geaccepteerd, maar als niet-gedocumenteerde alias (`Default` en een onzinwaarde
+// worden geweigerd met de lijst van zes). De labels hieronder komen letterlijk uit
+// wat de CLI zelf over die modi zegt, niet uit een aanname.
+//
+// "default" blijft bestaan als opgeslagen waarde en betekent: GEEN vlag meesturen,
+// dus de eigen instelling van de agent geldt. Dat is geen legacy-rest maar een
+// echte keuze -- wie in zijn settings.json `defaultMode: acceptEdits` heeft staan,
+// wil niet dat Taurus daar stilletjes overheen gaat.
+//
 // agy: geen --permission-mode, wel --sandbox (beperkt) en
 // --dangerously-skip-permissions (auto). Waarden komen overeen met de mapping in
 // build_command() in de Rust-backend.
 const MODE_OPTIONS = {
   claude: [
-    { value: "default", key: "mode_default" },
+    { value: "default", key: "mode_inherit" },
+    { value: "manual", key: "mode_manual" },
+    { value: "acceptEdits", key: "mode_accept_edits" },
     { value: "plan", key: "mode_plan" },
     { value: "auto", key: "mode_auto" },
+    { value: "dontAsk", key: "mode_dont_ask" },
+    { value: "bypassPermissions", key: "mode_bypass" },
   ],
   agy: [
     { value: "default", key: "mode_default" },
@@ -710,6 +829,9 @@ const DEFAULT_SETTINGS = {
   // er niets; daarboven vouwen sessies uit dezelfde bron samen.
   tabGroups: true, tabGroupAt: 10, tabRecap: true,
   fullPaths: true,
+  // Drie standen sinds #129: ask (default) / silent / clean. Het oude
+  // persistSessions-vinkje wordt nog gelezen zodat een bestaande config klopt.
+  persistMode: "ask",
   persistSessions: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
@@ -767,7 +889,8 @@ function locText(p) {
 // een machine net zo goed als in een map.
 function agentLocTag(p) {
   const h = p.host_id ? hostById(p.host_id) : null;
-  if (h) return { text: `(${h.nickname || h.hostname})`, cls: "remote", title: `${h.user}@${h.hostname}` };
+  // De MACHINE op de kaart, niet de route: hoe Taurus daar binnenkomt is plumbing.
+  if (h) return { text: `(${machineLabel(p.host_id)})`, cls: "remote", title: `${h.user}@${h.hostname}` };
   return { text: driveTag(p.path), cls: locClass(p.path), title: locText(p.path) };
 }
 function escapeHtml(s) {
@@ -964,11 +1087,51 @@ async function loadProjects() { projects = await invoke("get_projects"); renderP
 // De machines waarop een tab een agent kan draaien. Leeg = alleen lokaal, en dan
 // gedraagt de app zich exact zoals voorheen.
 let hosts = [];
+// Eén regel per FYSIEKE machine, met de routes eronder (#124). De backend groepeert,
+// want daar hoort ook de regel welke route voorkeur heeft.
+let machines = [];
 async function loadHosts() {
   try { hosts = await invoke("get_hosts"); } catch (_) { hosts = []; }
+  await refreshMachines();
   fillHostSelect();
 }
+async function refreshMachines() {
+  try { machines = await invoke("machines"); } catch (_) { machines = []; }
+}
 function hostById(id) { return hosts.find((h) => h.id === id) || null; }
+
+// De poort waarop Taurus zelf luistert (#121). Een route daarheen vraagt geen
+// sleuteluitwisseling en geen sshd aan de andere kant.
+const TAURUS_PORT = 8287;
+
+// Bij welke machine hoort deze route? Een agentkaart bewaart een route-id, maar
+// overal waar een naam wordt GETOOND hoort de machinenaam te staan: welke route
+// het is, is plumbing, en "(Taurus-host)" lekte zo door naar tabs en kaarten.
+function machineOf(hostId) {
+  return machines.find((m) => m.routes.some((r) => r.id === hostId)) || null;
+}
+function machineLabel(hostId) {
+  const m = machineOf(hostId);
+  if (m) return m.label;
+  const h = hostById(hostId);
+  return h ? (h.nickname || h.hostname) : "";
+}
+// Hoe je de machine bereikt, kort genoeg voor op één regel. De poort maakt het
+// onderscheid; de bijnaam hoeft het niet meer te dragen.
+function routeLabel(h) {
+  const soort = h.port === TAURUS_PORT ? "Taurus" : h.via === "wsl" ? "WSL" : "sshd";
+  return `${soort} :${h.port || 22}`;
+}
+// Keuzelijsten tonen machines, geen routes: drie regels "ursu" is geen keuze maar
+// een raadsel. De waarde blijft een route-id, want dat is wat een kaart bewaart --
+// de voorkeursroute, tenzij de kaart al een andere route van diezelfde machine
+// gebruikt. Die dan omschrijven levert niets op en zou een werkende kaart raken.
+function machineOptions(currentHostId) {
+  return machines.map((m) => {
+    const eigen = m.routes.find((r) => r.id === currentHostId);
+    return { id: eigen ? eigen.id : m.preferred, label: m.label };
+  });
+}
 // De hostlijst is veranderd: de agentkaarten tonen hun machine, en een open
 // editor moet de nieuwe keuzes tonen.
 function fillHostSelect() {
@@ -985,6 +1148,14 @@ function openHostModal() {
   renderHostRows();
   els.hostModal.classList.remove("hidden");
   refreshHostReachability();
+  startDiscovery();
+}
+
+// Eén plek om te sluiten, want zoeken hoort te stoppen zodra het scherm dicht is:
+// discovery is passief en dat is precies wat dat betekent (#125).
+function closeHostModal() {
+  els.hostModal.classList.add("hidden");
+  stopDiscovery();
 }
 // De dots vullen zich ná de eerste render: check_hosts doet alle hosts naast
 // elkaar, dus de modal is meteen zichtbaar i.p.v. te wachten op de traagste.
@@ -1002,36 +1173,432 @@ async function refreshHostReachability() {
   }
   renderHostRows();
 }
+// Het bolletje van de machine vat zijn routes samen: bereikbaar zodra ÉÉN route
+// het doet, want dan is de machine bereikbaar -- dat is wat de regel beweert.
+function machineDotClass(m) {
+  const sts = m.routes.map((r) => hostStatus[r.id]);
+  if (sts.some((s) => s && !s.testing && s.reachable)) return "up";
+  if (sts.length && sts.every((s) => s && !s.testing)) return "down";
+  return "pending";
+}
+
 function renderHostRows() {
-  if (!hosts.length) {
+  if (!machines.length) {
     els.hostRows.innerHTML = `<div class="host-empty">${escapeHtml(t("host_none"))}</div>`;
     return;
   }
   els.hostRows.innerHTML = "";
-  hosts.forEach((h, i) => {
-    const st = hostStatus[h.id];
-    const cls = !st ? "pending" : st.testing ? "pending" : st.reachable ? "up" : "down";
-    const label = !st ? "…" : st.testing ? t("host_testing") : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
-    const row = document.createElement("div");
-    row.className = "host-row";
-    row.innerHTML = `
-      <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
-      <div class="host-main">
-        <div class="host-name">${escapeHtml(h.nickname || h.hostname)}</div>
-        <div class="host-sub">${escapeHtml((h.user ? h.user + "@" : "") + h.hostname + (h.port && h.port !== 22 ? ":" + h.port : ""))}
-          · ${escapeHtml(h.os || "?")} · ${escapeHtml(h.mux || "none")}</div>
+  for (const m of machines) {
+    const pref = hostById(m.preferred) || m.routes[0];
+    const box = document.createElement("div");
+    box.className = "machine";
+    box.innerHTML = `
+      <div class="machine-head">
+        <span class="host-dot ${machineDotClass(m)}"></span>
+        <div class="host-main">
+          <div class="host-name">${escapeHtml(m.label)}</div>
+          <div class="host-sub">${escapeHtml((pref.user ? pref.user + "@" : "") + pref.hostname)} · ${escapeHtml(pref.os || "?")}</div>
+        </div>
+        <button class="machine-sess-toggle" title="${escapeHtml(t("machine_agents_hint"))}">${escapeHtml(t("machine_agents"))}</button>
+        <button class="machine-connect" title="${escapeHtml(t("machine_new_hint"))}">${escapeHtml(t("machine_new"))}</button>
       </div>
-      <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
-      <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
-    row.querySelector(".host-test").addEventListener("click", () => testExistingHost(i));
-    row.querySelector(".host-del").addEventListener("click", async () => {
-      hosts.splice(i, 1);
-      await invoke("save_hosts", { hosts });
-      fillHostSelect();
-      renderHostRows();
+      <div class="machine-routes"></div>`;
+    const routes = box.querySelector(".machine-routes");
+    for (const r of m.routes) {
+      const st = hostStatus[r.id];
+      const cls = !st || st.testing ? "pending" : st.reachable ? "up" : "down";
+      const label = !st ? "…" : st.testing ? t("host_testing") : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
+      const row = document.createElement("div");
+      row.className = "route-row";
+      // De voorkeur alleen benoemen als er iets te kiezen viel: bij één route is
+      // "voorkeur" een woord zonder alternatief.
+      row.innerHTML = `
+        <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
+        <span class="route-name">${escapeHtml(routeLabel(r))}</span>
+        ${r.id === m.preferred && m.routes.length > 1 ? `<span class="route-pref">${escapeHtml(t("route_preferred"))}</span>` : ""}
+        <span class="route-mux">${escapeHtml([r.os, r.mux || "none"].filter(Boolean).join(" · "))}</span>
+        <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
+        <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
+      row.querySelector(".host-test").addEventListener("click", () => testExistingHost(hosts.findIndex((h) => h.id === r.id)));
+      row.querySelector(".host-del").addEventListener("click", async () => {
+        hosts = hosts.filter((h) => h.id !== r.id);
+        await invoke("save_hosts", { hosts });
+        await refreshMachines();
+        fillHostSelect();
+        renderHostRows();
+      });
+      routes.appendChild(row);
+    }
+    box.querySelector(".machine-connect").addEventListener("click", () => newAgentOnMachine(m));
+    box.querySelector(".machine-sess-toggle").addEventListener("click", () => toggleMachineAgents(m));
+    renderMachineAgents(box, m);
+    els.hostRows.appendChild(box);
+  }
+}
+
+/* ---- de hand opsteken (#125) ---- */
+// Vragen wijst naar ÉÉN agent, en zolang de hand omhoog is ben je zichtbaar op het
+// vertrouwde netwerk -- zoals bluetooth in koppelmodus. Laat je hem zakken, dan is
+// er niets meer te zien.
+//
+// Het werk blijft van jou: wie komt helpen leest mee in DEZE terminal en typt erin
+// mee. Hij neemt niets over en niets verhuist.
+let asking = null;
+
+async function askForHelp(s) {
+  try {
+    asking = await invoke("help_ask", { session: s.id, title: s.title || "agent", cwd: s.path || "" });
+  } catch (e) {
+    toast(String(e), "err");
+    return;
+  }
+  toast(t("help_asked").replace("{title}", s.title || "agent"));
+  renderAskingBanner();
+}
+
+async function withdrawHelp() {
+  await invoke("help_withdraw").catch(() => {});
+  asking = null;
+  renderAskingBanner();
+}
+
+// Eén rustige balk onder de tabbalk. Geen popup: je hebt het zelf aangezet, dus het
+// hoeft je niet te onderbreken -- het moet alleen niet te vergeten zijn.
+function renderAskingBanner() {
+  let el = document.querySelector("#asking-banner");
+  if (!asking) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "asking-banner";
+    el.className = "asking-banner";
+    els.tabbar.parentElement.insertAdjacentElement("afterend", el);
+  }
+  el.innerHTML = `
+    <span>✋</span>
+    <span class="grow">${escapeHtml(t("help_asking").replace("{title}", asking.title))}</span>
+    <button class="btn-ghost">${escapeHtml(t("help_withdraw"))}</button>`;
+  el.querySelector("button").onclick = withdrawHelp;
+}
+
+/* ---- machines vinden op het vertrouwde netwerk (#125) ---- */
+// Zoeken loopt ALLEEN zolang dit scherm openstaat. Geen melding, geen badge, geen
+// popup: een aankondiging is omgevingsgeluid. Alleen een verzoek om toegang mag
+// onderbreken, anders verdrinkt de popup die wél een antwoord nodig heeft.
+let discoTimer = null;
+let found = [];
+let discoNote = "";
+let firewall = null;
+
+async function startDiscovery() {
+  if (discoTimer) return;
+  found = []; discoNote = "";
+  try {
+    await invoke("discovery_start");
+  } catch (e) {
+    discoNote = String(e);
+  }
+  await pollDiscovery();
+  discoTimer = setInterval(pollDiscovery, 1500);
+  // Eén keer per opening: kunnen we überhaupt gevonden worden? Dit duurt seconden
+  // (het loopt door alle firewallregels heen), dus het mag de lijst niet ophouden.
+  invoke("firewall_status", { port: null })
+    .then((s) => { firewall = s; renderFound(); })
+    .catch(() => {});
+}
+
+function stopDiscovery() {
+  if (discoTimer) { clearInterval(discoTimer); discoTimer = null; }
+  invoke("discovery_stop").catch(() => {});
+}
+
+async function pollDiscovery() {
+  let view;
+  try {
+    view = await invoke("discovered_machines");
+  } catch (e) {
+    discoNote = String(e);
+    renderFound();
+    return;
+  }
+  // Alleen wat we nog niet kennen: een bekende machine staat hierboven al, met
+  // zijn routes en zijn knoppen. Twee keer dezelfde naam is geen vondst.
+  found = view.machines.filter((m) => !m.known);
+  discoNote = view.problem || "";
+  // Niet meer "je bent niet vindbaar": in de vraagmodus kondig je alleen aan als je
+  // zelf iets vraagt, dus zwijgen is de normale toestand. Wat wél de moeite waard
+  // is om te melden staat hieronder (firewall), en anders is een lege lijst een
+  // waar antwoord: niemand heeft hulp nodig.
+  renderFound();
+}
+
+function renderFound() {
+  const wrap = document.querySelector("#found-wrap");
+  const rows = document.querySelector("#found-rows");
+  const note = document.querySelector("#found-note");
+  if (!wrap || !rows || !note) return;
+  wrap.classList.toggle("hidden", !found.length);
+  rows.innerHTML = "";
+  // Een verzoek, geen machine. Er staat wie het vraagt, waarbij, en waar dat werk
+  // staat -- zonder die agent zou je uitkomen "op een computer", en dan kan het
+  // antwoord een kale prompt zijn.
+  for (const f of found) {
+    const row = document.createElement("div");
+    row.className = "askband";
+    row.innerHTML = `
+      <span class="askband-hand">✋</span>
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(t("help_from").replace("{user}", f.user || "?").replace("{machine}", f.name))} <b>${escapeHtml(f.agentTitle || "?")}</b></div>
+        <div class="host-sub">${escapeHtml([f.agentCwd, f.fingerprint].filter(Boolean).join(" · "))}</div>
+      </div>
+      <button class="machine-connect">${escapeHtml(t("help_join"))}</button>`;
+    row.querySelector("button").addEventListener("click", () => joinHelpRequest(f));
+    rows.appendChild(row);
+  }
+  // Eén eerlijke regel wanneer er niets te zien is, in plaats van een lege lijst
+  // die als "er is niemand" leest. Een firewall die ons tegenhoudt is iets anders
+  // dan een netwerk waar niemand hulp nodig heeft.
+  const lines = [];
+  if (discoNote) lines.push(discoNote);
+  const fwBlocked = !!(firewall && firewall.checked && firewall.blocked > 0);
+  const fwMissing = !!(firewall && firewall.checked && !(firewall.tcp && firewall.udp));
+  if (fwBlocked) lines.push(t("found_firewall_blocked").replace("{n}", firewall.blocked));
+  if (fwMissing) lines.push(t("found_firewall"));
+  note.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
+  if (fwBlocked || fwMissing) {
+    const b = document.createElement("button");
+    b.className = "btn-ghost add";
+    b.textContent = t(fwBlocked ? "found_firewall_unblock" : "found_firewall_fix");
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      b.textContent = t("found_firewall_busy");
+      try {
+        await invoke("firewall_allow", { port: null });
+      } catch (e) {
+        els.hostStatusMsg.textContent = "✗ " + e;
+        els.hostStatusMsg.className = "status-msg err";
+      }
+      try { firewall = await invoke("firewall_status", { port: null }); } catch (_) {}
+      b.disabled = false;
+      renderFound();
     });
-    els.hostRows.appendChild(row);
+    note.appendChild(b);
+  }
+  note.classList.toggle("hidden", !lines.length);
+}
+
+// Meedoen met een hulpvraag. Geen kaart, geen machine erbij in hosts.json: iemand
+// helpen maakt zijn computer nog niet tot een van jouw machines. Je landt in ZIJN
+// terminal en typt daarin mee.
+async function joinHelpRequest(f) {
+  const id = "s" + (++seq);
+  const session = spawnTerminal({
+    id, uuid: "", path: f.agentCwd || "", title: f.agentTitle || f.name, accent: "#7c9cff",
+    mode: "", command: "", agent: "", model: "", hostId: "", projectId: "",
   });
+  // Taurus heeft dit commando niet gebouwd en kan het niet hervatten of verplaatsen.
+  session.attached = true;
+  try {
+    await invoke("answer_help_request", {
+      id, gen: session.gen, found: f,
+      cols: session.term.cols, rows: session.term.rows,
+    });
+    closeHostModal();
+    showView(id);
+  } catch (e) {
+    sessions.delete(id); session.term.dispose(); session.el.remove();
+    renderTabs();
+    els.hostStatusMsg.textContent = "✗ " + e;
+    els.hostStatusMsg.className = "status-msg err";
+  }
+}
+
+/* ---- welke AGENTS er op een machine draaien (#128) ---- */
+// DE REGEL: Taurus toont agents. ssh, tmux en herdr maken de weg vrij zodat er een
+// agent kan starten; ze zijn leidingwerk en nooit iets wat je kiest. Geen agent
+// betekent dat er niets is om mee te verbinden -- geen keuze met een
+// waarschuwingslabel, maar geen keuze. Lege sessies bestaan wel en staan daarom
+// onderaan als opruimwerk.
+//
+// Pas op verzoek ophalen: dit zijn twee ssh-rondes per machine. Bij het openen alle
+// machines bevragen zou het traagste antwoord de hele lijst laten wachten.
+const machineAgents = {}; // machine-key -> { loading, view, error }
+
+async function toggleMachineAgents(m) {
+  if (machineAgents[m.key] && !machineAgents[m.key].loading) {
+    delete machineAgents[m.key];
+    renderHostRows();
+    return;
+  }
+  machineAgents[m.key] = { loading: true, view: null, error: "" };
+  renderHostRows();
+  const host = hostById(m.preferred) || m.routes[0];
+  try {
+    const view = await invoke("remote_agents", { hostId: host.id });
+    machineAgents[m.key] = { loading: false, view, error: "" };
+  } catch (e) {
+    machineAgents[m.key] = { loading: false, view: null, error: String(e) };
+  }
+  renderHostRows();
+}
+
+function renderMachineAgents(box, m) {
+  const st = machineAgents[m.key];
+  if (!st) return;
+  const wrap = document.createElement("div");
+  wrap.className = "machine-sess";
+  const line = (txt, cls) => {
+    const d = document.createElement("div");
+    d.className = "route-row" + (cls ? " " + cls : "");
+    d.textContent = txt;
+    return d;
+  };
+  if (st.loading) { wrap.appendChild(line(t("attach_loading"))); box.appendChild(wrap); return; }
+  if (st.error)   { wrap.appendChild(line("✗ " + st.error, "err")); box.appendChild(wrap); return; }
+
+  const v = st.view || { agents: [], empty: [], taurusSeen: false };
+  if (!v.agents.length) {
+    // Eerlijk en kort: er valt hier niets te verbinden. Dat is een antwoord, geen
+    // aanleiding om dan maar leidingwerk aan te bieden.
+    wrap.appendChild(line(t("agents_none")));
+  }
+  for (const a of v.agents) {
+    const row = document.createElement("div");
+    row.className = "route-row";
+    const meta = [a.agent, a.cwd].filter(Boolean).join(" · ");
+    row.innerHTML = `
+      <span class="host-dot ${a.status ? "up" : "pending"}"></span>
+      <span class="route-name">${escapeHtml(a.title || a.session)}</span>
+      ${a.status ? `<span class="route-pref">${escapeHtml(a.status)}</span>` : ""}
+      <span class="route-mux">${escapeHtml(meta)}</span>
+      ${a.attachable
+        ? `<button class="host-test sess-open">${escapeHtml(t("session_attach"))}</button>
+           <button class="host-del sess-stop" title="${escapeHtml(t("session_stop_hint"))}">✕</button>`
+        : `<span class="sess-bare" title="${escapeHtml(t("agent_local_hint"))}">${escapeHtml(t("agent_local"))}</span>`}`;
+    if (a.attachable) {
+      row.querySelector(".sess-open").addEventListener("click", () => attachFromMachine(m, a));
+      wireStopButton(row.querySelector(".sess-stop"), m, a.session);
+    }
+    wrap.appendChild(row);
+  }
+  // Opruimwerk onderaan, buiten de keuzes. Ze bestaan echt, dus verbergen zou
+  // verwarrender zijn dan ze benoemen -- maar een klik erop opent niets.
+  if (v.empty.length) {
+    const row = document.createElement("div");
+    row.className = "route-row";
+    row.innerHTML = `
+      <span class="host-dot pending"></span>
+      <span class="route-mux">${escapeHtml(t("agents_leftovers").replace("{n}", v.empty.length))}</span>
+      <button class="host-del sess-clean">${escapeHtml(t("agents_clean"))}</button>`;
+    wireCleanButton(row.querySelector(".sess-clean"), m, v.empty);
+    wrap.appendChild(row);
+  }
+  box.appendChild(wrap);
+}
+
+// Twee klikken: een sessie beëindigen is andermans werk afbreken, en dat mag geen
+// uitschieter zijn. De knop zegt zelf wat de tweede klik doet.
+function armTwice(btn, label, run) {
+  btn.addEventListener("click", async () => {
+    if (btn.dataset.armed !== "1") {
+      btn.dataset.armed = "1";
+      btn.dataset.was = btn.textContent;
+      btn.textContent = t("session_stop_sure");
+      btn.classList.add("armed");
+      setTimeout(() => {
+        if (!btn.isConnected) return;
+        btn.dataset.armed = "";
+        btn.textContent = btn.dataset.was || label;
+        btn.classList.remove("armed");
+      }, 4000);
+      return;
+    }
+    btn.disabled = true;
+    try {
+      await run();
+    } catch (e) {
+      btn.disabled = false;
+      els.hostStatusMsg.textContent = "✗ " + e;
+      els.hostStatusMsg.className = "status-msg err";
+      return;
+    }
+    renderHostRows();
+  });
+}
+
+function wireStopButton(btn, m, session) {
+  armTwice(btn, "✕", async () => {
+    const host = hostById(m.preferred) || m.routes[0];
+    await invoke("stop_remote_session", { hostId: host.id, session });
+    const st = machineAgents[m.key];
+    if (st && st.view) st.view.agents = st.view.agents.filter((x) => x.session !== session);
+  });
+}
+
+function wireCleanButton(btn, m, names) {
+  armTwice(btn, t("agents_clean"), async () => {
+    const host = hostById(m.preferred) || m.routes[0];
+    for (const n of names) {
+      await invoke("stop_remote_session", { hostId: host.id, session: n });
+    }
+    const st = machineAgents[m.key];
+    if (st && st.view) st.view.empty = [];
+  });
+}
+
+// Aanhaken aan een agent die op die machine draait.
+async function attachFromMachine(m, a) {
+  const host = hostById(m.preferred) || m.routes[0];
+  const id = "s" + (++seq);
+  const session = spawnTerminal({
+    id, uuid: "", path: a.cwd || "", title: a.title || a.session, accent: "#7c9cff",
+    mode: "", command: "", agent: "", model: "", hostId: host.id, projectId: "",
+  });
+  session.attached = true;
+  try {
+    await invoke("attach_remote_session", {
+      id, gen: session.gen, hostId: host.id, session: a.session,
+      cols: session.term.cols, rows: session.term.rows,
+    });
+    closeHostModal();
+    recordSession(session);
+    showView(id);
+  } catch (e) {
+    sessions.delete(id); session.term.dispose(); session.el.remove();
+    renderTabs();
+    els.hostStatusMsg.textContent = "✗ " + e;
+    els.hostStatusMsg.className = "status-msg err";
+  }
+}
+
+// "Nieuwe agent…" op een machine: open het gewone startformulier met de map van die
+// machine voorgevuld.
+//
+// Heette eerst "Connect", en dat was geen eerlijke naam. Het startte iets naamloos in
+// een map die je niet gekozen had -- vandaar dat je in C:\Users\arjen terechtkwam
+// terwijl je bij je werk wilde zijn. Nu kies je wat er start, net als lokaal, en zie
+// je vooraf waar het begint.
+async function newAgentOnMachine(m) {
+  const host = hostById(m.preferred) || m.routes[0];
+  if (!host) return;
+  const path = host.default_project || "";
+  if (!path) {
+    els.hostStatusMsg.textContent = t("machine_no_default").replace("{machine}", m.label);
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  const leaf = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || m.label;
+  closeHostModal();
+  await selectProject(
+    {
+      id: "", label: `${leaf} (${m.label})`, path, title: leaf, task: "",
+      accent: "#7c9cff", mode: "default", command: "", agent: "claude", model: "",
+      // De machine hoort bij deze start; het formulier toont de werkmap dan als
+      // "op de host" en de bladerknop verdwijnt -- dat pad bestaat hier niet.
+      host_id: host.id,
+    },
+    null
+  );
+  showView("new");
 }
 
 function openHostForm() {
@@ -1100,6 +1667,7 @@ async function addAndTestHost() {
            : (wantMux || p.mux || "none");
   hosts.push(host);
   await invoke("save_hosts", { hosts });
+  await refreshMachines();
   const tuned = await tuneHerdrChrome(host);
   fillHostSelect();
   renderHostRows();
@@ -1145,6 +1713,7 @@ async function testExistingHost(i) {
     const auto = h.mux_auto !== false;
     hosts[i] = { ...h, os: p.os, mux: auto ? (p.mux || "none") : h.mux };
     await invoke("save_hosts", { hosts });
+    await refreshMachines();
     await tuneHerdrChrome(hosts[i]);
     fillHostSelect();
     els.hostStatusMsg.textContent = `${h.nickname}: ✓ ${t("host_ok")}`;
@@ -1184,101 +1753,109 @@ function showProbeReport(p, tuned) {
 // Zonder dit kun je alleen bij een draaiende sessie komen door toevallig dezelfde
 // agent met dezelfde map te starten, zodat de sessienaam matcht. Sessies van een
 // ander werkstation, of van een kaart die intussen anders heet, waren onzichtbaar.
-let atSessions = [];
-let atPicked = "";
 
+// ⇱ Verder werken: terug naar werk dat al loopt of dat er geweest is. Nadrukkelijk
+// alleen JOUW spullen -- deze computer en de machines die je zelf hebt ingericht.
+// Een collega verschijnt hier nooit; die steekt zijn hand op en dat is #125.
+//
+// Lokaal eerst: dat is negen van de tien keer waar je heen wilt, en het geeft de
+// geschiedenis uit #129 de plek die dat issue vraagt ("op elk moment bereikbaar",
+// niet alleen bij het opstarten).
 function openAttachModal() {
-  atSessions = []; atPicked = "";
   els.atRows.innerHTML = "";
+  document.querySelector("#at-local").innerHTML = "";
   els.atStatus.textContent = ""; els.atStatus.className = "status-msg";
-  els.atHost.innerHTML = hosts
-    .map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.nickname || h.hostname)}</option>`)
-    .join("");
   els.attachModal.classList.remove("hidden");
-  if (!hosts.length) {
-    els.atStatus.textContent = t("attach_no_hosts");
-    els.atStatus.className = "status-msg err";
-    return;
-  }
+  loadLocalHistory();
   loadRemoteSessions();
 }
 
-async function loadRemoteSessions() {
-  const hostId = els.atHost.value;
-  if (!hostId) return;
-  atSessions = []; atPicked = "";
-  els.atRows.innerHTML = "";
-  els.atStatus.textContent = t("attach_loading"); els.atStatus.className = "status-msg";
-  els.atRefresh.disabled = true;
-  try {
-    atSessions = await invoke("remote_sessions", { hostId });
-    els.atStatus.textContent = "";
-  } catch (e) {
-    // Onbereikbaar, of een machine die geen sessies bewaart: de reden hoort hier
-    // te staan, niet als een lege lijst die op "niets draait" lijkt.
-    els.atStatus.textContent = "✗ " + e;
-    els.atStatus.className = "status-msg err";
-  } finally {
-    els.atRefresh.disabled = false;
-  }
-  renderAttachRows();
-}
-
-function renderAttachRows() {
-  if (!atSessions.length) {
-    els.atRows.innerHTML = els.atStatus.textContent
-      ? ""
-      : `<div class="host-empty">${escapeHtml(t("attach_empty"))}</div>`;
+// De lokale helft: wat er in de geschiedenis staat en niet al open is.
+async function loadLocalHistory() {
+  const box = document.querySelector("#at-local");
+  if (!box) return;
+  let hist = [];
+  try { hist = await invoke("session_history"); } catch (_) {}
+  const open = new Set([...sessions.values()].map((s) => s.uuid).filter(Boolean));
+  const rows = hist.filter((h) => h.uuid && !open.has(h.uuid) && !h.hostId);
+  box.innerHTML = "";
+  if (!rows.length) {
+    box.innerHTML = `<div class="host-empty">${escapeHtml(t("attach_no_local"))}</div>`;
     return;
   }
-  els.atRows.innerHTML = "";
-  for (const s of atSessions) {
-    // Een sessie zonder (herkende) agent is nog steeds bruikbaar -- je landt in
-    // de pane en kunt er iets starten. Dus tonen, niet verbergen.
-    const agent = s.agent ? s.agent + (s.agentStatus ? " · " + s.agentStatus : "") : t("attach_noagent");
+  for (const h of rows.slice(0, 12)) {
     const row = document.createElement("div");
-    row.className = "host-row" + (s.name === atPicked ? " picked" : "");
+    row.className = "host-row";
     row.innerHTML = `
-      <span class="host-dot ${s.status === "running" || s.status === "attached" ? "up" : "pending"}"></span>
+      <span class="host-dot pending"></span>
       <div class="host-main">
-        <div class="host-name">${escapeHtml(s.name)}</div>
-        <div class="host-sub">${escapeHtml(agent)}${s.cwd ? " · " + escapeHtml(s.cwd) : ""}</div>
-      </div>`;
-    row.addEventListener("click", () => { atPicked = s.name; renderAttachRows(); });
-    els.atRows.appendChild(row);
+        <div class="host-name">${escapeHtml(h.title || h.path)}</div>
+        <div class="host-sub">${escapeHtml([h.agent || "claude", h.model, h.path].filter(Boolean).join(" · "))}</div>
+      </div>
+      <span class="route-mux">${escapeHtml(agoText(h.lastSeen))}</span>
+      <button class="host-test">${escapeHtml(t("attach_open"))}</button>`;
+    row.querySelector("button").addEventListener("click", async () => {
+      const meta = {
+        uuid: h.uuid, path: h.path, title: h.title, accent: h.accent,
+        mode: h.mode, agent: h.agent, model: h.model,
+        host_id: "", project_id: h.projectId || "",
+      };
+      const why = await resumeBlocker(meta);
+      if (why) { els.atStatus.textContent = "✗ " + why; els.atStatus.className = "status-msg err"; return; }
+      els.attachModal.classList.add("hidden");
+      await restoreSessions([meta]);
+    });
+    box.appendChild(row);
   }
 }
 
-async function connectToRemoteSession() {
-  if (!atPicked) {
-    els.atStatus.textContent = t("attach_pick"); els.atStatus.className = "status-msg err";
+// De remote helft: per eigen machine welke AGENTS daar draaien (#128). Geen agent =
+// niets om mee te verbinden, en dat staat er dan ook zo.
+async function loadRemoteSessions() {
+  els.atRows.innerHTML = "";
+  if (!machines.length) {
+    els.atRows.innerHTML = `<div class="host-empty">${escapeHtml(t("attach_no_hosts"))}</div>`;
     return;
   }
-  const hostId = els.atHost.value;
-  const meta = atSessions.find((x) => x.name === atPicked) || {};
-  // De sessie weet zelf al waar hij draait; de mapnaam leest prettiger op een tab
-  // dan een sessienaam met een hash erachter.
-  const leaf = (meta.cwd || "").split(/[\\/]/).filter(Boolean).pop();
-  const id = "s" + (++seq);
-  const session = spawnTerminal({
-    id, uuid: "", path: meta.cwd || "", title: leaf || atPicked, accent: "#7c9cff",
-    mode: "", command: "", agent: "", model: "", hostId, projectId: "",
-  });
-  // Taurus heeft dit commando niet gebouwd: herstarten/hervatten zou iets anders
-  // doen dan je verwacht, en opslaan-voor-de-volgende-start ook.
-  session.attached = true;
-  try {
-    await invoke("attach_remote_session", {
-      id, gen: session.gen, hostId, session: atPicked,
-      cols: session.term.cols, rows: session.term.rows,
-    });
-    els.attachModal.classList.add("hidden");
-    showView(id);
-  } catch (e) {
-    sessions.delete(id); session.term.dispose(); session.el.remove();
-    renderTabs();
-    els.atStatus.textContent = "✗ " + e; els.atStatus.className = "status-msg err";
+  els.atRefresh.disabled = true;
+  for (const m of machines) {
+    const box = document.createElement("div");
+    box.className = "machine";
+    box.innerHTML = `
+      <div class="machine-head">
+        <span class="host-dot ${machineDotClass(m)}"></span>
+        <div class="host-main"><div class="host-name">${escapeHtml(m.label)}</div></div>
+        <span class="route-mux">${escapeHtml(t("attach_loading"))}</span>
+      </div>`;
+    els.atRows.appendChild(box);
+    const host = hostById(m.preferred) || m.routes[0];
+    let view = null, err = "";
+    try { view = await invoke("remote_agents", { hostId: host.id }); }
+    catch (e) { err = String(e); }
+    const note = box.querySelector(".route-mux");
+    if (err) { note.textContent = "✗ " + err; continue; }
+    const agents = (view && view.agents) || [];
+    note.textContent = agents.length ? "" : t("agents_none_short");
+    for (const a of agents) {
+      const row = document.createElement("div");
+      row.className = "route-row";
+      row.innerHTML = `
+        <span class="host-dot ${a.status ? "up" : "pending"}"></span>
+        <span class="route-name">${escapeHtml(a.title || a.session)}</span>
+        <span class="route-mux">${escapeHtml([a.agent, a.cwd].filter(Boolean).join(" · "))}</span>
+        ${a.attachable
+          ? `<button class="host-test">${escapeHtml(t("session_attach"))}</button>`
+          : `<span class="sess-bare" title="${escapeHtml(t("agent_local_hint"))}">${escapeHtml(t("agent_local"))}</span>`}`;
+      if (a.attachable) {
+        row.querySelector("button").addEventListener("click", () => {
+          els.attachModal.classList.add("hidden");
+          attachFromMachine(m, a);
+        });
+      }
+      box.appendChild(row);
+    }
   }
+  els.atRefresh.disabled = false;
 }
 
 /* ---- agent naar een andere machine verplaatsen (#102) ---- */
@@ -1299,8 +1876,10 @@ async function openMoveModal(project) {
   movePlan = { project, skip: new Set(), survey: null, target: null };
   // Doelen: alles behalve waar hij nu al staat. "Deze computer" hoort erbij als
   // de agent elders draait -- terughalen is net zo goed een richting.
-  const opts = [{ id: "", label: t("host_local") }, ...hosts.map((h) => ({ id: h.id, label: h.nickname || h.hostname }))]
-    .filter((o) => o.id !== (project.host_id || ""));
+  // Doelen zijn machines, niet routes: "ursu" drie keer in de lijst is geen keuze.
+  const hier = machineOf(project.host_id || "");
+  const opts = [{ id: "", label: t("host_local") }, ...machineOptions(project.host_id || "")]
+    .filter((o) => o.id !== (project.host_id || "") && !(hier && machineOf(o.id) === hier));
   if (!opts.length) { toast(t("move_no_target"), "err"); return; }
   els.mvTarget.innerHTML = opts.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`).join("");
   els.mvPath.value = suggestTargetPath(project, opts[0].id);
@@ -1609,7 +2188,7 @@ function groupState(leden) {
 
 function hostBadge(s) {
   const host = s.hostId ? hostById(s.hostId) : null;
-  return host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "";
+  return host ? `<span class="tab-host">${escapeHtml(machineLabel(s.hostId))}</span>` : "";
 }
 
 function renderTabs() {
@@ -1634,7 +2213,7 @@ function renderTabs() {
       // een draait -- zonder dat een lokale tab er anders uit gaat zien.
       const host = s.hostId ? hostById(s.hostId) : null;
       tab.innerHTML = `<span class="tab-dot"></span>${hostBadge(s)}<span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
-      tab.title = host ? `${s.title} — ${host.nickname || host.hostname}` : s.title;
+      tab.title = host ? `${s.title} — ${machineLabel(s.hostId)}` : s.title;
       tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
       tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
       tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
@@ -1857,7 +2436,7 @@ function showRecap(anchor, s) {
   recapTip.innerHTML =
     `<div class="recap-head">` +
       `<span class="recap-name">${escapeHtml(s.title)}</span>` +
-      (host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "") +
+      (host ? `<span class="tab-host">${escapeHtml(machineLabel(s.hostId))}</span>` : "") +
       (staat ? `<span class="recap-state">${escapeHtml(staat)}</span>` : "") +
     `</div>` +
     `<div class="recap-meta">${escapeHtml(meta.join(" · "))}</div>` +
@@ -2193,6 +2772,7 @@ async function startSession() {
   const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId });
   try {
     await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
+    recordSession(session);
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -2240,8 +2820,44 @@ async function addAgentFromForm() {
 /* ============ persistente sessies ============ */
 // Schrijf de huidige (herstartbare) sessies naar schijf. Command-override-sessies
 // (demo nep-Claude) hebben geen --resume-transcript en slaan we niet op.
+/* ============ sessiegeschiedenis (#129) ============ */
+// Drie standen in plaats van een vinkje: vragen (nieuwe default), stil hervatten
+// (wat het was) en schoon starten. "Schoon" wist alleen de OPEN-lijst; de
+// geschiedenis blijft, want daar zat de fout.
+function persistMode() {
+  const m = settings.persistMode || (settings.persistSessions === false ? "clean" : "ask");
+  return m === "silent" || m === "clean" ? m : "ask";
+}
+
+// Elke sessie die Taurus start belandt in de geschiedenis, en blijft daar. Een
+// aangehaakte of gespiegelde sessie heeft geen eigen transcript om te hervatten,
+// maar het spoor dat hij bestond hoort er wel te zijn.
+function recordSession(s) {
+  if (!s || !s.uuid) return;
+  invoke("history_record", {
+    entry: {
+      uuid: s.uuid, path: s.path || "", title: s.title || "",
+      accent: s.accent || "#7c9cff", mode: s.mode || "default",
+      agent: s.agent || "claude", model: s.model || "",
+      hostId: s.hostId || "", projectId: s.projectId || "",
+      created: 0, lastSeen: 0, wasOpen: true,
+    },
+  }).catch(() => {});
+}
+
+// Wat staat er NU open. Aparte vraag van "wat is er geweest", en daarom een aparte
+// aanroep: zo valt een tab die je sluit netjes af zonder uit de lijst te verdwijnen.
+function recordOpenSessions() {
+  const open = [...sessions.values()].filter((s) => s.uuid).map((s) => s.uuid);
+  invoke("history_mark_open", { uuids: open }).catch(() => {});
+}
+
 function persistSessionsToDisk() {
-  if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
+  // De geschiedenis loopt HIER buitenom (#129). Wat er open staat is een andere
+  // vraag dan wat er geweest is, en die tweede mag niet meegewist worden door de
+  // eerste -- dat was precies hoe twee sessies na een herstart verdwenen.
+  recordOpenSessions();
+  if (persistMode() === "clean") { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
   const list = [...sessions.values()]
     // Een aangehaakte sessie heeft geen uuid en geen commando dat Taurus kent;
     // hem hier opslaan zou bij de volgende start een resume proberen die nergens
@@ -2258,29 +2874,30 @@ function persistSessionsToDisk() {
 // te vragen. Ontbreekt het transcript (Claude heeft het opgeruimd) of is het ouder
 // dan 1 dag -> overslaan, niet eens proberen. Een echte spawn-fout -> tab opruimen
 // en melden welke (projectnaam) sessie niet lukte.
-async function restoreSessions() {
-  if (!settings.persistSessions) return;
-  let saved = [];
-  try { saved = await invoke("get_sessions"); } catch (_) { return; }
-  if (!saved.length) return;
+// Waarom een opgeslagen sessie NU niet te hervatten is. Een reden, geen stilte:
+// overslaan mag hem niet uit beeld halen, want dat was precies de fout (#129).
+async function resumeBlocker(meta) {
+  if (meta.host_id) {
+    return hostById(meta.host_id) ? "" : t("resume_no_host");
+  }
+  // Het transcript van een REMOTE sessie staat op de host, niet hier -- die check
+  // zou hem altijd overslaan. Draait er een multiplexer, dan haakt de herstart
+  // bovendien gewoon aan de nog levende sessie aan; zo niet, dan vindt
+  // claude --resume het transcript daar zelf.
+  let st = { exists: false, ageSecs: 0 };
+  try { st = await invoke("session_state", { path: meta.path, uuid: meta.uuid }); } catch (_) {}
+  if (!st.exists) return t("resume_no_transcript");
+  if (st.ageSecs > 86400) return t("resume_old").replace("{days}", Math.floor(st.ageSecs / 86400));
+  return "";
+}
 
-  const ONE_DAY = 86400;
+// Hervat precies wat er is aangevinkt. Geen filter meer hierbinnen: wat niet kon,
+// is al bij het vragen als reden getoond.
+async function restoreSessions(metas) {
   const failures = [];
-  for (const meta of saved) {
+  for (const meta of metas) {
     const uuid = meta.uuid;
     if (!uuid) continue;
-    // Het transcript van een REMOTE sessie staat op de host, niet hier -- die
-    // check zou hem altijd overslaan. Draait er een multiplexer, dan haakt de
-    // herstart bovendien gewoon aan de nog levende sessie aan; zo niet, dan
-    // vindt claude --resume het transcript daar zelf.
-    if (!meta.host_id) {
-      let st = { exists: false, ageSecs: 0 };
-      try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
-      if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
-    } else if (!hostById(meta.host_id)) {
-      continue; // host is inmiddels verwijderd
-    }
-
     const id = "s" + (++seq);
     const session = spawnTerminal({
       id, uuid, path: meta.path,
@@ -2308,8 +2925,93 @@ async function restoreSessions() {
     }
   }
   showView("new");            // herstelde tabs in de balk, maar blijf op het startscherm
-  persistSessionsToDisk();    // herschrijf zonder overgeslagen/verlopen sessies
+  persistSessionsToDisk();
   if (failures.length) toast(`${t("restore_failed")} ${failures.join(", ")}`, "err");
+}
+
+// Bij het opstarten. Drie standen: vragen (default), stil hervatten zoals het was,
+// of schoon beginnen. "Schoon" verliest niets -- de geschiedenis blijft staan.
+async function startupRestore() {
+  const mode = persistMode();
+  if (mode === "clean") return;
+  let saved = [];
+  try { saved = await invoke("get_sessions"); } catch (_) { return; }
+
+  if (mode === "silent") {
+    const ok = [];
+    for (const m of saved) {
+      if (m.uuid && !(await resumeBlocker(m))) ok.push(m);
+    }
+    if (ok.length) await restoreSessions(ok);
+    return;
+  }
+
+  // Vragen. Wat open stond staat voorgevinkt; de rest van de geschiedenis staat
+  // eronder, uitgevinkt. Wat niet te hervatten is krijgt een reden in plaats van
+  // te verdwijnen.
+  let hist = [];
+  try { hist = await invoke("session_history"); } catch (_) {}
+  const openUuids = new Set(saved.map((m) => m.uuid).filter(Boolean));
+  const rows = [];
+  for (const m of saved) {
+    if (!m.uuid) continue;
+    rows.push({ meta: m, open: true, reason: await resumeBlocker(m) });
+  }
+  for (const h of hist) {
+    if (!h.uuid || openUuids.has(h.uuid)) continue;
+    const meta = {
+      uuid: h.uuid, path: h.path, title: h.title, accent: h.accent,
+      mode: h.mode, agent: h.agent, model: h.model,
+      host_id: h.hostId || "", project_id: h.projectId || "",
+    };
+    rows.push({ meta, open: false, reason: await resumeBlocker(meta), lastSeen: h.lastSeen });
+  }
+  if (!rows.length) return;
+  openRestoreDialog(rows);
+}
+
+// De vraag zelf. Een rij die niet te hervatten is blijft staan mét de reden en is
+// niet aan te vinken -- verdwijnen was de fout, en een vinkje dat niets doet zou de
+// volgende zijn.
+function openRestoreDialog(rows) {
+  const box = document.querySelector("#restore-rows");
+  const modal = document.querySelector("#restore-modal");
+  if (!box || !modal) return;
+  box.innerHTML = "";
+  rows.forEach((r, i) => {
+    const row = document.createElement("label");
+    row.className = "host-row restore-row";
+    const meta = [r.meta.agent || "claude", r.meta.model, r.meta.host_id ? machineLabel(r.meta.host_id) : ""]
+      .filter(Boolean).join(" · ");
+    row.innerHTML = `
+      <input type="checkbox" data-i="${i}"${r.open && !r.reason ? " checked" : ""}${r.reason ? " disabled" : ""} />
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(r.meta.title || r.meta.path || r.meta.uuid.slice(0, 8))}</div>
+        <div class="host-sub">${escapeHtml(r.meta.path)}${meta ? " · " + escapeHtml(meta) : ""}</div>
+      </div>
+      ${r.reason ? `<span class="sess-bare">${escapeHtml(r.reason)}</span>` : ""}
+      ${r.lastSeen ? `<span class="route-mux">${escapeHtml(agoText(r.lastSeen))}</span>` : ""}`;
+    box.appendChild(row);
+  });
+  modal.classList.remove("hidden");
+
+  const close = () => modal.classList.add("hidden");
+  document.querySelector("#restore-none").onclick = close;
+  document.querySelector("#restore-go").onclick = async () => {
+    const picked = [...box.querySelectorAll("input:checked")].map((c) => rows[+c.dataset.i].meta);
+    close();
+    if (picked.length) await restoreSessions(picked);
+  };
+}
+
+// "12 min geleden". Seconden sinds epoch, net als de backend ze bewaart.
+function agoText(secs) {
+  if (!secs) return "";
+  const d = Math.max(0, Math.floor(Date.now() / 1000) - secs);
+  if (d < 90) return t("ago_now");
+  if (d < 5400) return t("ago_min").replace("{n}", Math.round(d / 60));
+  if (d < 172800) return t("ago_hour").replace("{n}", Math.round(d / 3600));
+  return t("ago_day").replace("{n}", Math.round(d / 86400));
 }
 
 let toastTimer = null;
@@ -2708,9 +3410,16 @@ function openTabMenu(x, y, id) {
     <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
     <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item${att}"${attWhy} data-act="move">${t("ctx_move")}</div>
+    <div class="ctx-item${off}"${why} data-act="help">${t("ctx_help")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
   m.querySelector('[data-act="restart"]').addEventListener("click", () => { if (!s.attached) restartSession(id); });
+  // Hulp vragen kan alleen voor een sessie die HIER draait: je nodigt iemand uit in
+  // je eigen terminal. Bij een remote sessie zit het werk al ergens anders (#125).
+  m.querySelector('[data-act="help"]').addEventListener("click", () => {
+    closeTabMenu();
+    if (!s.hostId) askForHelp(s);
+  });
   m.querySelector('[data-act="speak"]').addEventListener("click", () => {
     closeTabMenu();
     const sel = s.term.getSelection();
@@ -2801,7 +3510,7 @@ function openSettings() {
   els.setTabRecap.checked = settings.tabRecap;
   els.setTabGroupAt.value = settings.tabGroups ? settings.tabGroupAt : 0;
   els.setFullPaths.checked = settings.fullPaths;
-  els.setPersist.checked = settings.persistSessions;
+  els.setPersistMode.value = persistMode();
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
   els.setSkin.value = settings.skin || brandingSkin || (brandHasTheme ? "brand" : "default");
@@ -2961,6 +3670,11 @@ function showNextConsent() {
   // Meekijken kan alleen bij een sessie: bij een pairing is er nog geen terminal.
   els.consentJoin.classList.toggle("hidden", pairing);
   els.consentRemember.checked = false;
+  // Vol beheer gaat over wat een SESSIE krijgt; bij een pairing is er nog niets
+  // om macht aan te geven. Meekijken geeft het sowieso, dus daar is het geen keuze.
+  els.consentFullRow.classList.toggle("hidden", pairing);
+  els.consentFull.checked = false;
+  els.consentFullWarn.classList.add("hidden");
   els.consentModal.classList.remove("hidden");
 
   // Uit de backend, zodat teller en server niet uit elkaar lopen.
@@ -2990,10 +3704,13 @@ function answerConsent(decision) {
   if (!consentActive) return;
   const id = consentActive.id;
   // "Niet meer vragen" is een sterkere vorm van toestaan, geen apart antwoord.
-  const d = decision === "allow" && els.consentRemember.checked ? "always" : decision;
+  let d = decision === "allow" && els.consentRemember.checked ? "always" : decision;
+  // Vol beheer is een tweede as: hij zegt niet WIE er binnen mag maar WAT die dan
+  // krijgt. Meekijken heeft hem niet nodig -- daar is toezicht de controle (#126).
+  if ((d === "allow" || d === "always") && els.consentFull.checked) d += "-full";
   invoke("ssh_consent_reply", { id, decision: d }).catch(() => {});
   closeConsent();
-  if (d === "block" || d === "always") refreshSshPeers();
+  if (d === "block" || d.startsWith("always")) refreshSshPeers();
 }
 
 function fillSttModelSelect() {
@@ -3024,7 +3741,7 @@ function saveSettingsFromForm() {
   settings.tabGroupAt = Number.isFinite(drempel) && drempel > 0 ? drempel : DEFAULT_SETTINGS.tabGroupAt;
   settings.tabGroups = Number.isFinite(drempel) && drempel > 0;
   settings.fullPaths = els.setFullPaths.checked;
-  settings.persistSessions = els.setPersist.checked;
+  settings.persistMode = els.setPersistMode.value;
   settings.skin = els.setSkin.value;
   settings.ttsEnabled = els.ttsOn.checked;
   settings.ttsVoice = els.ttsVoiceSel.value;
@@ -3121,7 +3838,7 @@ function renderEditor() {
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_host"))}</span>
           <select class="e-host">
             <option value="">${escapeHtml(t("host_local"))}</option>
-            ${hosts.map((h) => `<option value="${escapeHtml(h.id)}"${r.host_id === h.id ? " selected" : ""}>${escapeHtml(h.nickname || h.hostname)}</option>`).join("")}
+            ${machineOptions(r.host_id || "").map((o) => `<option value="${escapeHtml(o.id)}"${r.host_id === o.id ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("")}
           </select></div>
         </div>
         <div class="e-field"><span class="e-cap">${escapeHtml(isRemoteRow ? t("cap_workdir_remote") : t("cap_workdir"))}</span>
@@ -3258,7 +3975,8 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.hostModal.classList.add("hidden"); els.moveModal.classList.add("hidden"); } return; }
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
+    document.querySelector("#restore-modal").classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
   // sluiten voordat de toets naar de terminal gaat (#90).
@@ -3659,7 +4377,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabRecap: document.querySelector("#set-tabrecap"),
     setTabGroupAt: document.querySelector("#set-tabgroupat"),
     setFullPaths: document.querySelector("#set-fullpaths"),
-    setPersist: document.querySelector("#set-persist"),
+    setPersistMode: document.querySelector("#set-persist-mode"),
     setSkin: document.querySelector("#set-skin"),
     recordWidget: document.querySelector("#record-widget"),
     recordBtn: document.querySelector("#record-btn"),
@@ -3685,6 +4403,9 @@ window.addEventListener("DOMContentLoaded", () => {
     consentWhat: document.querySelector("#consent-what"),
     consentFp: document.querySelector("#consent-fingerprint"),
     consentRemember: document.querySelector("#consent-remember"),
+    consentFull: document.querySelector("#consent-full"),
+    consentFullRow: document.querySelector("#consent-full-row"),
+    consentFullWarn: document.querySelector("#consent-full-warn"),
     consentRememberRow: document.querySelector("#consent-remember-row"),
     consentTimer: document.querySelector("#consent-timer"),
     consentAllow: document.querySelector("#consent-allow"),
@@ -3718,12 +4439,10 @@ window.addEventListener("DOMContentLoaded", () => {
     hfMux: document.querySelector("#hf-mux"),
     attachBtn: document.querySelector("#attach-btn"),
     attachModal: document.querySelector("#attach-modal"),
-    atHost: document.querySelector("#at-host"),
     atRefresh: document.querySelector("#at-refresh"),
     atRows: document.querySelector("#at-rows"),
     atStatus: document.querySelector("#at-status"),
     atCancel: document.querySelector("#at-cancel"),
-    atConnect: document.querySelector("#at-connect"),
     hfTest: document.querySelector("#hf-test"),
     hostStatusMsg: document.querySelector("#hf-status"),
     hfReport: document.querySelector("#hf-report"),
@@ -3763,12 +4482,10 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#host-add").addEventListener("click", openHostForm);
   document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
   document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
-  document.querySelector("#host-close").addEventListener("click", () => els.hostModal.classList.add("hidden"));
+  document.querySelector("#host-close").addEventListener("click", closeHostModal);
   els.attachBtn.addEventListener("click", openAttachModal);
-  els.atHost.addEventListener("change", loadRemoteSessions);
-  els.atRefresh.addEventListener("click", loadRemoteSessions);
+  els.atRefresh.addEventListener("click", () => { loadLocalHistory(); loadRemoteSessions(); });
   els.atCancel.addEventListener("click", () => els.attachModal.classList.add("hidden"));
-  els.atConnect.addEventListener("click", connectToRemoteSession);
   // Sleutelkiezer via het bestaande pick_file-command: de dialog-plugin is niet
   // vanuit JS aanroepbaar (staat niet in capabilities/default.json).
   document.querySelector("#hf-key-browse").addEventListener("click", async () => {
@@ -3829,6 +4546,11 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   listen("ssh-host-changed", () => refreshSshStatus());
   els.consentAllow.addEventListener("click", () => answerConsent("allow"));
+  // De waarschuwing verschijnt pas als je het vinkje zet: hij hoort bij die keuze,
+  // en permanent zichtbaar zou hij wegkijken worden.
+  els.consentFull.addEventListener("change", () => {
+    els.consentFullWarn.classList.toggle("hidden", !els.consentFull.checked);
+  });
   els.consentJoin.addEventListener("click", () => answerConsent("join"));
   els.consentDeny.addEventListener("click", () => answerConsent("deny"));
   els.consentBlock.addEventListener("click", () => answerConsent("block"));
@@ -3895,8 +4617,11 @@ window.addEventListener("DOMContentLoaded", () => {
   markTestInstance();
   renderTabs();
   loadProjects();
-  // Hosts eerst: restoreSessions moet een opgeslagen host_id kunnen opzoeken.
-  loadHosts().then(restoreSessions);
+  // Hosts eerst: het herstellen moet een opgeslagen host_id kunnen opzoeken.
+  loadHosts().then(startupRestore);
+  // Stond er nog een hand omhoog toen de app sloot? Dan hoort de balk er te
+  // staan -- een vraag die je niet meer ziet trek je ook niet in (#125).
+  invoke("help_asking").then((a) => { asking = a; renderAskingBanner(); }).catch(() => {});
 
   // Toon de app-versie discreet onderin de sidebar.
   invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});

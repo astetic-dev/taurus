@@ -9,9 +9,10 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // Taurus als SSH-host: inkomende sessies met toestemming in de GUI (#121).
+mod discovery;
 mod sshhost;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -141,6 +142,77 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- machines: een machine is geen route (#124) ----------
+
+// Waaronder een route wordt gegroepeerd. Expliciet gezette `machine` wint;
+// anders het adres, want twee routes naar hetzelfde adres zijn per definitie
+// dezelfde computer.
+fn machine_key(h: &Host) -> String {
+    let m = h.machine.trim();
+    if m.is_empty() {
+        h.hostname.trim().to_lowercase()
+    } else {
+        m.to_lowercase()
+    }
+}
+
+// Eén regel per machine, met de routes eronder. De naam van de machine is de
+// KORTSTE bijnaam van zijn routes: die bevat de onderscheidende toevoeging niet
+// ("ursu" i.p.v. "ursu (Taurus-host)"), en juist die toevoeging wilden we kwijt.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MachineView {
+    key: String,
+    label: String,
+    routes: Vec<Host>,
+    // De route die Taurus zelf zou kiezen: de Taurus-host als die er is, want
+    // die vraagt geen sleuteluitwisseling en geen sshd op de andere machine.
+    preferred: String,
+}
+
+const TAURUS_PORT: u16 = sshhost::DEFAULT_PORT;
+
+fn preferred_route(routes: &[Host]) -> String {
+    routes
+        .iter()
+        .find(|h| h.port == TAURUS_PORT)
+        .or_else(|| routes.first())
+        .map(|h| h.id.clone())
+        .unwrap_or_default()
+}
+
+fn group_machines(hosts: Vec<Host>) -> Vec<MachineView> {
+    let mut order: Vec<String> = Vec::new();
+    let mut buckets: HashMap<String, Vec<Host>> = HashMap::new();
+    for h in hosts {
+        let k = machine_key(&h);
+        if !buckets.contains_key(&k) {
+            order.push(k.clone());
+        }
+        buckets.entry(k).or_default().push(h);
+    }
+    order
+        .into_iter()
+        .map(|k| {
+            let routes = buckets.remove(&k).unwrap_or_default();
+            let label = routes
+                .iter()
+                .map(|h| h.nickname.trim())
+                .filter(|n| !n.is_empty())
+                .min_by_key(|n| n.chars().count())
+                .unwrap_or(k.as_str())
+                .to_string();
+            let preferred = preferred_route(&routes);
+            MachineView { key: k, label, routes, preferred }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn machines() -> Vec<MachineView> {
+    group_machines(get_hosts())
+}
+
 // ---------- remote hosts (#98) ----------
 
 // Een machine waarop een tab een agent kan draaien. Bewaard in
@@ -151,6 +223,16 @@ struct Host {
     id: String,
     nickname: String,
     hostname: String,
+    // Welke FYSIEKE machine dit is (#124). Een `Host` is namelijk geen machine
+    // maar een ROUTE ernaartoe: dezelfde computer staat er drie keer in zodra je
+    // hem over sshd, over WSL en over een Taurus-host kunt bereiken. Daardoor
+    // moest de naam het onderscheid dragen ("ursu (Taurus-host)"), en dat lekte
+    // door naar tabbadges en agentkaarten.
+    //
+    // Leeg = val terug op `hostname`, zodat een bestaande hosts.json vanzelf
+    // samenvalt tot een rij per adres zonder dat iemand iets hoeft te herschrijven.
+    #[serde(default)]
+    machine: String,
     #[serde(default)]
     user: String,
     #[serde(default = "default_ssh_port")]
@@ -1206,6 +1288,137 @@ fn get_sessions() -> Vec<PersistedSession> {
     Vec::new()
 }
 
+// ---------- sessiegeschiedenis (#129) ----------
+//
+// GEMETEN na een herstart voor een driverinstallatie (2026-08-14): van vier sessies
+// kwamen er twee terug en waren de andere twee niet "niet hersteld" maar VERDWENEN.
+// Dat is geen pech maar de code: restoreSessions slaat over wat het niet kan
+// hervatten, en persistSessionsToDisk schrijft daarna sessions.json opnieuw uit de
+// tabs die dan open staan. Het enige spoor dat Taurus bijhield was daarmee weg.
+//
+// Deze lijst is daarom een ANDER bestand met een andere regel: er wordt aan
+// toegevoegd en bijgewerkt, en een mislukte herstart haalt er nooit iets uit.
+// sessions.json blijft wat het is -- "wat stond er open" -- en dit is "wat is er
+// geweest".
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct HistoryEntry {
+    uuid: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    accent: String,
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    agent: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    host_id: String,
+    #[serde(default)]
+    project_id: String,
+    // Seconden sinds epoch, net als de rest van de tree (geen chrono).
+    #[serde(default)]
+    created: u64,
+    #[serde(default)]
+    last_seen: u64,
+    // Stond hij open toen Taurus voor het laatst sloot? Dat bepaalt of hij bij het
+    // opstarten voorgevinkt staat -- niet of hij bewaard blijft.
+    #[serde(default)]
+    was_open: bool,
+}
+
+fn history_path() -> std::path::PathBuf {
+    config_dir().join("history.json")
+}
+
+fn read_history() -> Vec<HistoryEntry> {
+    let p = history_path();
+    match std::fs::read_to_string(&p) {
+        Ok(txt) => match serde_json::from_str::<Vec<HistoryEntry>>(&txt) {
+            Ok(v) => v,
+            Err(_) => {
+                backup_invalid(&p);
+                Vec::new()
+            }
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+fn write_history(list: &[HistoryEntry]) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(config_dir());
+    let txt = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
+    std::fs::write(history_path(), txt).map_err(|e| e.to_string())
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// Bijwerken op uuid, nooit verwijderen. `created` van de eerste keer blijft staan;
+// dat is wat "wanneer begon dit werk" betekent.
+fn merge_history(mut list: Vec<HistoryEntry>, mut e: HistoryEntry, now: u64) -> Vec<HistoryEntry> {
+    if e.uuid.trim().is_empty() {
+        return list;
+    }
+    e.last_seen = now;
+    match list.iter_mut().find(|x| x.uuid == e.uuid) {
+        Some(old) => {
+            e.created = if old.created == 0 { now } else { old.created };
+            *old = e;
+        }
+        None => {
+            if e.created == 0 {
+                e.created = now;
+            }
+            list.push(e);
+        }
+    }
+    // Nieuwste bovenaan: dat is de volgorde waarin je ernaar zoekt.
+    list.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+    list
+}
+
+#[tauri::command]
+fn session_history() -> Vec<HistoryEntry> {
+    read_history()
+}
+
+#[tauri::command]
+fn history_record(entry: HistoryEntry) -> Result<(), String> {
+    let list = merge_history(read_history(), entry, now_secs());
+    write_history(&list)
+}
+
+// Welke sessies stonden er open toen Taurus sloot. Apart van `history_record`,
+// want dit is een eigenschap van het MOMENT en niet van de sessie: hij wordt in
+// één keer voor de hele lijst gezet, zodat een tab die je sluit ook echt afvalt.
+#[tauri::command]
+fn history_mark_open(uuids: Vec<String>) -> Result<(), String> {
+    let mut list = read_history();
+    for e in list.iter_mut() {
+        e.was_open = uuids.iter().any(|u| u == &e.uuid);
+    }
+    write_history(&list)
+}
+
+// Met de hand vergeten. De enige manier waarop hier iets uit verdwijnt -- niet
+// omdat een herstart niet lukte.
+#[tauri::command]
+fn history_forget(uuid: String) -> Result<Vec<HistoryEntry>, String> {
+    let mut list = read_history();
+    list.retain(|e| e.uuid != uuid);
+    write_history(&list)?;
+    Ok(list)
+}
+
 // Pad waar Claude Code het transcript van een sessie bewaart:
 // %USERPROFILE%\.claude\projects\<map-encoded>\<uuid>.jsonl
 // De map-encoding vervangt elk niet-alfanumeriek teken door '-'
@@ -1461,12 +1674,54 @@ struct Session {
     _job: Option<job::Job>,
 }
 
+// ---------- een lokale sessie ook naar buiten laten meelezen (#125) ----------
+//
+// De vraagmodus belooft dat het werk in de sessie blijft van degene die vastloopt:
+// je kijkt mee in ZIJN terminal, je krijgt er geen tweede naast. Daarvoor moet de
+// uitvoer van een lokale sessie naar een tweede lezer kunnen -- precies wat #121's
+// join al doet, maar dan de andere kant op.
+//
+// Een globale registry en geen veld op `Session`, omdat de lees-thread in start_pty
+// alleen een geleende `&Mutex<..>` heeft en die niet kan vasthouden. De sleutel is
+// het sessie-id; een sessie zonder abonnee kost hier niets.
+type OfferSink = std::sync::mpsc::Sender<Vec<u8>>;
+static OFFERS: std::sync::OnceLock<Mutex<HashMap<String, Vec<OfferSink>>>> =
+    std::sync::OnceLock::new();
+
+fn offers() -> &'static Mutex<HashMap<String, Vec<OfferSink>>> {
+    OFFERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// Dezelfde bytes als naar het venster gaan, ook naar wie meeleest. Weggevallen
+// abonnees ruimen we hier op: een dichte channel is het einde van dat meekijken en
+// geen reden om de sessie zelf iets te laten merken.
+fn fan_out(id: &str, data: &[u8]) {
+    let mut map = offers().lock().unwrap();
+    let Some(list) = map.get_mut(id) else { return };
+    list.retain(|tx| tx.send(data.to_vec()).is_ok());
+    if list.is_empty() {
+        map.remove(id);
+    }
+}
+
+fn offer_subscribe(id: &str) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    offers().lock().unwrap().entry(id.to_string()).or_default().push(tx);
+    rx
+}
+
 struct AppState {
     sessions: Mutex<HashMap<String, Session>>,
     // STT-opname: commando-kanaal naar de audio-thread + zichtbare status.
     stt: SttState,
     // Inkomende SSH: listener, wachtende popups en draaiende sessies (#121).
     ssh: std::sync::Arc<sshhost::HostState>,
+    // Aankondigen en zoeken op het vertrouwde netwerk (#125).
+    discovery: std::sync::Arc<discovery::Discovery>,
+    // De openstaande hulpvraag, als die er is. Eén tegelijk: een hand die je
+    // opsteekt wijst naar één agent, en twee handen tegelijk is geen vraag maar
+    // ruis op het netwerk.
+    asking: Mutex<Option<HelpRequest>>,
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
@@ -1541,6 +1796,10 @@ fn start_pty(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    // Wie meeleest krijgt dezelfde bytes (#125). Eerst, zodat een
+                    // trage abonnee het venster niet ophoudt -- send() op een
+                    // channel blokkeert niet.
+                    fan_out(&id2, &buf[..n]);
                     // Base64 i.p.v. Vec<u8>: Tauri serialiseert events als JSON,
                     // en een byte-array wordt dan een array van getallen (3-4x
                     // zo groot + parse-kosten) op het heetste pad van de app (#73).
@@ -1665,6 +1924,33 @@ fn remote_agent_program(agent: &str, os: &str) -> String {
     }
 }
 
+// Welke waarde er achter `--permission-mode` mag, en None als er helemaal geen vlag
+// mee moet (#130).
+//
+// De lijst is die van claude 2.1.232: acceptEdits, auto, bypassPermissions, manual,
+// dontAsk, plan. Een whitelist en geen doorgeefluik, want een kaart kan een modus
+// bewaren die bij een ANDERE agent hoorde -- zet je een agy-kaart met "sandbox" om
+// naar claude, dan zou dat anders een ongeldige vlag worden en krijg je de fout drie
+// lagen diep uit een remote shell. Onbekend valt daarom terug op "geen vlag", wat
+// altijd werkt.
+//
+// "default" is geen modus maar de afwezigheid van een keuze: geen vlag, dus de eigen
+// instelling van de agent geldt. Dat is bewust -- wie `defaultMode: acceptEdits` in
+// zijn settings.json heeft staan, wil niet dat Taurus daar overheen gaat. De CLI
+// accepteert `default` overigens nog steeds als niet-gedocumenteerde alias, maar
+// meesturen zou juist die eigen instelling overschrijven.
+fn claude_permission_mode(mode: &str) -> Option<&'static str> {
+    match mode.trim() {
+        "manual" => Some("manual"),
+        "acceptEdits" => Some("acceptEdits"),
+        "plan" => Some("plan"),
+        "auto" => Some("auto"),
+        "dontAsk" => Some("dontAsk"),
+        "bypassPermissions" => Some("bypassPermissions"),
+        _ => None,
+    }
+}
+
 fn build_command(
     agent: &str,
     kind: LaunchKind,
@@ -1732,9 +2018,9 @@ fn build_command(
             }
             a.push("-n".into());
             a.push(norm_title(title));
-            if !mode.is_empty() && mode != "default" {
+            if let Some(m) = claude_permission_mode(mode) {
                 a.push("--permission-mode".into());
-                a.push(mode.into());
+                a.push(m.into());
             }
             if !model.trim().is_empty() {
                 a.push("--model".into());
@@ -2465,6 +2751,224 @@ foreach ($l in ($lines | Select-Object -Skip 1)) {
     })
 }
 
+// ---------- agents op een machine van jezelf (#128) ----------
+//
+// DE REGEL: Taurus toont AGENTS. ssh, tmux en herdr maken de weg vrij zodat er een
+// agent kan starten -- ze zijn leidingwerk en nooit iets wat je kiest. Geen agent
+// betekent dat er niets is om mee te verbinden; dat is geen keuze met een
+// waarschuwingslabel erop, het is geen keuze.
+//
+// Een agent kan er op twee manieren zijn, en voor wie kijkt is dat hetzelfde ding:
+//   - Taurus startte hem hier vandaan over ssh; dan weet herdr ervan.
+//   - Hij draait in de Taurus OP die machine; dan staat hij in de sessions.json daar.
+// GEMETEN op ursu: herdr kende drie sessies (nul agents) terwijl er twee agents
+// draaiden die alleen in die sessions.json stonden. Wie alleen herdr vraagt, ziet
+// dus precies het verkeerde.
+#[derive(serde::Serialize, Clone, Default, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RemoteAgent {
+    // De mux-sessie waaraan je kunt aanhaken. Leeg voor een agent die in de Taurus
+    // daar draait: die heeft er geen, en daarom kun je hem (nog) niet overnemen.
+    session: String,
+    title: String,
+    agent: String,
+    cwd: String,
+    status: String,
+    // "herdr" of "taurus" -- een detail op de regel, geen tweede lijst.
+    origin: String,
+    attachable: bool,
+}
+
+#[derive(serde::Serialize, Default, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct MachineAgents {
+    agents: Vec<RemoteAgent>,
+    // Sessies zonder agent. Geen keuze, wel opruimwerk -- ze bestaan echt.
+    empty: Vec<String>,
+    // Kon de Taurus op die machine bevraagd worden? "Nee" is iets anders dan
+    // "die draait daar niets".
+    taurus_seen: bool,
+}
+
+// Wat de laatste regel van de andere Taurus zegt over zijn eigen sessies. Alleen de
+// velden die hier iets betekenen; de rest van dat bestand gaat ons niet aan.
+#[derive(serde::Deserialize)]
+struct PeerSession {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    agent: String,
+    // Leeg = lokaal op die machine. Een sessie die dáár naar een derde machine
+    // wijst is niet van deze machine en hoort hier niet in de lijst.
+    #[serde(default)]
+    host_id: String,
+}
+
+// De twee bronnen samenvoegen. Puur, zodat de regel "geen agent is geen keuze"
+// toetsbaar is zonder machine ernaast.
+fn collect_agents(sessions: Vec<RemoteSession>, peer_json: Option<&str>) -> MachineAgents {
+    let mut out = MachineAgents::default();
+    for s in sessions {
+        if s.agent.trim().is_empty() {
+            // Geen agent: bestaat wel, is geen keuze.
+            out.empty.push(s.name);
+            continue;
+        }
+        // De mapnaam leest prettiger dan een sessienaam met een hash erachter.
+        let leaf = s
+            .cwd
+            .rsplit(['\\', '/'])
+            .find(|p| !p.is_empty())
+            .unwrap_or(&s.name)
+            .to_string();
+        out.agents.push(RemoteAgent {
+            title: leaf,
+            agent: s.agent,
+            cwd: s.cwd,
+            status: if s.agent_status.is_empty() { s.status } else { s.agent_status },
+            session: s.name,
+            origin: "herdr".into(),
+            attachable: true,
+        });
+    }
+    let Some(txt) = peer_json else { return out };
+    let Ok(peers) = serde_json::from_str::<Vec<PeerSession>>(txt) else {
+        return out;
+    };
+    out.taurus_seen = true;
+    for p in peers {
+        // Alleen wat op DIE machine zelf draait.
+        if !p.host_id.trim().is_empty() {
+            continue;
+        }
+        // Draait hij al als mux-sessie, dan is het dezelfde agent en niet een tweede.
+        if out.agents.iter().any(|a| paths_equal(&a.cwd, &p.path)) {
+            continue;
+        }
+        out.agents.push(RemoteAgent {
+            title: p.title,
+            agent: if p.agent.is_empty() { "claude".into() } else { p.agent },
+            cwd: p.path,
+            status: String::new(),
+            session: String::new(),
+            origin: "taurus".into(),
+            // Er is geen kanaal naar een sessie die in die Taurus zelf leeft. Tonen
+            // dus wel, aanbieden nog niet -- en dat moet de UI ook zo zeggen.
+            attachable: false,
+        });
+    }
+    out
+}
+
+// Windows-paden verschillen in hoofdletters en in de slash die je toevallig typte.
+fn paths_equal(a: &str, b: &str) -> bool {
+    let norm = |s: &str| s.trim().trim_end_matches(['\\', '/']).replace('/', "\\").to_lowercase();
+    !a.trim().is_empty() && norm(a) == norm(b)
+}
+
+// De sessions.json van de Taurus aan de andere kant uitlezen. Aparte ssh-ronde in
+// plaats van de bestaande sessie-scripts uitbreiden: die zijn precies afgeregeld en
+// gaan door twee quoting-lagen, en dit is een lijst die alleen op verzoek wordt
+// opgehaald -- correctheid weegt daar zwaarder dan een seconde.
+fn peer_sessions_command(host: &Host) -> Option<String> {
+    if effective_os(host) != "windows" || host.via == "wsl" {
+        // Op POSIX heeft config_dir geen stabiele plek (geen APPDATA), dus daar valt
+        // niets betrouwbaars te lezen. Liever niets dan een gokpad.
+        return None;
+    }
+    let ps = "$p = Join-Path $env:APPDATA 'Taurus\\sessions.json'\n\
+              if (Test-Path $p) { Get-Content $p -Raw } else { '[]' }";
+    Some(format!(
+        "powershell -NoProfile -EncodedCommand {}",
+        b64(&utf16le(ps))
+    ))
+}
+
+#[tauri::command]
+fn remote_agents(host_id: String) -> Result<MachineAgents, String> {
+    let host = lookup_host(&host_id)?
+        .ok_or_else(|| "Agents opsommen kan alleen op een andere machine.".to_string())?;
+    let sessions = remote_sessions(host_id)?;
+    let peer = peer_sessions_command(&host)
+        .and_then(|cmd| ssh_run(&host, &cmd).ok())
+        .map(|(out, _)| out);
+    Ok(collect_agents(sessions, peer.as_deref()))
+}
+
+// Het commando dat een sessie op de andere machine beëindigt (#124). Apart van de
+// tauri-command, want dit is de kant die te toetsen valt zonder machine ernaast.
+//
+// GEMETEN tegen herdr op ursu, en de eerste versie hiervan was fout. Die deed
+// `herdr --session <naam> server stop`, naar analogie van hoe Taurus een server
+// START. Dat gaf exitcode 0 en veranderde niets -- de sessie stond daarna nog
+// gewoon in de lijst -- en het startte als bijeffect de default-sessie op die
+// machine. De juiste vorm neemt de naam als ARGUMENT:
+//
+//   herdr session stop <naam>     stopt de server, laat de sessie staan
+//   herdr session delete <naam>   haalt hem echt weg  ("deleted session ...")
+//
+// Allebei, in die volgorde: de knop staat er voor een sessie die weg moet, en een
+// entry die blijft staan is precies de klacht waarvoor hij gebouwd is.
+fn stop_session_command(host: &Host, session: &str) -> Result<String, String> {
+    let os = effective_os(host);
+    let via_wsl = host.via == "wsl";
+    let posix = |script: String| {
+        if via_wsl {
+            format!("wsl -e sh -c \"echo {} | base64 -d | sh\"", b64(script.as_bytes()))
+        } else {
+            format!("echo {} | base64 -d | sh", b64(script.as_bytes()))
+        }
+    };
+    match host.mux.as_str() {
+        "herdr" if os == "windows" && !via_wsl => {
+            let ps = format!(
+                "$h = (Get-Command herdr -EA 0).Source\n\
+                 if (-not $h) {{ $h = Join-Path $env:LOCALAPPDATA '{fb}' }}\n\
+                 if (-not (Test-Path $h)) {{ 'ERR=herdr staat niet op deze machine'; exit 0 }}\n\
+                 & $h session stop {s} 2>&1 | Out-Null\n\
+                 & $h session delete {s} 2>&1 | Out-Null\n\
+                 if ($LASTEXITCODE -ne 0) {{ 'ERR=herdr kon de sessie niet verwijderen' }}",
+                fb = HERDR_WIN_FALLBACK,
+                s = ps_quote(session),
+            );
+            Ok(format!(
+                "powershell -NoProfile -EncodedCommand {}",
+                b64(&utf16le(&ps))
+            ))
+        }
+        "herdr" => Ok(posix(format!(
+            "H=herdr; command -v herdr >/dev/null 2>&1 || H=\"{fb}\"; \
+             \"$H\" session stop {s} >/dev/null 2>&1; \
+             \"$H\" session delete {s} >/dev/null 2>&1 || echo 'ERR=herdr kon de sessie niet verwijderen'",
+            fb = HERDR_POSIX_FALLBACK,
+            s = shell_quote_posix(session),
+        ))),
+        "tmux" | "psmux" => Ok(posix(format!(
+            "{mux} kill-session -t {s} 2>&1 || echo 'ERR=tmux kon de sessie niet stoppen'",
+            mux = host.mux,
+            s = shell_quote_posix(session),
+        ))),
+        _ => Err("Deze machine bewaart geen sessies, dus er valt niets te stoppen.".to_string()),
+    }
+}
+
+// Een sessie op een andere machine beëindigen. Zonder dit is een verweesde sessie --
+// eentje waarvan de agent weg is -- alleen op te ruimen door naar die machine toe te
+// lopen, terwijl Taurus hem wel toont en er een oude `--resume` in laat mislukken.
+#[tauri::command]
+fn stop_remote_session(host_id: String, session: String) -> Result<(), String> {
+    let host = lookup_host(&host_id)?
+        .ok_or_else(|| "Een sessie stoppen kan alleen op een andere machine.".to_string())?;
+    let cmd = stop_session_command(&host, &session)?;
+    let (out, _) = ssh_run(&host, &cmd)?;
+    if let Some(err) = out.lines().find_map(|l| l.trim().strip_prefix("ERR=")) {
+        return Err(err.to_string());
+    }
+    Ok(())
+}
+
 // Open een tab op een sessie die al draait. Geen uuid, geen agent-vlaggen: Taurus
 // heeft dit commando niet gebouwd en kan het dus ook niet hervatten.
 #[tauri::command]
@@ -2574,10 +3078,19 @@ fn create_session(
     host_id: String,
     cols: u16,
     rows: u16,
+    // Wegwerpsessie: geen persistentie, ook niet als de machine herdr heeft (#124).
+    //
+    // GEMETEN nadat de Connect-knop een paar keer was gebruikt: op ursu stonden drie
+    // herdr-sessies zonder agent, waarvan twee door Connect gemaakt. "Geen kaart in
+    // de zijbalk" was dus maar de helft van het verhaal -- aan de andere kant bleef
+    // er wél iets staan, en die lege sessies zetten je bij het aanhaken in een kale
+    // shell of in een mislukte `claude --resume`. Wat weg mag zijn, moet ook echt
+    // verdwijnen als je de tab sluit.
+    ephemeral: Option<bool>,
 ) -> Result<(), String> {
     // De host moet BEKEND zijn voordat het commando gebouwd wordt: remote levert
     // een andere programmanaam op dan lokaal.
-    let host = lookup_host(&host_id)?;
+    let host = lookup_host(&host_id)?.map(|h| without_persistence(h, ephemeral.unwrap_or(false)));
     let (program, args) = if !command.trim().is_empty() {
         // Commando-override (bijv. nep-Claude voor de demo): voer dit programma
         // uit i.p.v. de agent, zonder agent-vlaggen.
@@ -2597,6 +3110,18 @@ fn create_session(
     };
     let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
     start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)
+}
+
+// Een wegwerpsessie krijgt een host-kopie zonder persistentie: dan maakt de andere
+// kant geen herdr-sessie aan en blijft er dus ook niets staan. `mux_auto` gaat mee
+// uit, anders zou een latere hertest hem alsnog invullen. De opgeslagen host in
+// hosts.json verandert niet -- dit geldt alleen voor deze ene start.
+fn without_persistence(h: Host, ephemeral: bool) -> Host {
+    if ephemeral {
+        Host { mux: "none".to_string(), mux_auto: false, ..h }
+    } else {
+        h
+    }
 }
 
 // Leeg host_id = lokaal. Een onbekend id is een fout en geen stille terugval op
@@ -3898,8 +4423,10 @@ fn ssh_network_trust(
     // Meteen laten meebewegen in plaats van tot de volgende ronde wachten.
     if state.ssh.is_desired() {
         let port = *state.ssh.port.lock().unwrap();
-        sshhost::set_enabled(app, state.ssh.clone(), true, port)?;
+        sshhost::set_enabled(app.clone(), state.ssh.clone(), true, port)?;
     }
+    // Een ander netwerk betekent een ander adres om op aan te kondigen -- of geen.
+    sync_announcement(&app);
     Ok(ssh_status_of(&state))
 }
 
@@ -3913,9 +4440,440 @@ fn ssh_host_set(
     port: Option<u16>,
 ) -> Result<SshHostStatus, String> {
     let p = port.unwrap_or(sshhost::DEFAULT_PORT);
-    sshhost::set_enabled(app, state.ssh.clone(), enabled, p)?;
+    sshhost::set_enabled(app.clone(), state.ssh.clone(), enabled, p)?;
+    sync_announcement(&app);
     Ok(ssh_status_of(&state))
 }
+
+// De aankondiging volgt zowel de listener als de vraag: er valt niets aan te
+// kondigen als de deur dicht staat, en er valt niets aan te kondigen als niemand
+// iets vraagt. Zodra een van beide wegvalt, verdwijnt de vraag van het netwerk.
+fn sync_announcement(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let ask = state.asking.lock().unwrap().clone();
+    let Some(ask) = ask.filter(|_| state.ssh.is_running()) else {
+        state.discovery.unannounce();
+        return;
+    };
+    let port = *state.ssh.port.lock().unwrap();
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
+    // Lukt aankondigen niet, dan is dat geen reden om de vraag in te trekken -- de
+    // deur werkt ook als niemand hem kan vinden; het scherm meldt het verschil.
+    let _ = state.discovery.announce(
+        port,
+        &user,
+        &sshhost::host_key_fingerprint(),
+        &ask.title,
+        &ask.cwd,
+        &ask.token,
+    );
+}
+
+// ---------- de hand opsteken (#125) ----------
+//
+// Een verzoek wijst altijd naar ÉÉN agent. Dat is niet netter maar noodzakelijk:
+// zonder agent kom je uit "op een computer", en dan kan het antwoord een kale
+// prompt zijn. Met een agent erbij kan dat per constructie niet.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HelpRequest {
+    // Het lokale sessie-id waar de helper aan gaat meelezen.
+    session: String,
+    title: String,
+    cwd: String,
+    // Eenmalig; de uitnodiging is de toestemming, dus dit is het hele bewijs.
+    token: String,
+}
+
+// Een token dat niet te raden hoeft te zijn om te tellen, maar het wel is: hij
+// reist alleen over het vertrouwde netwerk en leeft zolang de vraag open staat.
+fn new_token() -> String {
+    // rand 0.10: `Rng` is de trait met fill_bytes, `RngExt` die met random_range.
+    use rand::Rng;
+    const T: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut bytes = [0u8; 24];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| T[*b as usize % T.len()] as char).collect()
+}
+
+#[tauri::command]
+fn help_ask(
+    app: AppHandle,
+    state: State<AppState>,
+    session: String,
+    title: String,
+    cwd: String,
+) -> Result<HelpRequest, String> {
+    if !state.ssh.is_running() {
+        return Err(
+            "Zet eerst 'bereikbaar' aan op een vertrouwd netwerk -- anders kan niemand je vraag beantwoorden."
+                .to_string(),
+        );
+    }
+    let req = HelpRequest { session, title, cwd, token: new_token() };
+    *state.asking.lock().unwrap() = Some(req.clone());
+    sync_announcement(&app);
+    Ok(req)
+}
+
+#[tauri::command]
+fn help_withdraw(app: AppHandle, state: State<AppState>) {
+    *state.asking.lock().unwrap() = None;
+    sync_announcement(&app);
+}
+
+// Klopt dit token bij de openstaande vraag? Alleen kijken, niet innemen: dit is de
+// auth-fase, en er is nog geen kanaal om aan te hangen.
+pub(crate) fn help_token_matches(app: &AppHandle, token: &str) -> bool {
+    let state = app.state::<AppState>();
+    let ask = state.asking.lock().unwrap();
+    offer_matches(ask.as_ref(), token)
+}
+
+// Zelfde vergelijking als `take_offer`, maar zonder in te nemen. Apart benoemd zodat
+// de auth-fase en de exec-fase gegarandeerd dezelfde regel gebruiken: een leeg token
+// matcht nooit, ook niet met een lege gebruikersnaam.
+fn offer_matches(ask: Option<&HelpRequest>, token: &str) -> bool {
+    ask.map(|a| !a.token.trim().is_empty() && a.token == token)
+        .unwrap_or(false)
+}
+
+// Het token inwisselen, vanuit de SSH-host. De vraag gaat er meteen af: wie hem
+// beantwoordt, heeft hem beantwoord, en een hand die omhoog blijft nadat er iemand
+// gekomen is nodigt de rest van de gang voor niets uit.
+pub(crate) fn claim_help_offer(app: &AppHandle, token: &str) -> Option<String> {
+    let state = app.state::<AppState>();
+    let session = take_offer(&state.asking, token)?;
+    sync_announcement(app);
+    let _ = app.emit("help-answered", ());
+    Some(session)
+}
+
+// De beslissing zelf, los van de app: mag dit token binnen, en zo ja, welke sessie
+// hoort erbij. Apart omdat dit de plek is waar toegang wordt verleend zonder popup;
+// die moet te toetsen zijn zonder GUI eromheen.
+//
+// Het token is EENMALIG in de sterke zin: bij een geslaagde inwisseling gaat de
+// vraag er meteen af. Wie hem beantwoordt heeft hem beantwoord, en een tweede
+// verbinding met hetzelfde token vindt niets meer.
+fn take_offer(asking: &Mutex<Option<HelpRequest>>, token: &str) -> Option<String> {
+    let mut slot = asking.lock().unwrap();
+    let ask = slot.as_ref()?;
+    if ask.token.trim().is_empty() || ask.token != token {
+        return None;
+    }
+    let session = ask.session.clone();
+    *slot = None;
+    Some(session)
+}
+
+// Meelezen met een lokale sessie: dezelfde bytes die naar het venster gaan.
+pub(crate) fn subscribe_local_session(id: &str) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    offer_subscribe(id)
+}
+
+// En de terugweg: wat de helper typt gaat de LOKALE pty in, dezelfde terminal waar
+// de vrager in zit. Twee toetsenborden op een agent, net als de join uit #121 maar
+// dan andersom.
+pub(crate) fn write_local_session(app: &AppHandle, id: &str, data: &[u8]) {
+    let state = app.state::<AppState>();
+    let mut map = state.sessions.lock().unwrap();
+    if let Some(s) = map.get_mut(id) {
+        let _ = s.writer.write_all(data);
+        let _ = s.writer.flush();
+    }
+}
+
+#[tauri::command]
+fn help_asking(state: State<AppState>) -> Option<HelpRequest> {
+    state.asking.lock().unwrap().clone()
+}
+
+// ---------- machines vinden op het vertrouwde netwerk (#125) ----------
+
+// Een gevonden machine, plus of hij al bekend is. Bekend = niet nog een keer in
+// de gevonden-lijst: hij staat dan al boven, met zijn routes en zijn knoppen.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FoundMachine {
+    #[serde(flatten)]
+    found: discovery::Found,
+    known: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryView {
+    machines: Vec<FoundMachine>,
+    // Waarom de lijst leeg is, als hij leeg is. Een lege lijst die "geblokkeerd"
+    // betekent leest als "er is niemand", en dat is de verkeerde conclusie.
+    problem: String,
+    // Kondigen we zelf aan? Zo niet, dan ziet niemand ONS -- ook goed om te weten
+    // op een scherm dat over vindbaarheid gaat.
+    announcing: bool,
+}
+
+// Zoeken loopt alleen terwijl het machinescherm open staat. Dat is de hele
+// invulling van "discovery is passief": geen melding, geen badge, geen popup.
+#[tauri::command]
+fn discovery_start(state: State<AppState>) -> Result<(), String> {
+    state.discovery.browse_start()
+}
+
+#[tauri::command]
+fn discovery_stop(state: State<AppState>) {
+    state.discovery.browse_stop();
+}
+
+#[tauri::command]
+fn discovered_machines(state: State<AppState>) -> DiscoveryView {
+    let hosts = get_hosts();
+    let machines = state
+        .discovery
+        .list()
+        .into_iter()
+        .map(|f| {
+            let known = hosts
+                .iter()
+                .any(|h| h.hostname.eq_ignore_ascii_case(&f.address));
+            FoundMachine { found: f, known }
+        })
+        .collect();
+    DiscoveryView {
+        machines,
+        problem: state.discovery.problem(),
+        announcing: sshhost::read_pref().enabled && sshhost::netgate::on_trusted_network(),
+    }
+}
+
+// Een hulpvraag beantwoorden (#125). Er wordt niets gestart en niets opgeslagen:
+// dit opent een tab op de sessie die de ander al draait.
+//
+// De machine hoeft niet in hosts.json te staan en er is geen sleutel nodig -- het
+// token in de gebruikersnaam is het bewijs, en het geldt alleen voor deze vraag.
+// Daarom ook geen `adopt`: iemand helpen maakt hem nog niet tot een van jouw
+// machines.
+#[tauri::command]
+fn answer_help_request(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+    gen: u64,
+    found: discovery::Found,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    if found.token.trim().is_empty() {
+        return Err("Dit verzoek heeft geen token meer; vraag de ander opnieuw.".to_string());
+    }
+    let host = Host {
+        id: "help".into(),
+        nickname: found.name.clone(),
+        hostname: found.address.clone(),
+        machine: found.address.clone(),
+        // Het token reist als gebruikersnaam: de andere kant herkent het in de
+        // auth-fase en laat precies dit ene pad toe.
+        user: format!("taurus-help-{}", found.token),
+        port: found.port,
+        key_path: String::new(),
+        default_project: String::new(),
+        via: String::new(),
+        os: found.os.clone(),
+        mux: "none".into(),
+        agent_version: String::new(),
+        mux_auto: false,
+    };
+    let (program, args) = ssh_interactive(&host, format!("TAURUS-JOIN {}", found.token))?;
+    start_pty(
+        &app,
+        &state.sessions,
+        id,
+        gen,
+        program,
+        &local_cwd_for_remote(),
+        args,
+        cols,
+        rows,
+    )
+}
+
+// ---------- de twee firewall-uitzonderingen, in één handeling (#125) ----------
+//
+// GEMETEN: elke bestaande allow-regel voor mDNS op deze machine is PROGRAMMA-
+// gebonden (svchost voor Windows' eigen responder, msedgewebview2 voor Edge).
+// Taurus valt daar niet onder, dus `taurus.exe` op UDP 5353 heeft een eigen regel
+// nodig -- naast de poortregel voor TCP 8287 die #121 al vraagt.
+//
+// Ze samen aanbieden bij het aanzetten van "bereikbaar" is het verschil tussen één
+// bewuste handeling en twee verrassingen op twee momenten: de tweede zou pas komen
+// bovendrijven wanneer iemand zich afvraagt waarom niemand hem ziet staan.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FirewallStatus {
+    // Staan ONZE eigen regels er: aan, inbound, toestaan?
+    tcp: bool,
+    udp: bool,
+    // Regels die deze exe expliciet BLOKKEREN. Geen bijzaak: een block-regel wint in
+    // Windows Firewall van elke allow-regel, dus zolang die er staat is Taurus dicht,
+    // hoeveel uitzonderingen je er ook naast zet.
+    //
+    // GEMETEN op dit werkstation: er stonden er twee, "TCP Query User{...}" en
+    // "UDP Query User{...}", allebei op het pad van taurus.exe. Dat zijn de
+    // automatisch aangemaakte regels van een weggeklikte Defender-prompt -- precies
+    // wat er tijdens de spike gebeurde en toen met de hand weg moest.
+    blocked: u32,
+    // Kon het überhaupt nagekeken worden? Op een niet-Windows-machine, of als de
+    // cmdlet ontbreekt, is "nee" iets anders dan "geen regel".
+    checked: bool,
+}
+
+const FW_TCP_RULE: &str = "Taurus";
+const FW_UDP_RULE: &str = "Taurus mDNS";
+
+fn this_exe() -> String {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+// Twee vragen die snel te stellen zijn: staan onze eigen regels er, en blokkeert
+// iets deze exe?
+//
+// De derde vraag -- "laat een WILLEKEURIGE regel deze poort door?" -- is geprobeerd
+// en weer weggegooid, om twee gemeten redenen:
+//
+//   1. `Get-NetFirewallPortFilter` als LOSSE lijst is niet op InstanceID te koppelen
+//      aan `Get-NetFirewallRule`. De 599 objecten die hij teruggaf bevatten de
+//      InstanceID van onze eigen regel niet, terwijl de associatie
+//      (`$rule | Get-NetFirewallPortFilter`) hem wél geeft. Een eerdere versie
+//      koppelde zo en antwoordde daardoor ALTIJD "nee" -- ook nadat de regels
+//      aantoonbaar waren aangemaakt. (De app-filters koppelen wél gewoon op
+//      InstanceID; alleen de poortfilters niet.)
+//   2. Het via de associatie in bulk doen klopt wel, maar duurde 39,7 seconden.
+//
+// Deze versie doet er 6. Een handgemaakte regel onder een andere naam telt niet mee;
+// daarom zegt de tekst "een eigen uitzondering", en het ergste gevolg is een
+// overbodige regel erbij.
+fn firewall_script(exe: &str) -> String {
+    format!(
+        "$ErrorActionPreference='SilentlyContinue'\n\
+         $exe = '{exe}'\n\
+         function Mine($naam) {{\n\
+         \x20 $r = Get-NetFirewallRule -DisplayName $naam -EA 0 | Where-Object {{ $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' }}\n\
+         \x20 return [bool]$r\n\
+         }}\n\
+         'TCP=' + (Mine '{tcp}')\n\
+         'UDP=' + (Mine '{udp}')\n\
+         $apps = @{{}}\n\
+         foreach ($a in Get-NetFirewallApplicationFilter) {{ $apps[$a.InstanceID] = $a.Program }}\n\
+         $n = 0\n\
+         foreach ($r in Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True) {{\n\
+         \x20 $p = $apps[$r.InstanceID]\n\
+         \x20 if ($p -and [Environment]::ExpandEnvironmentVariables($p) -eq $exe) {{ $n = $n + 1 }}\n\
+         }}\n\
+         'BLOCKED=' + $n\n",
+        exe = exe.replace('\'', "''"),
+        tcp = FW_TCP_RULE,
+        udp = FW_UDP_RULE,
+    )
+}
+
+#[tauri::command]
+fn firewall_status(port: Option<u16>) -> FirewallStatus {
+    let _ = port; // de poort zit in de regelnaam, niet in de vraag
+    let dicht = FirewallStatus { tcp: false, udp: false, blocked: 0, checked: false };
+    let Ok(o) = ps_encoded(&firewall_script(&this_exe())).output() else {
+        return dicht;
+    };
+    let out = String::from_utf8_lossy(&o.stdout);
+    let flag = |k: &str| {
+        out.lines()
+            .find_map(|l| l.trim().strip_prefix(k))
+            .map(|v| v.trim().eq_ignore_ascii_case("true"))
+    };
+    let count = out
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("BLOCKED="))
+        .and_then(|v| v.trim().parse::<u32>().ok());
+    match (flag("TCP="), flag("UDP="), count) {
+        (Some(t), Some(u), Some(b)) => FirewallStatus { tcp: t, udp: u, blocked: b, checked: true },
+        _ => dicht,
+    }
+}
+
+// Alles wat nodig is in ÉÉN UAC-prompt: de ontbrekende regels erbij, en de
+// block-regels tegen deze exe eraf. Dat laatste hoort erbij en niet apart -- een
+// allow-regel is zinloos zolang er een block-regel naast staat, en wie "maak de
+// regels" aanklikt bedoelt "zorg dat Taurus erdoor kan".
+//
+// Bewust smal: alleen INBOUND, alleen BLOCK, en alleen als het programmafilter
+// precies deze exe is. Er wordt niets anders aangeraakt.
+#[tauri::command]
+fn firewall_allow(port: Option<u16>) -> Result<(), String> {
+    let p = port.unwrap_or(sshhost::DEFAULT_PORT);
+    let exe = this_exe();
+    let st = firewall_status(Some(p));
+    if st.checked && st.tcp && st.udp && st.blocked == 0 {
+        return Ok(());
+    }
+    // Windows PowerShell 5.1, ASCII: dit draait op de machine van de gebruiker en
+    // niet per se op pwsh 7. De verhoogde kant kijkt zélf opnieuw wat er moet
+    // gebeuren; namen van buiten meegeven zou quoting-gevoelig zijn, want een
+    // "TCP Query User{...}C:\pad\taurus.exe" zit vol accolades en backslashes.
+    let inner = format!(
+        "$ErrorActionPreference='Stop'\n\
+         $exe = '{exe}'\n\
+         if (-not (Get-NetFirewallRule -DisplayName '{tcp}' -EA 0)) {{ New-NetFirewallRule -DisplayName '{tcp}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort {p} | Out-Null }}\n\
+         if (-not (Get-NetFirewallRule -DisplayName '{udp}' -EA 0)) {{ New-NetFirewallRule -DisplayName '{udp}' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5353 | Out-Null }}\n\
+         $apps = @{{}}\n\
+         foreach ($a in Get-NetFirewallApplicationFilter) {{ $apps[$a.InstanceID] = $a.Program }}\n\
+         foreach ($r in Get-NetFirewallRule -Direction Inbound -Action Block) {{\n\
+         \x20 $prog = $apps[$r.InstanceID]\n\
+         \x20 if ($prog -and [Environment]::ExpandEnvironmentVariables($prog) -eq $exe) {{\n\
+         \x20   Remove-NetFirewallRule -Name $r.Name -EA 0\n\
+         \x20 }}\n\
+         }}\n",
+        exe = exe.replace('\'', "''"),
+        tcp = FW_TCP_RULE,
+        udp = FW_UDP_RULE,
+    );
+    let utf16: Vec<u8> = inner.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    // -WindowStyle Hidden: anders knippert er een consolevenster over het scherm.
+    let launcher = format!(
+        "try {{ $p = Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList '-NoProfile','-EncodedCommand','{}'; 'CODE=' + $p.ExitCode }} catch {{ 'ERR=' + $_.Exception.Message }}",
+        b64(&utf16)
+    );
+    let o = ps_encoded(&launcher)
+        .output()
+        .map_err(|e| format!("PowerShell starten: {e}"))?;
+    let out = String::from_utf8_lossy(&o.stdout);
+    if let Some(err) = out.lines().find_map(|l| l.trim().strip_prefix("ERR=")) {
+        // De meest voorkomende: de UAC-prompt is weggeklikt.
+        return Err(format!("De firewall-regels zijn niet aangepast ({err})."));
+    }
+    let code = out
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("CODE="))
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .unwrap_or(-1);
+    if code != 0 {
+        return Err(format!("De firewall-regels zijn niet aangepast (afsluitcode {code})."));
+    }
+    // Meteen nakijken of het ook echt gelukt is. Zonder deze controle meldt de knop
+    // succes zodra de prompt is weggeklikt, ook als er niets veranderde -- en dat is
+    // precies hoe je een melding krijgt die blijft staan zonder uitleg.
+    let na = firewall_status(Some(p));
+    if na.checked && (!na.tcp || !na.udp || na.blocked > 0) {
+        return Err(
+            "De prompt is doorlopen, maar de firewall staat er nog hetzelfde bij. Kijk of beleid van de organisatie deze regels terugzet."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 
 // Antwoord op een popup: "deny" | "allow" | "join" | "block" | "always".
 #[tauri::command]
@@ -4024,6 +4982,8 @@ pub fn run() {
                 level: mic_level,
             },
             ssh: std::sync::Arc::new(sshhost::HostState::default()),
+            discovery: std::sync::Arc::new(discovery::Discovery::default()),
+            asking: Mutex::new(None),
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -4090,6 +5050,22 @@ pub fn run() {
             get_projects,
             save_projects,
             get_hosts,
+            machines,
+            remote_agents,
+            session_history,
+            history_record,
+            history_mark_open,
+            history_forget,
+            stop_remote_session,
+            discovery_start,
+            discovery_stop,
+            help_ask,
+            help_withdraw,
+            help_asking,
+            answer_help_request,
+            discovered_machines,
+            firewall_status,
+            firewall_allow,
             save_hosts,
             check_hosts,
             probe_host,
@@ -4158,6 +5134,7 @@ mod tests {
             id: "h1".into(),
             nickname: "Support".into(),
             hostname: "support01".into(),
+            machine: String::new(),
             user: "arjen".into(),
             port: 22,
             key_path: String::new(),
@@ -4558,6 +5535,297 @@ mod tests {
         assert!(!list[0].mux_auto);
     }
 
+    // GEMETEN op een echte opstelling: dezelfde computer stond er drie keer in
+    // (sshd, WSL, Taurus-host), waardoor de bijnaam het onderscheid moest dragen
+    // en "(Taurus-host)" doorlekte naar tabbadges en agentkaarten (#124).
+    #[test]
+    fn routes_to_one_address_collapse_into_one_machine() {
+        let mk = |id: &str, nick: &str, port: u16| {
+            let mut h = test_host();
+            h.id = id.into();
+            h.nickname = nick.into();
+            h.hostname = "192.168.2.9".into();
+            h.port = port;
+            h
+        };
+        let m = group_machines(vec![
+            mk("ursu", "ursu", 22),
+            mk("ursu-wsl", "ursu-wsl", 2223),
+            mk("ursu-taurus", "ursu (Taurus-host)", 8287),
+        ]);
+        assert_eq!(m.len(), 1, "een adres is een machine");
+        // De kortste bijnaam wint: juist de toevoeging wilden we kwijt.
+        assert_eq!(m[0].label, "ursu");
+        assert_eq!(m[0].routes.len(), 3);
+        // De Taurus-route heeft voorkeur: geen sleutelruil, geen sshd nodig.
+        assert_eq!(m[0].preferred, "ursu-taurus");
+    }
+
+    // Zonder Taurus-route valt de voorkeur terug op wat er wel is.
+    #[test]
+    fn without_a_taurus_route_the_first_one_is_used() {
+        let mut a = test_host();
+        a.id = "ursu".into();
+        a.hostname = "192.168.2.9".into();
+        a.port = 22;
+        let m = group_machines(vec![a]);
+        assert_eq!(m[0].preferred, "ursu");
+    }
+
+    // Twee echt verschillende machines blijven twee regels; en een expliciete
+    // `machine` wint van het adres (zelfde computer achter twee adressen).
+    #[test]
+    fn different_machines_stay_apart_and_machine_field_wins() {
+        let mk = |id: &str, host: &str, machine: &str| {
+            let mut h = test_host();
+            h.id = id.into();
+            h.hostname = host.into();
+            h.machine = machine.into();
+            h
+        };
+        assert_eq!(group_machines(vec![mk("a", "10.0.0.1", ""), mk("b", "10.0.0.2", "")]).len(), 2);
+        assert_eq!(group_machines(vec![mk("a", "10.0.0.1", "ursu"), mk("b", "10.0.0.2", "ursu")]).len(), 1);
+        // Hoofdlettergebruik mag geen tweede machine opleveren.
+        assert_eq!(group_machines(vec![mk("a", "URSU", ""), mk("b", "ursu", "")]).len(), 1);
+    }
+
+    // Wat de firewallcheck op DEZE machine antwoordt. Genegeerd in de gewone run,
+    // want de uitkomst hangt af van hoe deze machine is ingericht -- maar het is
+    // wel de enige manier om te zien of hij de waarheid vertelt, en een eerdere
+    // versie deed dat aantoonbaar niet:
+    //
+    //   cargo test --lib -- --ignored --nocapture toon_firewall
+    #[test]
+    #[ignore]
+    fn toon_firewall() {
+        // Standaard de testbinary; met TAURUS_TEST_EXE kijk je naar de echte. De
+        // check is namelijk PER EXE, en dat is precies het punt: een block-regel op
+        // taurus.exe zegt niets over dit testproces, en andersom ook niet.
+        let exe = std::env::var("TAURUS_TEST_EXE").unwrap_or_else(|_| this_exe());
+        let out = ps_encoded(&firewall_script(&exe))
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        println!("exe: {exe}\n{}", out.trim());
+    }
+
+    // Tegen een ECHTE machine uit je eigen hosts.json. Genegeerd in de gewone run
+    // (hij doet twee ssh-rondes en hangt dus aan een netwerk en een sleutel), maar
+    // dit is de enige manier om te zien of de twee bronnen samen kloppen zonder de
+    // GUI te starten:
+    //
+    //   cargo test --lib -- --ignored --nocapture toon_agents_op
+    //
+    // Zet TAURUS_TEST_HOST op het host-id; zonder die variabele doet hij niets.
+    #[test]
+    #[ignore]
+    fn toon_agents_op() {
+        let Ok(id) = std::env::var("TAURUS_TEST_HOST") else {
+            println!("zet TAURUS_TEST_HOST=<host-id> om dit te draaien");
+            return;
+        };
+        match remote_agents(id.clone()) {
+            Err(e) => println!("{id}: FOUT {e}"),
+            Ok(v) => {
+                println!("{id}: {} agent(s), {} lege sessie(s), taurus gezien: {}",
+                    v.agents.len(), v.empty.len(), v.taurus_seen);
+                for a in &v.agents {
+                    println!("  [{}] {} | {} | {} | aanhaakbaar={}",
+                        a.origin, a.title, a.agent, a.cwd, a.attachable);
+                }
+                for e in &v.empty {
+                    println!("  (leeg) {e}");
+                }
+            }
+        }
+    }
+
+    // De hele reden dat dit bestand bestaat: een mislukte herstart mag een sessie
+    // niet uit de geschiedenis halen. GEMETEN: na een herstart kwamen 2 van de 4
+    // sessies terug en waren de andere twee helemaal weg uit Taurus.
+    #[test]
+    fn history_updates_and_never_loses_the_first_start() {
+        let e = |uuid: &str, title: &str| HistoryEntry {
+            uuid: uuid.into(),
+            title: title.into(),
+            ..Default::default()
+        };
+        let list = merge_history(Vec::new(), e("u1", "Ontwikkel"), 100);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].created, 100);
+
+        // Zelfde sessie later opnieuw gezien: bijgewerkt, niet verdubbeld, en
+        // "wanneer begon dit werk" blijft staan.
+        let list = merge_history(list, e("u1", "Ontwikkel hernoemd"), 500);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].created, 100, "created is van de eerste keer");
+        assert_eq!(list[0].last_seen, 500);
+        assert_eq!(list[0].title, "Ontwikkel hernoemd");
+
+        // Een tweede sessie komt erbij, nieuwste bovenaan.
+        let list = merge_history(list, e("u2", "random"), 900);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].uuid, "u2");
+    }
+
+    // Een lege uuid is geen sessie om te onthouden; die zou bij elke start een
+    // nieuwe regel opleveren.
+    #[test]
+    fn history_ignores_an_entry_without_a_uuid() {
+        let list = merge_history(Vec::new(), HistoryEntry::default(), 1);
+        assert!(list.is_empty());
+    }
+
+    // GEMETEN op ursu, en precies de situatie die de klacht opleverde: herdr kende
+    // drie sessies waarvan NUL een agent had, terwijl er twee agents draaiden die
+    // alleen de Taurus daar kende. Alle drie de herdr-regels werden als keuze
+    // aangeboden en zetten je in een cmd-prompt.
+    #[test]
+    fn only_agents_are_choices_and_the_rest_is_cleanup() {
+        let sess = |name: &str, agent: &str, cwd: &str| RemoteSession {
+            name: name.into(),
+            status: "running".into(),
+            agent: agent.into(),
+            agent_status: String::new(),
+            cwd: cwd.into(),
+        };
+        let peer = r#"[
+          {"title":"Ontwikkel","path":"C:\\Users\\arjen\\ontwikkelmap","agent":"claude","host_id":""},
+          {"title":"random","path":"C:\\Users\\arjen","agent":"claude","host_id":""},
+          {"title":"elders","path":"/srv/x","agent":"claude","host_id":"andere-machine"}
+        ]"#;
+        let got = collect_agents(
+            vec![
+                sess("default", "", ""),
+                sess("taurus-ursu-c-users-arjen-28f85e64", "", r"C:\Users\arjen"),
+                sess("taurus-ursu-taurus-c-users-arjen-28f85e64", "", ""),
+            ],
+            Some(peer),
+        );
+        // Geen van de drie herdr-sessies is een keuze; ze zijn opruimwerk.
+        assert_eq!(got.empty.len(), 3);
+        // Wel de twee agents die er echt draaien.
+        let namen: Vec<&str> = got.agents.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(namen, vec!["Ontwikkel", "random"]);
+        // Een sessie die op DIE machine naar een derde machine wijst is niet van haar.
+        assert!(!got.agents.iter().any(|a| a.title == "elders"));
+        // Zonder mux-sessie is er niets om aan te haken, en dat zegt het model ook.
+        assert!(got.agents.iter().all(|a| !a.attachable && a.origin == "taurus"));
+        assert!(got.taurus_seen);
+    }
+
+    // Een herdr-sessie MET agent is wel gewoon een keuze, en de mapnaam leest
+    // prettiger dan een sessienaam met een hash erachter.
+    #[test]
+    fn a_herdr_session_with_an_agent_is_a_real_choice() {
+        let got = collect_agents(
+            vec![RemoteSession {
+                name: "taurus-ursu-c-users-arjen-proj-1a2b".into(),
+                status: "running".into(),
+                agent: "claude".into(),
+                agent_status: "werkt".into(),
+                cwd: r"C:\Users\arjen\proj".into(),
+                }],
+            None,
+        );
+        assert_eq!(got.agents.len(), 1);
+        assert_eq!(got.agents[0].title, "proj");
+        assert!(got.agents[0].attachable);
+        assert_eq!(got.agents[0].origin, "herdr");
+        assert_eq!(got.agents[0].status, "werkt");
+        // Geen antwoord van de Taurus daar is iets anders dan "hij draait niets".
+        assert!(!got.taurus_seen);
+    }
+
+    // Dezelfde agent langs twee kanten gezien blijft één regel: de Taurus daar kent
+    // hem ook, maar het is dezelfde map en dus hetzelfde werk.
+    #[test]
+    fn the_same_agent_seen_twice_stays_one_row() {
+        let got = collect_agents(
+            vec![RemoteSession {
+                name: "taurus-ursu-x".into(),
+                status: "running".into(),
+                agent: "claude".into(),
+                agent_status: String::new(),
+                cwd: r"C:\Users\arjen\proj".into(),
+            }],
+            Some(r#"[{"title":"proj","path":"c:/users/arjen/proj/","agent":"claude","host_id":""}]"#),
+        );
+        assert_eq!(got.agents.len(), 1, "{:?}", got.agents);
+        assert!(got.agents[0].attachable, "de aanhaakbare kant wint");
+    }
+
+    // GEMETEN nadat Connect een paar keer gebruikt was: op de andere machine
+    // stonden drie herdr-sessies zonder agent, twee daarvan door Connect gemaakt.
+    // "Wegwerp" moet aan beide kanten gelden, anders stapelen lege sessies zich op
+    // die bij het aanhaken in een kale shell of een mislukte resume eindigen.
+    #[test]
+    fn a_throwaway_session_leaves_no_persistent_session_behind() {
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.mux_auto = true;
+        let weg = without_persistence(h.clone(), true);
+        assert_eq!(weg.mux, "none");
+        // Anders vult de eerste hertest hem alsnog in.
+        assert!(!weg.mux_auto);
+        // Een gewone start houdt de persistentie die de machine biedt.
+        assert_eq!(without_persistence(h, false).mux, "herdr");
+    }
+
+    // De sessienaam gaat een shell in, dus hij hoort gequote te zijn -- en het moet
+    // `session delete` zijn, niet `server stop`.
+    //
+    // GEMETEN tegen herdr op ursu: `--session <naam> server stop` gaf exitcode 0,
+    // liet de sessie gewoon in de lijst staan en startte en passant de
+    // default-sessie. `session delete <naam>` antwoordt "deleted session ..." en
+    // haalt hem er echt uit.
+    #[test]
+    fn stopping_a_session_deletes_it_by_name_and_quotes_it() {
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.os = "linux".into();
+        let cmd = stop_session_command(&h, "werk 2").unwrap();
+        // De payload gaat als base64 door de shell; decodeer hem om te kijken.
+        let b64part = cmd.split_whitespace().nth(1).unwrap();
+        let raw = String::from_utf8(b64_decode_for_test(b64part)).unwrap();
+        assert!(raw.contains("session stop 'werk 2'"), "{raw}");
+        assert!(raw.contains("session delete 'werk 2'"), "{raw}");
+        // Juist NIET de vorm die niets deed.
+        assert!(!raw.contains("server stop"), "{raw}");
+    }
+
+    // Op een Windows-host gaat het door PowerShell, met dezelfde herdr-terugval
+    // als de rest: een pad in LOCALAPPDATA als `herdr` niet in PATH staat.
+    #[test]
+    fn stopping_a_session_on_windows_goes_through_powershell() {
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.os = "windows".into();
+        let cmd = stop_session_command(&h, "werk").unwrap();
+        assert!(cmd.starts_with("powershell -NoProfile -EncodedCommand "), "{cmd}");
+    }
+
+    // tmux heeft zijn eigen werkwoord; psmux spreekt dezelfde taal.
+    #[test]
+    fn stopping_a_tmux_session_uses_kill_session() {
+        let mut h = test_host();
+        h.mux = "tmux".into();
+        h.os = "linux".into();
+        let cmd = stop_session_command(&h, "werk").unwrap();
+        let b64part = cmd.split_whitespace().nth(1).unwrap();
+        let raw = String::from_utf8(b64_decode_for_test(b64part)).unwrap();
+        assert!(raw.contains("tmux kill-session -t 'werk'"), "{raw}");
+    }
+
+    // Zonder persistentie is er geen sessie die blijft staan, dus ook niets om te
+    // stoppen. Een commando verzinnen zou hier een fout uit een shell opleveren.
+    #[test]
+    fn stopping_a_session_needs_a_mux() {
+        let mut h = test_host();
+        h.mux = "none".into();
+        assert!(stop_session_command(&h, "werk").is_err());
+    }
+
     // Zonder herdr is er geen chrome om te verbergen, en dan hoort Taurus van
     // andermans configbestand af te blijven.
     #[test]
@@ -4877,6 +6145,7 @@ mod tests {
             id: "ursu".into(),
             nickname: "ursu".into(),
             hostname: std::env::var("TAURUS_TEST_HOST").expect("TAURUS_TEST_HOST"),
+            machine: String::new(),
             user: std::env::var("TAURUS_TEST_USER").unwrap_or_default(),
             port: 22,
             key_path: std::env::var("TAURUS_TEST_KEY").unwrap_or_default(),
@@ -4978,6 +6247,7 @@ mod tests {
             id: "h2".into(),
             nickname: "Work".into(),
             hostname: "work.tail.net".into(),
+            machine: String::new(),
             user: "arjen".into(),
             port: 2222,
             key_path: r"C:\Users\AST\.ssh\id_ed25519".into(),
@@ -5072,6 +6342,40 @@ mod tests {
     }
 
     #[test]
+    // De zes waarden die claude 2.1.232 accepteert, plus de twee die juist GEEN
+    // vlag mogen opleveren. GEMETEN met `claude --permission-mode <x> --version`:
+    // een onbekende waarde geeft "argument '<x>' is invalid. Allowed choices are
+    // acceptEdits, auto, bypassPermissions, manual, dontAsk, plan".
+    #[test]
+    fn every_permission_mode_the_cli_accepts_is_reachable() {
+        for m in ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"] {
+            assert_eq!(claude_permission_mode(m), Some(m), "{m} hoort door te komen");
+        }
+        // "default" is geen modus maar de afwezigheid van een keuze: geen vlag,
+        // zodat de eigen instelling van de agent blijft gelden.
+        assert_eq!(claude_permission_mode("default"), None);
+        assert_eq!(claude_permission_mode(""), None);
+    }
+
+    // Een kaart kan een modus bewaren die bij een andere agent hoorde. Die mag nooit
+    // als vlag doorkomen -- dat geeft een fout drie lagen diep in een remote shell.
+    #[test]
+    fn a_mode_from_another_agent_never_becomes_a_flag() {
+        assert_eq!(claude_permission_mode("sandbox"), None, "agy-modus");
+        assert_eq!(claude_permission_mode("Manual"), None, "hoofdletters telt de CLI ook niet");
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "sandbox", "", false, None);
+        assert!(!a.contains(&"--permission-mode".to_string()), "{a:?}");
+    }
+
+    // De nieuwe modi komen ook echt op de commandoregel terecht.
+    #[test]
+    fn accept_edits_and_dont_ask_reach_the_command_line() {
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "acceptEdits", "", false, None);
+        assert!(a.windows(2).any(|w| w == ["--permission-mode", "acceptEdits"]), "{a:?}");
+        let (_, b) = build_command("claude", LaunchKind::Create, "u1", "t", "", "dontAsk", "", false, None);
+        assert!(b.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]), "{b:?}");
+    }
+
     fn build_command_claude_create_and_resume() {
         let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true, None);
         assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);

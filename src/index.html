@@ -26,7 +26,7 @@
         <div class="section-head">
           <div class="sidebar-label dropzone-label" data-i18n="projects">Agents</div>
           <button id="hosts-btn" class="icon-btn sec-add" data-i18n-title="host_manage">🖥</button>
-          <button id="attach-btn" class="icon-btn sec-add" data-i18n-title="attach_open">⇱</button>
+          <button id="attach-btn" class="icon-btn sec-add" data-i18n-title="attach_menu">⇱</button>
           <button id="add-project-btn" class="icon-btn sec-add" data-i18n-title="new_project">＋</button>
         </div>
         <div id="project-list" class="project-list"></div>
@@ -221,7 +221,12 @@
             </div>
             <div class="setting-group">
               <h3 data-i18n="grp_sessions">Sessies</h3>
-              <label class="srow check" data-help-key="help_persist"><input id="set-persist" type="checkbox" /> <span data-i18n="set_persist">Sessies onthouden en bij opstarten hervatten</span></label>
+              <label class="srow" data-help-key="help_persist"><span data-i18n="set_persist">Bij opstarten</span>
+                <select id="set-persist-mode">
+                  <option value="ask" data-i18n="persist_ask">Vragen welke sessies je opent</option>
+                  <option value="silent" data-i18n="persist_silent">Stil hervatten wat openstond</option>
+                  <option value="clean" data-i18n="persist_clean">Schoon beginnen</option>
+                </select></label>
             </div>
           </div>
 
@@ -348,6 +353,10 @@
         </div>
         <div id="consent-warn" class="hint" data-i18n="consent_warn">Toestaan betekent dat deze computer als jouw account mag werken, met jouw rechten en credentials.</div>
         <label class="srow check" id="consent-remember-row"><input id="consent-remember" type="checkbox" /> <span data-i18n="consent_remember">Niet meer vragen voor deze computer</span></label>
+        <!-- Macht volgt toezicht (#126). Er start altijd een AGENT, nooit een kale
+             shell; dit vinkje bepaalt of die agent uit zichzelf iets mag. -->
+        <label class="srow check" id="consent-full-row"><input id="consent-full" type="checkbox" /> <span data-i18n="consent_full">Vol beheer: de agent zonder rem</span></label>
+        <div id="consent-full-warn" class="hint hidden" data-i18n="consent_full_warn">Met vol beheer draait de agent op jouw account in zijn eigen modus, zonder dat er iemand meekijkt. Zonder het vinkje start hij in de map waar hij begint en vraagt hij het per stap.</div>
         <div id="consent-timer" class="consent-timer"></div>
         <div class="modal-actions">
           <button id="consent-block" class="btn-ghost" data-i18n="consent_block">Blokkeer</button>
@@ -377,7 +386,15 @@
     <div id="host-modal" class="modal hidden">
       <div class="modal-box wide">
         <h2 data-i18n="hosts_title">Machines</h2>
+        <div class="group-head" data-i18n="hosts_known">Bekende machines</div>
         <div id="host-rows" class="host-rows"></div>
+        <!-- Gevonden op het vertrouwde netwerk (#125). Zichtbaar gescheiden van de
+             bekende lijst: "ik ken je" en "ik zie je" zijn niet hetzelfde. -->
+        <div id="found-wrap" class="hidden">
+          <div class="group-head" data-i18n="found_title">Iemand vraagt hulp</div>
+          <div id="found-rows" class="host-rows"></div>
+        </div>
+        <div id="found-note" class="found-note hidden"></div>
         <button id="host-add" class="btn-ghost add" data-i18n="host_add">＋ Machine toevoegen…</button>
 
         <div id="host-form" class="host-form hidden">
@@ -416,22 +433,32 @@
       </div>
     </div>
 
+    <!-- ===== Opstarten: welke sessies open je opnieuw? (#129) ===== -->
+    <div id="restore-modal" class="modal hidden">
+      <div class="modal-box wide">
+        <h2 data-i18n="restore_title">Vorige sessies openen?</h2>
+        <p class="hint" data-i18n="restore_lead">Aangevinkt is wat openstond toen Taurus sloot. Daaronder staat wat er eerder is geweest — die blijft bewaard, ook als je hem nu niet opent.</p>
+        <div id="restore-rows" class="host-rows"></div>
+        <div class="modal-actions">
+          <button id="restore-none" class="btn-ghost" data-i18n="restore_none">Niets openen</button>
+          <button id="restore-go" class="btn-primary" data-i18n="restore_go">Openen</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ===== Aanhaken aan een sessie die al draait op een machine ===== -->
     <div id="attach-modal" class="modal hidden">
       <div class="modal-box wide">
-        <h2 data-i18n="attach_title">Verbinden met een draaiende sessie</h2>
-        <div class="e-field">
-          <span class="e-cap" data-i18n="attach_host">Machine</span>
-          <div class="e-pathrow">
-            <select id="at-host"></select>
-            <button id="at-refresh" class="e-browse" data-i18n-title="attach_refresh">↻</button>
-          </div>
-        </div>
+        <h2 data-i18n="attach_title">Verder werken</h2>
+        <p class="hint" data-i18n="attach_lead">Alleen jouw eigen computer en de machines die je zelf hebt ingericht.</p>
+        <div class="group-head" data-i18n="attach_local">Op deze computer</div>
+        <div id="at-local" class="host-rows"></div>
+        <div class="group-head" data-i18n="attach_mine">Op jouw machines</div>
         <div id="at-rows" class="host-rows"></div>
         <div id="at-status" class="status-msg"></div>
         <div class="modal-actions">
-          <button id="at-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
-          <button id="at-connect" class="btn-primary" data-i18n="attach_connect">Verbinden</button>
+          <button id="at-refresh" class="btn-ghost" data-i18n="attach_refresh">↻ Opnieuw ophalen</button>
+          <button id="at-cancel" class="btn-primary" data-i18n="close">Sluiten</button>
         </div>
       </div>
     </div>

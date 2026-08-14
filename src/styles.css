@@ -836,6 +836,62 @@ select:-webkit-autofill {
   border-radius: 5px; cursor: pointer; padding: 3px 8px; font-size: 12px;
 }
 .host-test:hover, .host-del:hover { color: var(--text); border-color: var(--accent); }
+
+/* Eén blok per machine (#124). De routes staan eronder ingesprongen, want ze zijn
+   een eigenschap van die machine -- geen tweede lijst met eigen betekenis. */
+.machine {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 9px 11px; display: flex; flex-direction: column; gap: 6px;
+}
+.machine-head { display: flex; align-items: center; gap: 10px; }
+.machine-connect {
+  background: var(--accent); border: 1px solid var(--accent); color: #fff;
+  border-radius: 5px; cursor: pointer; padding: 4px 12px; font-size: 12px; flex: 0 0 auto;
+}
+.machine-connect:hover { filter: brightness(1.1); }
+/* Ingesprongen tot onder de naam, zodat de routes visueel bij de machine horen
+   en niet als losse regels in de lijst gelezen worden. */
+.machine-routes { display: flex; flex-direction: column; gap: 4px; padding-left: 19px; }
+.route-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+.route-name { min-width: 92px; }
+.route-mux { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* De voorkeursroute is geen waarschuwing en geen status: een rustig label, in de
+   accentkleur van het thema en niet in een signaalkleur. */
+.route-pref {
+  border: 1px solid var(--accent); color: var(--accent);
+  border-radius: 4px; padding: 0 5px; font-size: 10px; flex: 0 0 auto;
+}
+.route-row .host-test, .route-row .host-del { padding: 1px 6px; font-size: 11px; }
+.route-row.err { color: var(--signal-bad); }
+.machine-sess-toggle {
+  background: none; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 5px; cursor: pointer; padding: 4px 9px; font-size: 11.5px; flex: 0 0 auto;
+}
+.machine-sess-toggle:hover { color: var(--text); border-color: var(--accent); }
+/* Wat er draait staat onder de routes, met een scheiding: het is een andere soort
+   informatie -- routes zijn hoe je erbij komt, sessies zijn wat er al is. */
+.machine-sess {
+  display: flex; flex-direction: column; gap: 4px;
+  padding-left: 19px; padding-top: 6px; border-top: 1px dashed var(--border);
+}
+/* Een kale shell op andermans machine is geen fout, maar wel iets om te weten
+   voordat je klikt: waarschuwing, geen alarm. */
+.sess-bare {
+  border: 1px solid var(--signal-warn); color: var(--signal-warn);
+  border-radius: 4px; padding: 0 5px; font-size: 10px; flex: 0 0 auto;
+}
+/* Scherp gezet: de volgende klik breekt andermans sessie af. */
+.sess-stop.armed { color: var(--signal-bad); border-color: var(--signal-bad); }
+/* "Bekend" en "gevonden" zijn niet hetzelfde, en dat moet je kunnen zien (#125). */
+.group-head {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-dim); margin: 4px 2px 6px;
+}
+/* Waarom er niets staat. Rustig gezet: dit is uitleg, geen alarm. */
+.found-note {
+  font-size: 11.5px; color: var(--text-dim); margin-bottom: 12px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+}
 .host-form { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; display: flex; flex-direction: column; gap: 9px; }
 .host-form-row { display: flex; gap: 9px; }
 .host-form-row .grow { flex: 1; }
@@ -903,3 +959,32 @@ select:-webkit-autofill {
 .consent-fp code { word-break: break-all; }
 .consent-timer { margin-top: 8px; font-size: 12px; color: var(--text-dim); }
 #consent-modal .modal-actions { justify-content: space-between; }
+
+/* Opstartvraag: welke sessies open je opnieuw (#129). Een rij is een label met een
+   vinkje, zodat de hele regel klikbaar is. */
+.restore-row { cursor: pointer; }
+.restore-row input[disabled] { cursor: not-allowed; }
+/* Niet te hervatten: de rij blijft staan mét reden, en dat mag geen alarm zijn --
+   verdwijnen was de fout, en rood zou suggereren dat er iets stuk is. */
+.restore-row input[disabled] ~ .host-main { opacity: .6; }
+
+/* Vraagmodus (#125). De vragende kant krijgt een rustige balk onder de tabbalk:
+   je hebt het zelf aangezet, dus het hoeft je niet te onderbreken -- het moet
+   alleen niet te vergeten zijn. */
+.asking-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 14px; font-size: 12.5px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
+  border-bottom: 1px solid var(--accent);
+}
+.asking-banner .grow { flex: 1; min-width: 0; }
+.asking-banner button { padding: 3px 10px; font-size: 11.5px; }
+/* De ontvangende kant: een verzoek is geen machine in een lijst, dus het krijgt
+   een eigen vorm die opvalt zonder alarm te slaan. */
+.askband {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--accent); border-radius: 6px; padding: 11px 13px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  margin-bottom: 8px;
+}
+.askband-hand { font-size: 17px; }

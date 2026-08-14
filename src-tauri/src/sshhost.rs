@@ -3,9 +3,14 @@
 // plaats van in authorized_keys: een onbekende sleutel levert een pairing-popup,
 // een sessie levert een tweede popup met deny/allow/join.
 //
-// Bewust een VOLLEDIGE shell, net als wat Taurus zelf op elke host krijgt. De
-// echte knoppen zijn toestemming, zichtbaarheid en een audit-spoor -- niet een
-// commandofilter, want dat is in een shell toch niet af te dwingen.
+// Wat hier start is een AGENT, geen shell. Een agent draait in een shell, dus zo
+// mag je erover praten, maar een kale prompt op andermans machine is nooit het
+// product -- uitgaand vraagt Taurus ook om `ssh -t host "<agent>"` en niet om een
+// login. Een verzoek MET commandoregel draait die regel, want die stond in de
+// popup; een verzoek zonder start de agent (#126).
+//
+// De echte knoppen zijn toestemming, zichtbaarheid en een audit-spoor -- niet een
+// commandofilter, want dat is achter een agent-CLI toch niet af te dwingen.
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::net::SocketAddr;
@@ -200,20 +205,61 @@ pub enum Decision {
     Block,
     // Allow + onthoud dit, niet meer vragen.
     Always,
+    // Dezelfde twee, maar met vol beheer: het vinkje op de popup (#126).
+    AllowFull,
+    AlwaysFull,
+}
+
+// Hoeveel macht een sessie krijgt (#126). Niet gekoppeld aan VERTROUWEN maar aan
+// TOEZICHT: bij join ziet de ontvanger elke toetsaanslag in een spiegel-tab, en
+// dat meekijken IS de controle. Is er niemand die kijkt, dan hoort de sessie niet
+// te kunnen zwerven.
+//
+// WEES EERLIJK over wat "Sandboxed" is en niet is. Het is een STRUCTUREEL verschil:
+// er is geen shell, dus niet alles is per constructie bereikbaar. Het is GEEN
+// OS-grens: de agent kan zelf commando's draaien en zijn tools kunnen paden buiten
+// de werkmap raken. De inperking is precies zo sterk als het permissiemodel van de
+// agent -- een echt mechanisme, maar een dat van de agent is en niet van Taurus.
+// Een echte grens zou een apart beperkt Windows-account of een Job Object /
+// AppContainer vragen. Zeg in de UI dus wat het inperkt, niet het woord "sandbox".
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Power {
+    Sandboxed,
+    Full,
 }
 
 impl Decision {
     fn from_str(s: &str) -> Decision {
         match s {
             "allow" => Decision::Allow,
+            "allow-full" => Decision::AllowFull,
             "join" => Decision::Join,
             "block" => Decision::Block,
             "always" => Decision::Always,
+            "always-full" => Decision::AlwaysFull,
             _ => Decision::Deny,
         }
     }
     fn permits(self) -> bool {
-        matches!(self, Decision::Allow | Decision::Join | Decision::Always)
+        matches!(
+            self,
+            Decision::Allow
+                | Decision::Join
+                | Decision::Always
+                | Decision::AllowFull
+                | Decision::AlwaysFull
+        )
+    }
+    // Join geeft altijd vol beheer: daar wordt meegekeken. De andere twee alleen
+    // als de ontvanger dat expliciet aanvinkte.
+    fn power(self) -> Power {
+        match self {
+            Decision::Join | Decision::AllowFull | Decision::AlwaysFull => Power::Full,
+            _ => Power::Sandboxed,
+        }
+    }
+    fn remembers(self) -> bool {
+        matches!(self, Decision::Always | Decision::AlwaysFull)
     }
 }
 
@@ -370,6 +416,8 @@ impl russh::server::Server for TaurusHost {
             fingerprint: String::new(),
             auto_allow: false,
             ptys: Default::default(),
+            offered: Default::default(),
+            help_token: String::new(),
             chan_session: Default::default(),
             pty_req: Default::default(),
             channels: Default::default(),
@@ -453,6 +501,12 @@ struct HostSession {
     fingerprint: String,
     auto_allow: bool,
     ptys: Arc<StdMutex<HashMap<ChannelId, Arc<SessionIo>>>>,
+    // Het token waarmee deze verbinding binnenkwam, als dat zo is (#125). Zolang
+    // dit gezet is, is meelezen met de aangeboden sessie het enige wat mag.
+    help_token: String,
+    // Kanalen die een hulpvraag beantwoorden: kanaal -> LOKAAL sessie-id (#125).
+    // Daar wordt niets gestart; er wordt meegelezen en meegetypt.
+    offered: Arc<StdMutex<HashMap<ChannelId, String>>>,
     // Welk kanaal hoort bij welke sessie-id, zodat opruimen bij channel_close
     // ook de gedeelde kant (de JOIN-registratie) meeneemt.
     chan_session: Arc<StdMutex<HashMap<ChannelId, String>>>,
@@ -560,6 +614,55 @@ fn shell_command(cmd: Option<&str>, cwd: Option<&str>) -> CommandBuilder {
     c
 }
 
+// Wat een inkomende sessie start (#126).
+//
+// UITGANGSPUNT: Taurus start AGENTS, geen shells. Een agent draait in een shell --
+// zo mag je er in de UI ook over praten -- maar een kale prompt op andermans
+// machine is nooit het product. Dat gold al voor de uitgaande kant (`ssh -t host
+// "<agent>"`), en het hoort hier net zo te gelden. Dit is de reden dat er geen
+// enkel pad meer is waarop een verzoek ZONDER commando op cmd.exe uitkomt.
+//
+// Wat toezicht dan wél verandert, is hoeveel die agent uit zichzelf mag:
+//   - onbeheerd toegestaan -> `dontAsk`: vraagt niets en weigert wat niet vooraf
+//     is toegestaan;
+//   - meegekeken (join), of expliciet aangevinkt -> de eigen modus van de agent.
+//
+// Twee grenzen die hier expliciet horen te staan:
+//   - Dit is geen OS-grens. Zie de opmerking bij `Power`.
+//   - Een EXEC-verzoek (`ssh -t host "..."`) draait wat er gevraagd is, ook
+//     onbeheerd. Dat is geen gat maar de andere helft van hetzelfde principe: die
+//     regel stond in de popup en is als zodanig goedgekeurd. Er hier alsnog langs
+//     kijken zou commandofilteren zijn, en #121 heeft dat afgewezen op de grond
+//     dat een grens die niet houdt, leest als veiligheid.
+fn session_command(cmd: Option<&str>, cwd: Option<&str>, power: Power) -> CommandBuilder {
+    // Een expliciet commando is precies wat er in de popup stond; dat draait zoals
+    // gevraagd, door de shell die de regel kan lezen.
+    if cmd.is_some() {
+        return shell_command(cmd, cwd);
+    }
+    let (program, prefix) = crate::resolve_program("claude");
+    let mut c = CommandBuilder::new(program);
+    for a in prefix {
+        c.arg(a);
+    }
+    // Alleen bij onbeheerd de rem erop. Bij vol beheer geen vlag: dan geldt de
+    // eigen default van de agent, en die hoort niet hier overschreven te worden.
+    //
+    // `dontAsk` en niet `plan` (#130). Plan-modus voert HELEMAAL NIETS uit, dus een
+    // onbeheerde sessie kon het werk waarvoor hij was toegestaan niet doen -- je gaf
+    // iemand toegang tot een agent die alleen mocht nadenken. `dontAsk` vraagt niets
+    // en weigert wat niet vooraf is toegestaan, en dat is precies de goede kant om
+    // op te falen als er niemand kijkt: een popup die niemand beantwoordt is een
+    // hangende sessie, en dat is geen veiligheid maar een vastloper.
+    if power == Power::Sandboxed {
+        c.arg("--permission-mode");
+        c.arg("dontAsk");
+    }
+    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
+    c.cwd(cwd.unwrap_or(&home));
+    c
+}
+
 impl HostSession {
     fn peer_name(&self) -> String {
         format!("{}@{}", self.user, self.address)
@@ -585,7 +688,7 @@ impl HostSession {
             )
             .await;
         match d {
-            Decision::Always => {
+            _ if d.remembers() => {
                 let fp = self.fingerprint.clone();
                 upsert_peer(&fp, |p| p.auto_allow = true);
                 self.auto_allow = true;
@@ -602,6 +705,10 @@ impl HostSession {
         // Join apart vastleggen: meekijken betekent dat er een tweede toetsenbord
         // op dezelfde terminal zit, en dat hoort achteraf terug te vinden te zijn.
         // "Iemand keek mee" is een ander feit dan "iemand mocht verbinden".
+        //
+        // En sinds #126 staat er ook bij WELKE MACHT er is verleend: onbeheerd met
+        // vol beheer is een ander feit dan onbeheerd zonder shell, en achteraf is
+        // dat precies het verschil dat je wilt kunnen nazoeken.
         audit(
             &self.app,
             match d {
@@ -610,9 +717,61 @@ impl HostSession {
                 _ => "session-deny",
             },
             &self.peer_name(),
-            what,
+            &if d.permits() {
+                format!(
+                    "{what} [{}]",
+                    match d.power() {
+                        Power::Full => "vol beheer",
+                        Power::Sandboxed => "agent, geen shell",
+                    }
+                )
+            } else {
+                what.to_string()
+            },
         );
         d
+    }
+
+    // Een openstaande hulpvraag beantwoorden: hang dit kanaal aan de LOKALE sessie
+    // waar de vrager in zit (#125).
+    //
+    // Er wordt hier niets gestart. Dat is het hele punt van de vraagmodus: het werk
+    // blijft in de sessie van degene met het probleem, en de helper zit ernaast.
+    // Klopt het token niet, dan is dit gewoon een onbekend commando -- geen hint
+    // dat er een vraag open staat of stond.
+    fn answer_help(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+        token: &str,
+    ) -> Result<(), russh::Error> {
+        let Some(local) = crate::claim_help_offer(&self.app, token) else {
+            audit(&self.app, "help-bad-token", &self.peer_name(), "");
+            session.channel_failure(channel)?;
+            return Ok(());
+        };
+        audit(&self.app, "help-answered", &self.peer_name(), &local);
+        self.offered.lock().unwrap().insert(channel, local.clone());
+        session.channel_success(channel)?;
+
+        // Meelezen: dezelfde bytes die naar het venster van de vrager gaan.
+        let rx = crate::subscribe_local_session(&local);
+        let handle = session.handle();
+        let rt = tokio::runtime::Handle::current();
+        std::thread::spawn(move || {
+            while let Ok(chunk) = rx.recv() {
+                if rt.block_on(handle.data(channel, chunk)).is_err() {
+                    break;
+                }
+            }
+            // Het kanaal netjes afsluiten als de sessie ophoudt; de sessie zelf
+            // blijft van de vrager en gaat hier niet dicht.
+            rt.block_on(async {
+                let _ = handle.eof(channel).await;
+                let _ = handle.close(channel).await;
+            });
+        });
+        Ok(())
     }
 
     // Start een programma in een ConPTY, pompt beide kanten op, schrijft het
@@ -626,13 +785,14 @@ impl HostSession {
         rows: u16,
         term: &str,
         mirror: bool,
+        power: Power,
     ) -> Result<(), String> {
         let pty = NativePtySystem::default();
         let pair = pty
             .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| format!("openpty: {e}"))?;
 
-        let mut builder = shell_command(cmd, None);
+        let mut builder = session_command(cmd, None, power);
         builder.env("TERM", if term.is_empty() { "xterm-256color" } else { term });
 
         let mut child = pair.slave.spawn_command(builder).map_err(|e| format!("starten: {e}"))?;
@@ -721,6 +881,34 @@ impl HostSession {
 impl Handler for HostSession {
     type Error = russh::Error;
 
+    // Een hulpvraag beantwoorden vraagt GEEN sleutel (#125). Het token in de
+    // gebruikersnaam is de credential; de sleutel wordt op dit pad nergens tegen
+    // gecontroleerd, dus eisen dat de helper er een heeft voegt niets toe.
+    //
+    // GEMETEN tussen twee echte instanties: zonder dit kwam de verbinding niet eens
+    // tot `auth_publickey`. Deze machine heeft geen `~/.ssh/id_*`, dus de client bood
+    // niets aan en kreeg "Permission denied" -- terwijl het token gewoon klopte en er
+    // aan de andere kant geen enkele auditregel verscheen. Iemand te hulp schieten
+    // zou dan afhangen van of je ooit een sleutel hebt aangemaakt.
+    //
+    // Dit is niet zwakker dan de vorige route: dáár werd elke sleutel geaccepteerd
+    // zodra het token klopte. Wat de toegang begrenst is het token zelf -- 24 tekens
+    // uit OS-entropie, alleen geldig zolang de vraag open staat, eenmalig, en het
+    // levert niets op dan meelezen met de aangeboden sessie.
+    async fn auth_none(&mut self, user: &str) -> Result<Auth, Self::Error> {
+        if let Some(tok) = user.strip_prefix("taurus-help-") {
+            if crate::help_token_matches(&self.app, tok) {
+                self.user = user.to_string();
+                self.help_token = tok.to_string();
+                audit(&self.app, "help-auth", &self.peer_name(), "token, zonder sleutel");
+                return Ok(Auth::Accept);
+            }
+        }
+        // Voor al het andere blijft dit precies wat het was: geen toegang, en de
+        // client gaat door naar publickey.
+        Ok(Auth::reject())
+    }
+
     // Dit is het pairing-moment. De naam is een claim; de fingerprint is identiteit.
     async fn auth_publickey(
         &mut self,
@@ -730,6 +918,26 @@ impl Handler for HostSession {
         let fp = key.fingerprint(Default::default()).to_string();
         self.user = user.to_string();
         self.fingerprint = fp.clone();
+
+        // Iemand die een HULPVRAAG beantwoordt komt binnen op het token, niet op
+        // een bekende sleutel (#125). Dat moet, want de collega die te hulp schiet
+        // is meestal een onbekende: hem eerst een pairing-popup laten beantwoorden
+        // op de machine van degene die vastzit, terwijl die daar zelf om vroeg, is
+        // precies de omweg die de vraagmodus weghaalt. De uitnodiging IS de
+        // toestemming, en hij geldt alleen voor deze ene vraag.
+        //
+        // Dit geeft geen bredere toegang: `help_token` is gezet, en het enige wat
+        // dan lukt is meelezen met de aangeboden sessie. Alles wat een gewone
+        // sessie wil, loopt nog steeds langs de popups.
+        if let Some(tok) = user.strip_prefix("taurus-help-") {
+            if crate::help_token_matches(&self.app, tok) {
+                self.help_token = tok.to_string();
+                audit(&self.app, "help-auth", &self.peer_name(), &fp);
+                return Ok(Auth::Accept);
+            }
+            // Geen kloppend token: behandel het verder als een gewone poging, zodat
+            // dit pad niet verklapt of er een vraag open staat.
+        }
 
         let known = read_peers().into_iter().find(|p| p.fingerprint == fp);
 
@@ -848,6 +1056,13 @@ impl Handler for HostSession {
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        // Beantwoordt dit kanaal een hulpvraag, dan gaan de toetsaanslagen naar de
+        // LOKALE sessie van de vrager -- twee toetsenborden op een agent (#125).
+        let local = self.offered.lock().unwrap().get(&channel).cloned();
+        if let Some(id) = local {
+            crate::write_local_session(&self.app, &id, data);
+            return Ok(());
+        }
         let io = self.ptys.lock().unwrap().get(&channel).cloned();
         if let Some(io) = io {
             io.write(data);
@@ -935,7 +1150,7 @@ impl Handler for HostSession {
             .cloned()
             .unwrap_or((80, 24, "xterm-256color".into()));
         let handle = session.handle();
-        match self.start(handle, channel, None, cols, rows, &term, d == Decision::Join) {
+        match self.start(handle, channel, None, cols, rows, &term, d == Decision::Join, d.power()) {
             Ok(()) => session.channel_success(channel)?,
             Err(e) => {
                 audit(&self.app, "error", &self.peer_name(), &format!("shell: {e}"));
@@ -952,6 +1167,24 @@ impl Handler for HostSession {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         let line = String::from_utf8_lossy(data).to_string();
+
+        // Een hulpvraag beantwoorden (#125). Dit is geen commando dat we uitvoeren
+        // maar een token dat we inwisselen: er start hier niets nieuws, de helper
+        // gaat meelezen in de sessie die de vrager al open heeft. Vandaar dat dit
+        // VOOR alle andere paden staat, en zonder toestemmingspopup -- de vraag
+        // zelf was de uitnodiging.
+        if let Some(tok) = line.trim().strip_prefix("TAURUS-JOIN ") {
+            return self.answer_help(channel, session, tok.trim());
+        }
+        // Binnengekomen op een hulptoken? Dan is meelezen het enige wat mag. Alles
+        // anders is een gewone sessie en hoort ook langs de gewone toestemming --
+        // die is met dit token nooit gegeven.
+        if !self.help_token.is_empty() {
+            audit(&self.app, "help-refused", &self.peer_name(), &describe_request(&line));
+            session.channel_failure(channel)?;
+            return Ok(());
+        }
+
         let want_pty = self.pty_req.lock().unwrap().get(&channel).cloned();
 
         match want_pty {
@@ -971,6 +1204,7 @@ impl Handler for HostSession {
                     rows,
                     &term,
                     d == Decision::Join,
+                    d.power(),
                 ) {
                     Ok(()) => session.channel_success(channel)?,
                     Err(e) => {
@@ -1240,5 +1474,66 @@ mod tests {
         let exec = format!("{:?}", shell_command(Some("powershell -NoProfile -Enc AAA"), None));
         assert!(exec.contains("/C"), "{exec}");
         assert!(exec.contains("powershell"), "{exec}");
+    }
+
+    // #126: het vinkje is een TWEEDE as. Wie er binnen mag is de ene vraag, wat
+    // die dan krijgt de andere -- en meekijken geeft vol beheer zonder vinkje,
+    // want daar is het toezicht zelf de controle.
+    #[test]
+    fn power_follows_supervision_not_trust() {
+        assert_eq!(Decision::from_str("allow").power(), Power::Sandboxed);
+        assert_eq!(Decision::from_str("always").power(), Power::Sandboxed);
+        assert_eq!(Decision::from_str("join").power(), Power::Full);
+        assert_eq!(Decision::from_str("allow-full").power(), Power::Full);
+        assert_eq!(Decision::from_str("always-full").power(), Power::Full);
+        // De volle varianten laten binnen en worden onthouden, net als hun
+        // gewone tegenhangers -- ze zeggen alleen iets anders over de macht.
+        assert!(Decision::from_str("allow-full").permits());
+        assert!(Decision::from_str("always-full").remembers());
+        assert!(!Decision::from_str("allow").remembers());
+    }
+
+    // Alleen de argv, niet de Debug-vorm: die sleept de hele omgeving mee, en
+    // daar staat ComSpec=cmd.exe in -- waardoor "geen shell" altijd zou falen.
+    fn argv(c: &CommandBuilder) -> String {
+        c.get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    // Taurus start agents, geen shells -- in GEEN van beide gevallen. Een verzoek
+    // zonder commando komt nooit op cmd.exe uit; wat toezicht verandert is hoeveel
+    // die agent uit zichzelf mag.
+    #[test]
+    fn a_session_without_a_command_starts_the_agent_never_a_shell() {
+        let sandboxed = argv(&session_command(None, None, Power::Sandboxed));
+        assert!(!sandboxed.contains("cmd.exe"), "geen shell: {sandboxed}");
+        assert!(sandboxed.contains("claude"), "{sandboxed}");
+        assert!(sandboxed.contains("--permission-mode dontAsk"), "vraagt niets: {sandboxed}");
+        // Juist NIET plan: dat voert niets uit, en dan kan de sessie het werk
+        // waarvoor hij is toegestaan niet doen (#130).
+        assert!(!sandboxed.contains("plan"), "{sandboxed}");
+
+        // Meekijken geeft meer ruimte, maar nog steeds de agent -- geen prompt.
+        let full = argv(&session_command(None, None, Power::Full));
+        assert!(!full.contains("cmd.exe"), "ook hier geen shell: {full}");
+        assert!(full.contains("claude"), "{full}");
+        assert!(!full.contains("--permission-mode"), "eigen default van de agent: {full}");
+    }
+
+    // Een exec-verzoek draait wat er gevraagd is, ook onbeheerd: die regel stond in
+    // de popup en is als zodanig goedgekeurd. Er alsnog langs kijken zou
+    // commandofilteren zijn, en dat is in #121 afgewezen.
+    #[test]
+    fn an_approved_command_still_runs_unattended() {
+        let cmd = argv(&session_command(
+            Some("powershell -NoProfile -Enc AAA"),
+            None,
+            Power::Sandboxed,
+        ));
+        assert!(cmd.contains("/C"), "{cmd}");
+        assert!(cmd.contains("powershell"), "{cmd}");
     }
 }

@@ -52,6 +52,9 @@ russh = { version = "0.62", default-features = false, features = ["ring", "flate
 russh-sftp = "2.4"
 rand = "0.10"
 tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros"] }
+# Machines vinden op het vertrouwde netwerk (#125). GEMETEN: 0.21 bouwt schoon op
+# x86_64-pc-windows-msvc -- geen NASM, geen cmake, geen extra toolchain.
+mdns-sd = "0.21"
 
 # Windows-only: nodig om de WebView2 browser-accelerator-keys (F5, Ctrl+R,
 # Ctrl+Shift+R, devtools) uit te zetten via een COM-call. Versies gepind op
@@ -75,5 +78,14 @@ windows = { version = "0.61", features = [
   "Win32_Networking_NetworkListManager",
   "Win32_System_Com",
   "Win32_System_Variant",
+  # GetAdaptersAddresses: van het GUID van de adapter achter een vertrouwd netwerk
+  # naar zijn IPv4-adres. Nodig om de mDNS-aankondiging aan ALLEEN die interface
+  # te binden -- anders adverteert Taurus zijn Hyper-V- en WSL-interne ranges aan
+  # de hele LAN (#125).
+  "Win32_NetworkManagement_IpHelper",
+  # GetAdaptersAddresses zit achter Ndis EN WinSock: het struct dat het teruggeeft
+  # bevat velden uit allebei.
+  "Win32_NetworkManagement_Ndis",
+  "Win32_Networking_WinSock",
 ] }
 
