@@ -95,19 +95,35 @@ Stand daar bij het laatste kijkje: `enabled: true` op poort 8287, één netwerk 
 `peers.json` weg (dus eerste keer nog een pairing-popup bij een *gewone* sessie), en zowel
 `Taurus` als `Taurus mDNS` in de firewall aanwezig zonder block-regels.
 
-## Wat ik níét gedraaid heb
+## Wat al wél gemeten is, en herhaalbaar
 
 ```powershell
 cd C:\Users\AST\claude\Taurus\src-tauri
+
+# aankondigen + vinden over een echte UDP 5353-socket
 cargo test --lib -- --ignored --nocapture announce_and_find
-```
 
-Kondigt echt aan en zoekt echt in één proces, en controleert dat één machine één regel
-oplevert. Hij **bindt UDP 5353** — tijdens de spike blokkeerde Defender precies dat en
-moest de regel met de hand weg. Daarom `#[ignore]`.
+# welke agents er op ursu draaien, via twee echte ssh-rondes
+$env:TAURUS_TEST_HOST = 'ursu'
+cargo test --lib -- --ignored --nocapture toon_agents_op
 
-Deze bindt niets en laat zien welk adres de aankondiging zou dragen:
+# wat de firewallcheck van de release-exe vindt
+$env:TAURUS_TEST_EXE = 'C:\Users\AST\claude\Taurus\src-tauri\target\release\taurus.exe'
+cargo test --lib -- --ignored --nocapture toon_firewall
 
-```powershell
+# welk adres de aankondiging zou dragen (bindt niets)
 cargo test --lib -- --ignored --nocapture toon_trusted_ip
 ```
+
+Uitkomsten hier op 14 aug: mDNS geeft één rij met agentnaam, map en token; op ursu
+**1 agent** (Ontwikkel) en **2 lege sessies** als opruimwerk; firewall voor de release-exe
+TCP en UDP toegestaan, nul blokkades.
+
+De mDNS-test faalde de eerste keer — terecht: hij kondigde nog zonder token aan, en dat
+filtert de code weg omdat een aankondiging zonder token aanwezigheid is en geen vraag.
+
+## Wat alleen jij kunt doen
+
+De lus door de GUI: hand omhoog in het ene venster, meedoen vanuit het andere, aan beide
+kanten typen. Daar zijn twee draaiende vensters voor nodig, en jouw testvenster start ik
+niet zelf.
