@@ -2552,12 +2552,17 @@ foreach ($l in ($lines | Select-Object -Skip 1)) {
 // Het commando dat een sessie op de andere machine beëindigt (#124). Apart van de
 // tauri-command, want dit is de kant die te toetsen valt zonder machine ernaast.
 //
-// `server stop` en niet iets zachters: herdr's eigen documentatie noemt dat de
-// manier om een sessie mét zijn panes te stoppen. Dat is hier ook precies de
-// bedoeling -- de knop staat er voor een sessie waarvan de agent al weg is.
-// `--session <naam>` staat vóór het subcommando, dezelfde vorm die Taurus al
-// gebruikt om een server te STARTEN; zonder die vlag zou dit de default-sessie
-// van die machine raken, en dat is iemand anders zijn werk.
+// GEMETEN tegen herdr op ursu, en de eerste versie hiervan was fout. Die deed
+// `herdr --session <naam> server stop`, naar analogie van hoe Taurus een server
+// START. Dat gaf exitcode 0 en veranderde niets -- de sessie stond daarna nog
+// gewoon in de lijst -- en het startte als bijeffect de default-sessie op die
+// machine. De juiste vorm neemt de naam als ARGUMENT:
+//
+//   herdr session stop <naam>     stopt de server, laat de sessie staan
+//   herdr session delete <naam>   haalt hem echt weg  ("deleted session ...")
+//
+// Allebei, in die volgorde: de knop staat er voor een sessie die weg moet, en een
+// entry die blijft staan is precies de klacht waarvoor hij gebouwd is.
 fn stop_session_command(host: &Host, session: &str) -> Result<String, String> {
     let os = effective_os(host);
     let via_wsl = host.via == "wsl";
@@ -2574,7 +2579,9 @@ fn stop_session_command(host: &Host, session: &str) -> Result<String, String> {
                 "$h = (Get-Command herdr -EA 0).Source\n\
                  if (-not $h) {{ $h = Join-Path $env:LOCALAPPDATA '{fb}' }}\n\
                  if (-not (Test-Path $h)) {{ 'ERR=herdr staat niet op deze machine'; exit 0 }}\n\
-                 & $h --session {s} server stop 2>&1 | Out-Null",
+                 & $h session stop {s} 2>&1 | Out-Null\n\
+                 & $h session delete {s} 2>&1 | Out-Null\n\
+                 if ($LASTEXITCODE -ne 0) {{ 'ERR=herdr kon de sessie niet verwijderen' }}",
                 fb = HERDR_WIN_FALLBACK,
                 s = ps_quote(session),
             );
@@ -2585,7 +2592,8 @@ fn stop_session_command(host: &Host, session: &str) -> Result<String, String> {
         }
         "herdr" => Ok(posix(format!(
             "H=herdr; command -v herdr >/dev/null 2>&1 || H=\"{fb}\"; \
-             \"$H\" --session {s} server stop >/dev/null 2>&1 || echo 'ERR=herdr kon de sessie niet stoppen'",
+             \"$H\" session stop {s} >/dev/null 2>&1; \
+             \"$H\" session delete {s} >/dev/null 2>&1 || echo 'ERR=herdr kon de sessie niet verwijderen'",
             fb = HERDR_POSIX_FALLBACK,
             s = shell_quote_posix(session),
         ))),
@@ -5143,11 +5151,15 @@ mod tests {
         assert_eq!(without_persistence(h, false).mux, "herdr");
     }
 
-    // De sessienaam gaat een shell in, dus hij hoort gequote te zijn -- en de
-    // vlag hoort erbij, want zonder `--session` stopt dit de DEFAULT-sessie van
-    // die machine, en dat is het werk van iemand anders.
+    // De sessienaam gaat een shell in, dus hij hoort gequote te zijn -- en het moet
+    // `session delete` zijn, niet `server stop`.
+    //
+    // GEMETEN tegen herdr op ursu: `--session <naam> server stop` gaf exitcode 0,
+    // liet de sessie gewoon in de lijst staan en startte en passant de
+    // default-sessie. `session delete <naam>` antwoordt "deleted session ..." en
+    // haalt hem er echt uit.
     #[test]
-    fn stopping_a_session_names_the_session_and_quotes_it() {
+    fn stopping_a_session_deletes_it_by_name_and_quotes_it() {
         let mut h = test_host();
         h.mux = "herdr".into();
         h.os = "linux".into();
@@ -5155,7 +5167,10 @@ mod tests {
         // De payload gaat als base64 door de shell; decodeer hem om te kijken.
         let b64part = cmd.split_whitespace().nth(1).unwrap();
         let raw = String::from_utf8(b64_decode_for_test(b64part)).unwrap();
-        assert!(raw.contains("--session 'werk 2' server stop"), "{raw}");
+        assert!(raw.contains("session stop 'werk 2'"), "{raw}");
+        assert!(raw.contains("session delete 'werk 2'"), "{raw}");
+        // Juist NIET de vorm die niets deed.
+        assert!(!raw.contains("server stop"), "{raw}");
     }
 
     // Op een Windows-host gaat het door PowerShell, met dezelfde herdr-terugval

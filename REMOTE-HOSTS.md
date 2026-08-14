@@ -144,11 +144,24 @@ invent, no folder to pick, no card left in the sidebar. That is the "my limit is
 can you take over for ten minutes" case — an agent *card* is the shape for a workplace you
 come back to, and here you do not.
 
-**⇱ sessies** lists what is running on that machine (one ssh round, so it is fetched only
-when asked) and lets you attach to it or end it. Ending takes two clicks, because it cuts
-off someone else's work. herdr's own `default` session is labelled *shell, geen agent*
-rather than hidden: it exists, and the thing to prevent is landing in a bare shell on
-someone else's machine without knowing it.
+**⇱ sessies** lists what herdr keeps on that machine (one ssh round, so it is fetched only
+when asked) and lets you attach to one or end it. Ending takes two clicks, because it cuts
+off someone else's work, and it runs `herdr session stop` followed by `herdr session
+delete` — stop alone leaves the entry in the list, which is the thing being complained
+about in the first place.
+
+A session **without a recognised agent** is tagged *shell, geen agent*, and that includes
+herdr's own `default` as well as any leftover of Taurus's own making. It is a label rather
+than a hidden row: those sessions exist, and what has to be prevented is landing in a bare
+shell — or in a failed `claude --resume` — on someone else's machine without knowing it.
+
+Note that a machine has **three** kinds of "session" and they are not the same list:
+
+| where you see it | what it is |
+|---|---|
+| ⇱ sessies on the machine screen | herdr sessions — what Taurus started *there over SSH* |
+| Settings → Netwerk on that machine | inbound sessions a peer opened *on* it (#121) |
+| the tabs in the Taurus over there | its own local sessions — not visible from here yet (#128) |
 
 ## What `mux` buys you
 
