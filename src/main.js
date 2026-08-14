@@ -50,7 +50,6 @@ const I18N = {
     agents_clean: "Opruimen",
     agent_local: "in Taurus daar",
     agent_local_hint: "Deze agent draait in de Taurus op die machine. Zichtbaar, maar er is nog geen kanaal om hem hiervandaan over te nemen.",
-    session_bare: "shell, geen agent",
     session_attach: "Aanhaken",
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
     session_stop_sure: "zeker weten?",
@@ -85,14 +84,16 @@ const I18N = {
     host_mux_missing: "Deze machine heeft geen {mux}. Kies Automatisch, of installeer het daar en test opnieuw.",
     host_herdr_tuned: "✓ herdr's eigen sidebar en tabbalk uitgezet op deze machine — die zijn dubbelop in een Taurus-tab. Geldt vanaf de volgende sessie.",
     host_herdr_tune_failed: "ℹ herdr's sidebar kon niet uitgezet worden ({err}). De tab werkt gewoon, maar toont herdr's eigen menu ernaast.",
-    attach_open: "Verbinden met een draaiende sessie…",
-    attach_title: "Verbinden met een draaiende sessie",
-    attach_host: "Machine", attach_refresh: "Opnieuw ophalen", attach_connect: "Verbinden",
+    attach_open: "Openen",
+    attach_menu: "Verder werken…",
+    attach_title: "Verder werken",
+    attach_lead: "Alleen jouw eigen computer en de machines die je zelf hebt ingericht.",
+    attach_local: "Op deze computer", attach_mine: "Op jouw machines",
+    attach_no_local: "Geen eerdere sessies op deze computer.",
+    agents_none_short: "geen agent",
+    attach_refresh: "↻ Opnieuw ophalen",
     attach_loading: "Sessies ophalen…",
-    attach_empty: "Geen sessies op deze machine.",
     attach_no_hosts: "Nog geen machines. Voeg er een toe met 🖥.",
-    attach_pick: "Kies eerst een sessie.",
-    attach_noagent: "geen agent",
     attach_not_restartable: "Aangehaakte sessie: Taurus heeft dit commando niet gebouwd en kan het niet herstarten of verplaatsen.",
     dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
     dropper_sending: "Bestand overzetten naar de host…",
@@ -274,7 +275,6 @@ const I18N = {
     agents_clean: "Clean up",
     agent_local: "in Taurus there",
     agent_local_hint: "This agent runs in the Taurus on that machine. Visible, but there is no channel yet to take it over from here.",
-    session_bare: "shell, no agent",
     session_attach: "Attach",
     session_stop_hint: "End this session on the other machine",
     session_stop_sure: "are you sure?",
@@ -309,14 +309,16 @@ const I18N = {
     host_mux_missing: "This machine has no {mux}. Pick Automatic, or install it there and test again.",
     host_herdr_tuned: "✓ Turned off herdr's own sidebar and tab bar on this machine — a Taurus tab already has both. Applies from the next session.",
     host_herdr_tune_failed: "ℹ Could not turn off herdr's sidebar ({err}). The tab still works; it just shows herdr's own menu beside the agent.",
-    attach_open: "Connect to a running session…",
-    attach_title: "Connect to a running session",
-    attach_host: "Machine", attach_refresh: "Refresh", attach_connect: "Connect",
+    attach_open: "Open",
+    attach_menu: "Continue working…",
+    attach_title: "Continue working",
+    attach_lead: "Only your own computer and the machines you configured yourself.",
+    attach_local: "On this computer", attach_mine: "On your machines",
+    attach_no_local: "No earlier sessions on this computer.",
+    agents_none_short: "no agent",
+    attach_refresh: "↻ Refresh",
     attach_loading: "Fetching sessions…",
-    attach_empty: "No sessions on this machine.",
     attach_no_hosts: "No machines yet. Add one with 🖥.",
-    attach_pick: "Pick a session first.",
-    attach_noagent: "no agent",
     attach_not_restartable: "Attached session: Taurus did not build this command and cannot restart or move it.",
     dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
     dropper_sending: "Copying file to the host…",
@@ -1656,104 +1658,109 @@ function showProbeReport(p, tuned) {
 // Zonder dit kun je alleen bij een draaiende sessie komen door toevallig dezelfde
 // agent met dezelfde map te starten, zodat de sessienaam matcht. Sessies van een
 // ander werkstation, of van een kaart die intussen anders heet, waren onzichtbaar.
-let atSessions = [];
-let atPicked = "";
 
+// ⇱ Verder werken: terug naar werk dat al loopt of dat er geweest is. Nadrukkelijk
+// alleen JOUW spullen -- deze computer en de machines die je zelf hebt ingericht.
+// Een collega verschijnt hier nooit; die steekt zijn hand op en dat is #125.
+//
+// Lokaal eerst: dat is negen van de tien keer waar je heen wilt, en het geeft de
+// geschiedenis uit #129 de plek die dat issue vraagt ("op elk moment bereikbaar",
+// niet alleen bij het opstarten).
 function openAttachModal() {
-  atSessions = []; atPicked = "";
   els.atRows.innerHTML = "";
+  document.querySelector("#at-local").innerHTML = "";
   els.atStatus.textContent = ""; els.atStatus.className = "status-msg";
-  els.atHost.innerHTML = machineOptions("")
-    .map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`)
-    .join("");
   els.attachModal.classList.remove("hidden");
-  if (!hosts.length) {
-    els.atStatus.textContent = t("attach_no_hosts");
-    els.atStatus.className = "status-msg err";
-    return;
-  }
+  loadLocalHistory();
   loadRemoteSessions();
 }
 
-async function loadRemoteSessions() {
-  const hostId = els.atHost.value;
-  if (!hostId) return;
-  atSessions = []; atPicked = "";
-  els.atRows.innerHTML = "";
-  els.atStatus.textContent = t("attach_loading"); els.atStatus.className = "status-msg";
-  els.atRefresh.disabled = true;
-  try {
-    atSessions = await invoke("remote_sessions", { hostId });
-    els.atStatus.textContent = "";
-  } catch (e) {
-    // Onbereikbaar, of een machine die geen sessies bewaart: de reden hoort hier
-    // te staan, niet als een lege lijst die op "niets draait" lijkt.
-    els.atStatus.textContent = "✗ " + e;
-    els.atStatus.className = "status-msg err";
-  } finally {
-    els.atRefresh.disabled = false;
-  }
-  renderAttachRows();
-}
-
-function renderAttachRows() {
-  if (!atSessions.length) {
-    els.atRows.innerHTML = els.atStatus.textContent
-      ? ""
-      : `<div class="host-empty">${escapeHtml(t("attach_empty"))}</div>`;
+// De lokale helft: wat er in de geschiedenis staat en niet al open is.
+async function loadLocalHistory() {
+  const box = document.querySelector("#at-local");
+  if (!box) return;
+  let hist = [];
+  try { hist = await invoke("session_history"); } catch (_) {}
+  const open = new Set([...sessions.values()].map((s) => s.uuid).filter(Boolean));
+  const rows = hist.filter((h) => h.uuid && !open.has(h.uuid) && !h.hostId);
+  box.innerHTML = "";
+  if (!rows.length) {
+    box.innerHTML = `<div class="host-empty">${escapeHtml(t("attach_no_local"))}</div>`;
     return;
   }
-  els.atRows.innerHTML = "";
-  for (const s of atSessions) {
-    // Een sessie zonder (herkende) agent is nog steeds bruikbaar -- je landt in
-    // de pane en kunt er iets starten. Dus tonen, niet verbergen.
-    const agent = s.agent ? s.agent + (s.agentStatus ? " · " + s.agentStatus : "") : t("attach_noagent");
+  for (const h of rows.slice(0, 12)) {
     const row = document.createElement("div");
-    row.className = "host-row" + (s.name === atPicked ? " picked" : "");
-    // Herdr's eigen `default` is de uitzondering: die heeft geen agent en zet je
-    // in een kale shell op andermans machine. Zeggen wat het is, vóór de klik.
+    row.className = "host-row";
     row.innerHTML = `
-      <span class="host-dot ${s.status === "running" || s.status === "attached" ? "up" : "pending"}"></span>
+      <span class="host-dot pending"></span>
       <div class="host-main">
-        <div class="host-name">${escapeHtml(s.name)}${isBareShell(s) ? ` <span class="sess-bare">${escapeHtml(t("session_bare"))}</span>` : ""}</div>
-        <div class="host-sub">${escapeHtml(agent)}${s.cwd ? " · " + escapeHtml(s.cwd) : ""}</div>
-      </div>`;
-    row.addEventListener("click", () => { atPicked = s.name; renderAttachRows(); });
-    els.atRows.appendChild(row);
+        <div class="host-name">${escapeHtml(h.title || h.path)}</div>
+        <div class="host-sub">${escapeHtml([h.agent || "claude", h.model, h.path].filter(Boolean).join(" · "))}</div>
+      </div>
+      <span class="route-mux">${escapeHtml(agoText(h.lastSeen))}</span>
+      <button class="host-test">${escapeHtml(t("attach_open"))}</button>`;
+    row.querySelector("button").addEventListener("click", async () => {
+      const meta = {
+        uuid: h.uuid, path: h.path, title: h.title, accent: h.accent,
+        mode: h.mode, agent: h.agent, model: h.model,
+        host_id: "", project_id: h.projectId || "",
+      };
+      const why = await resumeBlocker(meta);
+      if (why) { els.atStatus.textContent = "✗ " + why; els.atStatus.className = "status-msg err"; return; }
+      els.attachModal.classList.add("hidden");
+      await restoreSessions([meta]);
+    });
+    box.appendChild(row);
   }
 }
 
-async function connectToRemoteSession() {
-  if (!atPicked) {
-    els.atStatus.textContent = t("attach_pick"); els.atStatus.className = "status-msg err";
+// De remote helft: per eigen machine welke AGENTS daar draaien (#128). Geen agent =
+// niets om mee te verbinden, en dat staat er dan ook zo.
+async function loadRemoteSessions() {
+  els.atRows.innerHTML = "";
+  if (!machines.length) {
+    els.atRows.innerHTML = `<div class="host-empty">${escapeHtml(t("attach_no_hosts"))}</div>`;
     return;
   }
-  const hostId = els.atHost.value;
-  const meta = atSessions.find((x) => x.name === atPicked) || {};
-  // De sessie weet zelf al waar hij draait; de mapnaam leest prettiger op een tab
-  // dan een sessienaam met een hash erachter.
-  const leaf = (meta.cwd || "").split(/[\\/]/).filter(Boolean).pop();
-  const id = "s" + (++seq);
-  const session = spawnTerminal({
-    id, uuid: "", path: meta.cwd || "", title: leaf || atPicked, accent: "#7c9cff",
-    mode: "", command: "", agent: "", model: "", hostId, projectId: "",
-  });
-  // Taurus heeft dit commando niet gebouwd: herstarten/hervatten zou iets anders
-  // doen dan je verwacht, en opslaan-voor-de-volgende-start ook.
-  session.attached = true;
-  try {
-    await invoke("attach_remote_session", {
-      id, gen: session.gen, hostId, session: atPicked,
-      cols: session.term.cols, rows: session.term.rows,
-    });
-    els.attachModal.classList.add("hidden");
-    recordSession(session);
-    showView(id);
-  } catch (e) {
-    sessions.delete(id); session.term.dispose(); session.el.remove();
-    renderTabs();
-    els.atStatus.textContent = "✗ " + e; els.atStatus.className = "status-msg err";
+  els.atRefresh.disabled = true;
+  for (const m of machines) {
+    const box = document.createElement("div");
+    box.className = "machine";
+    box.innerHTML = `
+      <div class="machine-head">
+        <span class="host-dot ${machineDotClass(m)}"></span>
+        <div class="host-main"><div class="host-name">${escapeHtml(m.label)}</div></div>
+        <span class="route-mux">${escapeHtml(t("attach_loading"))}</span>
+      </div>`;
+    els.atRows.appendChild(box);
+    const host = hostById(m.preferred) || m.routes[0];
+    let view = null, err = "";
+    try { view = await invoke("remote_agents", { hostId: host.id }); }
+    catch (e) { err = String(e); }
+    const note = box.querySelector(".route-mux");
+    if (err) { note.textContent = "✗ " + err; continue; }
+    const agents = (view && view.agents) || [];
+    note.textContent = agents.length ? "" : t("agents_none_short");
+    for (const a of agents) {
+      const row = document.createElement("div");
+      row.className = "route-row";
+      row.innerHTML = `
+        <span class="host-dot ${a.status ? "up" : "pending"}"></span>
+        <span class="route-name">${escapeHtml(a.title || a.session)}</span>
+        <span class="route-mux">${escapeHtml([a.agent, a.cwd].filter(Boolean).join(" · "))}</span>
+        ${a.attachable
+          ? `<button class="host-test">${escapeHtml(t("session_attach"))}</button>`
+          : `<span class="sess-bare" title="${escapeHtml(t("agent_local_hint"))}">${escapeHtml(t("agent_local"))}</span>`}`;
+      if (a.attachable) {
+        row.querySelector("button").addEventListener("click", () => {
+          els.attachModal.classList.add("hidden");
+          attachFromMachine(m, a);
+        });
+      }
+      box.appendChild(row);
+    }
   }
+  els.atRefresh.disabled = false;
 }
 
 /* ---- agent naar een andere machine verplaatsen (#102) ---- */
@@ -4330,12 +4337,10 @@ window.addEventListener("DOMContentLoaded", () => {
     hfMux: document.querySelector("#hf-mux"),
     attachBtn: document.querySelector("#attach-btn"),
     attachModal: document.querySelector("#attach-modal"),
-    atHost: document.querySelector("#at-host"),
     atRefresh: document.querySelector("#at-refresh"),
     atRows: document.querySelector("#at-rows"),
     atStatus: document.querySelector("#at-status"),
     atCancel: document.querySelector("#at-cancel"),
-    atConnect: document.querySelector("#at-connect"),
     hfTest: document.querySelector("#hf-test"),
     hostStatusMsg: document.querySelector("#hf-status"),
     hfReport: document.querySelector("#hf-report"),
@@ -4377,10 +4382,8 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
   document.querySelector("#host-close").addEventListener("click", closeHostModal);
   els.attachBtn.addEventListener("click", openAttachModal);
-  els.atHost.addEventListener("change", loadRemoteSessions);
-  els.atRefresh.addEventListener("click", loadRemoteSessions);
+  els.atRefresh.addEventListener("click", () => { loadLocalHistory(); loadRemoteSessions(); });
   els.atCancel.addEventListener("click", () => els.attachModal.classList.add("hidden"));
-  els.atConnect.addEventListener("click", connectToRemoteSession);
   // Sleutelkiezer via het bestaande pick_file-command: de dialog-plugin is niet
   // vanuit JS aanroepbaar (staat niet in capabilities/default.json).
   document.querySelector("#hf-key-browse").addEventListener("click", async () => {
