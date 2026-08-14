@@ -2722,10 +2722,19 @@ fn create_session(
     host_id: String,
     cols: u16,
     rows: u16,
+    // Wegwerpsessie: geen persistentie, ook niet als de machine herdr heeft (#124).
+    //
+    // GEMETEN nadat de Connect-knop een paar keer was gebruikt: op ursu stonden drie
+    // herdr-sessies zonder agent, waarvan twee door Connect gemaakt. "Geen kaart in
+    // de zijbalk" was dus maar de helft van het verhaal -- aan de andere kant bleef
+    // er wél iets staan, en die lege sessies zetten je bij het aanhaken in een kale
+    // shell of in een mislukte `claude --resume`. Wat weg mag zijn, moet ook echt
+    // verdwijnen als je de tab sluit.
+    ephemeral: Option<bool>,
 ) -> Result<(), String> {
     // De host moet BEKEND zijn voordat het commando gebouwd wordt: remote levert
     // een andere programmanaam op dan lokaal.
-    let host = lookup_host(&host_id)?;
+    let host = lookup_host(&host_id)?.map(|h| without_persistence(h, ephemeral.unwrap_or(false)));
     let (program, args) = if !command.trim().is_empty() {
         // Commando-override (bijv. nep-Claude voor de demo): voer dit programma
         // uit i.p.v. de agent, zonder agent-vlaggen.
@@ -2745,6 +2754,18 @@ fn create_session(
     };
     let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
     start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)
+}
+
+// Een wegwerpsessie krijgt een host-kopie zonder persistentie: dan maakt de andere
+// kant geen herdr-sessie aan en blijft er dus ook niets staan. `mux_auto` gaat mee
+// uit, anders zou een latere hertest hem alsnog invullen. De opgeslagen host in
+// hosts.json verandert niet -- dit geldt alleen voor deze ene start.
+fn without_persistence(h: Host, ephemeral: bool) -> Host {
+    if ephemeral {
+        Host { mux: "none".to_string(), mux_auto: false, ..h }
+    } else {
+        h
+    }
 }
 
 // Leeg host_id = lokaal. Een onbekend id is een fout en geen stille terugval op
@@ -5103,6 +5124,23 @@ mod tests {
         assert_eq!(group_machines(vec![mk("a", "10.0.0.1", "ursu"), mk("b", "10.0.0.2", "ursu")]).len(), 1);
         // Hoofdlettergebruik mag geen tweede machine opleveren.
         assert_eq!(group_machines(vec![mk("a", "URSU", ""), mk("b", "ursu", "")]).len(), 1);
+    }
+
+    // GEMETEN nadat Connect een paar keer gebruikt was: op de andere machine
+    // stonden drie herdr-sessies zonder agent, twee daarvan door Connect gemaakt.
+    // "Wegwerp" moet aan beide kanten gelden, anders stapelen lege sessies zich op
+    // die bij het aanhaken in een kale shell of een mislukte resume eindigen.
+    #[test]
+    fn a_throwaway_session_leaves_no_persistent_session_behind() {
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.mux_auto = true;
+        let weg = without_persistence(h.clone(), true);
+        assert_eq!(weg.mux, "none");
+        // Anders vult de eerste hertest hem alsnog in.
+        assert!(!weg.mux_auto);
+        // Een gewone start houdt de persistentie die de machine biedt.
+        assert_eq!(without_persistence(h, false).mux, "herdr");
     }
 
     // De sessienaam gaat een shell in, dus hij hoort gequote te zijn -- en de

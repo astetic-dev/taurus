@@ -45,6 +45,7 @@ const I18N = {
     machine_sessions: "⇱ sessies",
     machine_sessions_hint: "Toon wat er op deze machine draait — aanhaken of beëindigen.",
     session_bare: "shell, geen agent",
+    session_attach: "Aanhaken",
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
     session_stop_sure: "zeker weten?",
     hosts_known: "Bekende machines",
@@ -252,6 +253,7 @@ const I18N = {
     machine_sessions: "⇱ sessions",
     machine_sessions_hint: "Show what is running on this machine — attach to it or end it.",
     session_bare: "shell, no agent",
+    session_attach: "Attach",
     session_stop_hint: "End this session on the other machine",
     session_stop_sure: "are you sure?",
     hosts_known: "Known machines",
@@ -1132,7 +1134,7 @@ function renderHostRows() {
         <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
         <span class="route-name">${escapeHtml(routeLabel(r))}</span>
         ${r.id === m.preferred && m.routes.length > 1 ? `<span class="route-pref">${escapeHtml(t("route_preferred"))}</span>` : ""}
-        <span class="route-mux">${escapeHtml(r.mux || "none")}</span>
+        <span class="route-mux">${escapeHtml([r.os, r.mux || "none"].filter(Boolean).join(" · "))}</span>
         <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
         <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
       row.querySelector(".host-test").addEventListener("click", () => testExistingHost(hosts.findIndex((h) => h.id === r.id)));
@@ -1302,11 +1304,15 @@ async function toggleMachineSessions(m) {
   renderHostRows();
 }
 
-// Herdr's eigen `default` heeft geen agent: daar land je in een kale shell op
-// andermans machine. Niet verbergen -- hij bestaat en het is verwarrender als hij
-// er niet staat -- maar wel zeggen wat het is, vóórdat je erop klikt.
+// GEEN agent = je landt in een kale shell op andermans machine, of in een mislukte
+// `claude --resume` van een gesprek dat er niet meer is. Dat geldt voor herdr's eigen
+// `default`, maar net zo goed voor een sessie die Taurus ooit maakte en waarvan de
+// agent weg is -- en juist die zagen er in de lijst uit als een gewone keuze.
+//
+// Niet verbergen: ze bestaan, en een rij die er niet staat is verwarrender dan een
+// rij met een eerlijk label. Wel zeggen wat het is, vóór de klik.
 function isBareShell(s) {
-  return s.name === "default" && !s.agent;
+  return !s.agent;
 }
 
 function renderMachineSessions(box, m) {
@@ -1329,7 +1335,7 @@ function renderMachineSessions(box, m) {
       <span class="route-name">${escapeHtml(s.name)}</span>
       ${isBareShell(s) ? `<span class="sess-bare">${escapeHtml(t("session_bare"))}</span>` : ""}
       <span class="route-mux">${escapeHtml(meta)}</span>
-      <button class="host-test sess-open">${escapeHtml(t("machine_connect"))}</button>
+      <button class="host-test sess-open">${escapeHtml(t("session_attach"))}</button>
       <button class="host-del sess-stop" title="${escapeHtml(t("session_stop_hint"))}">✕</button>`;
     row.querySelector(".sess-open").addEventListener("click", () => attachFromMachine(m, s));
     const stop = row.querySelector(".sess-stop");
@@ -1418,6 +1424,9 @@ async function connectToMachine(m) {
       mode: "default", fullPaths: settings.fullPaths, command: "", agent: "claude",
       model: resolveModelArg("claude", ""), hostId: host.id,
       cols: session.term.cols, rows: session.term.rows,
+      // Wegwerp betekent aan BEIDE kanten wegwerp: geen kaart hier, en geen
+      // herdr-sessie die daar blijft staan als de tab dicht gaat.
+      ephemeral: true,
     });
     closeHostModal();
     showView(id);
