@@ -38,12 +38,18 @@ const I18N = {
     host_key: "SSH-key (leeg = ssh kiest zelf)", host_default_project: "Standaard werkmap op de host",
     host_add_test: "Toevoegen & testen", host_testing: "Verbinden…", host_retest: "Opnieuw testen",
     host_del: "Verwijderen", close: "Sluiten",
+    machine_new: "Nieuwe agent…",
+    machine_new_hint: "Open het startformulier met de werkmap van deze machine ingevuld.",
     machine_connect: "Verbinden",
-    machine_connect_hint: "Start meteen een sessie in de standaardmap van deze machine. Geen kaart in de zijbalk; de andere kant krijgt de toestemmingsvraag.",
     machine_no_default: "{machine} heeft geen standaard werkmap. Vul die in bij de machine — een sessie elders moet weten waar hij begint.",
     route_preferred: "voorkeur",
-    machine_sessions: "⇱ sessies",
-    machine_sessions_hint: "Toon wat er op deze machine draait — aanhaken of beëindigen.",
+    machine_agents: "⇱ agents",
+    machine_agents_hint: "Toon welke agents op deze machine draaien.",
+    agents_none: "Geen agent aan het werk — niets om mee te verbinden. Start er een met ＋ Nieuwe agent.",
+    agents_leftovers: "{n} lege sessie(s) die Taurus liet staan",
+    agents_clean: "Opruimen",
+    agent_local: "in Taurus daar",
+    agent_local_hint: "Deze agent draait in de Taurus op die machine. Zichtbaar, maar er is nog geen kanaal om hem hiervandaan over te nemen.",
     session_bare: "shell, geen agent",
     session_attach: "Aanhaken",
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
@@ -246,12 +252,18 @@ const I18N = {
     host_key: "SSH key (empty = let ssh decide)", host_default_project: "Default working directory on the host",
     host_add_test: "Add & test", host_testing: "Connecting…", host_retest: "Test again",
     host_del: "Remove", close: "Close",
+    machine_new: "New agent…",
+    machine_new_hint: "Opens the launch form with this machine's working directory filled in.",
     machine_connect: "Connect",
-    machine_connect_hint: "Starts a session in this machine's default folder right away. No card in the sidebar; the other side gets the approval prompt.",
     machine_no_default: "{machine} has no default working directory. Set one on the machine — a session elsewhere has to know where it starts.",
     route_preferred: "preferred",
-    machine_sessions: "⇱ sessions",
-    machine_sessions_hint: "Show what is running on this machine — attach to it or end it.",
+    machine_agents: "⇱ agents",
+    machine_agents_hint: "Show which agents are running on this machine.",
+    agents_none: "No agent at work — nothing to connect to. Start one with ＋ New agent.",
+    agents_leftovers: "{n} empty session(s) Taurus left behind",
+    agents_clean: "Clean up",
+    agent_local: "in Taurus there",
+    agent_local_hint: "This agent runs in the Taurus on that machine. Visible, but there is no channel yet to take it over from here.",
     session_bare: "shell, no agent",
     session_attach: "Attach",
     session_stop_hint: "End this session on the other machine",
@@ -1117,8 +1129,8 @@ function renderHostRows() {
           <div class="host-name">${escapeHtml(m.label)}</div>
           <div class="host-sub">${escapeHtml((pref.user ? pref.user + "@" : "") + pref.hostname)} · ${escapeHtml(pref.os || "?")}</div>
         </div>
-        <button class="machine-sess-toggle" title="${escapeHtml(t("machine_sessions_hint"))}">${escapeHtml(t("machine_sessions"))}</button>
-        <button class="machine-connect" title="${escapeHtml(t("machine_connect_hint"))}">${escapeHtml(t("machine_connect"))}</button>
+        <button class="machine-sess-toggle" title="${escapeHtml(t("machine_agents_hint"))}">${escapeHtml(t("machine_agents"))}</button>
+        <button class="machine-connect" title="${escapeHtml(t("machine_new_hint"))}">${escapeHtml(t("machine_new"))}</button>
       </div>
       <div class="machine-routes"></div>`;
     const routes = box.querySelector(".machine-routes");
@@ -1147,9 +1159,9 @@ function renderHostRows() {
       });
       routes.appendChild(row);
     }
-    box.querySelector(".machine-connect").addEventListener("click", () => connectToMachine(m));
-    box.querySelector(".machine-sess-toggle").addEventListener("click", () => toggleMachineSessions(m));
-    renderMachineSessions(box, m);
+    box.querySelector(".machine-connect").addEventListener("click", () => newAgentOnMachine(m));
+    box.querySelector(".machine-sess-toggle").addEventListener("click", () => toggleMachineAgents(m));
+    renderMachineAgents(box, m);
     els.hostRows.appendChild(box);
   }
 }
@@ -1280,111 +1292,151 @@ async function connectToFound(f) {
   if (m) await connectToMachine(m);
 }
 
-/* ---- wat er op een machine draait, en het kunnen stoppen (#124) ---- */
-// Pas op verzoek ophalen: dit is een ssh-ronde per machine en die kost seconden.
-// Bij het openen alle machines bevragen zou het traagste antwoord de hele lijst
-// laten wachten, terwijl je meestal maar één machine nodig hebt.
-const machineSessions = {}; // machine-key -> { loading, list, error }
+/* ---- welke AGENTS er op een machine draaien (#128) ---- */
+// DE REGEL: Taurus toont agents. ssh, tmux en herdr maken de weg vrij zodat er een
+// agent kan starten; ze zijn leidingwerk en nooit iets wat je kiest. Geen agent
+// betekent dat er niets is om mee te verbinden -- geen keuze met een
+// waarschuwingslabel, maar geen keuze. Lege sessies bestaan wel en staan daarom
+// onderaan als opruimwerk.
+//
+// Pas op verzoek ophalen: dit zijn twee ssh-rondes per machine. Bij het openen alle
+// machines bevragen zou het traagste antwoord de hele lijst laten wachten.
+const machineAgents = {}; // machine-key -> { loading, view, error }
 
-async function toggleMachineSessions(m) {
-  if (machineSessions[m.key] && !machineSessions[m.key].loading) {
-    delete machineSessions[m.key];
+async function toggleMachineAgents(m) {
+  if (machineAgents[m.key] && !machineAgents[m.key].loading) {
+    delete machineAgents[m.key];
     renderHostRows();
     return;
   }
-  machineSessions[m.key] = { loading: true, list: [], error: "" };
+  machineAgents[m.key] = { loading: true, view: null, error: "" };
   renderHostRows();
   const host = hostById(m.preferred) || m.routes[0];
   try {
-    const list = await invoke("remote_sessions", { hostId: host.id });
-    machineSessions[m.key] = { loading: false, list, error: "" };
+    const view = await invoke("remote_agents", { hostId: host.id });
+    machineAgents[m.key] = { loading: false, view, error: "" };
   } catch (e) {
-    machineSessions[m.key] = { loading: false, list: [], error: String(e) };
+    machineAgents[m.key] = { loading: false, view: null, error: String(e) };
   }
   renderHostRows();
 }
 
-// GEEN agent = je landt in een kale shell op andermans machine, of in een mislukte
-// `claude --resume` van een gesprek dat er niet meer is. Dat geldt voor herdr's eigen
-// `default`, maar net zo goed voor een sessie die Taurus ooit maakte en waarvan de
-// agent weg is -- en juist die zagen er in de lijst uit als een gewone keuze.
-//
-// Niet verbergen: ze bestaan, en een rij die er niet staat is verwarrender dan een
-// rij met een eerlijk label. Wel zeggen wat het is, vóór de klik.
-function isBareShell(s) {
-  return !s.agent;
-}
-
-function renderMachineSessions(box, m) {
-  const st = machineSessions[m.key];
+function renderMachineAgents(box, m) {
+  const st = machineAgents[m.key];
   if (!st) return;
   const wrap = document.createElement("div");
   wrap.className = "machine-sess";
-  if (st.loading || st.error || !st.list.length) {
-    const msg = st.loading ? t("attach_loading") : st.error ? "✗ " + st.error : t("attach_empty");
-    wrap.innerHTML = `<div class="route-row${st.error ? " err" : ""}">${escapeHtml(msg)}</div>`;
-    box.appendChild(wrap);
-    return;
+  const line = (txt, cls) => {
+    const d = document.createElement("div");
+    d.className = "route-row" + (cls ? " " + cls : "");
+    d.textContent = txt;
+    return d;
+  };
+  if (st.loading) { wrap.appendChild(line(t("attach_loading"))); box.appendChild(wrap); return; }
+  if (st.error)   { wrap.appendChild(line("✗ " + st.error, "err")); box.appendChild(wrap); return; }
+
+  const v = st.view || { agents: [], empty: [], taurusSeen: false };
+  if (!v.agents.length) {
+    // Eerlijk en kort: er valt hier niets te verbinden. Dat is een antwoord, geen
+    // aanleiding om dan maar leidingwerk aan te bieden.
+    wrap.appendChild(line(t("agents_none")));
   }
-  for (const s of st.list) {
+  for (const a of v.agents) {
     const row = document.createElement("div");
     row.className = "route-row";
-    const meta = [s.agent || t("attach_noagent"), s.cwd].filter(Boolean).join(" · ");
+    const meta = [a.agent, a.cwd].filter(Boolean).join(" · ");
     row.innerHTML = `
-      <span class="host-dot ${s.status === "running" || s.status === "attached" ? "up" : "pending"}"></span>
-      <span class="route-name">${escapeHtml(s.name)}</span>
-      ${isBareShell(s) ? `<span class="sess-bare">${escapeHtml(t("session_bare"))}</span>` : ""}
+      <span class="host-dot ${a.status ? "up" : "pending"}"></span>
+      <span class="route-name">${escapeHtml(a.title || a.session)}</span>
+      ${a.status ? `<span class="route-pref">${escapeHtml(a.status)}</span>` : ""}
       <span class="route-mux">${escapeHtml(meta)}</span>
-      <button class="host-test sess-open">${escapeHtml(t("session_attach"))}</button>
-      <button class="host-del sess-stop" title="${escapeHtml(t("session_stop_hint"))}">✕</button>`;
-    row.querySelector(".sess-open").addEventListener("click", () => attachFromMachine(m, s));
-    const stop = row.querySelector(".sess-stop");
-    // Twee klikken: een sessie stoppen is andermans werk afbreken, en dat mag geen
-    // uitschieter zijn. De knop zegt zelf wat de tweede klik doet.
-    stop.addEventListener("click", async () => {
-      if (stop.dataset.armed !== "1") {
-        stop.dataset.armed = "1";
-        stop.textContent = t("session_stop_sure");
-        stop.classList.add("armed");
-        setTimeout(() => {
-          if (!stop.isConnected) return;
-          stop.dataset.armed = "";
-          stop.textContent = "✕";
-          stop.classList.remove("armed");
-        }, 4000);
-        return;
-      }
-      const host = hostById(m.preferred) || m.routes[0];
-      stop.disabled = true;
-      try {
-        await invoke("stop_remote_session", { hostId: host.id, session: s.name });
-        machineSessions[m.key].list = machineSessions[m.key].list.filter((x) => x.name !== s.name);
-        renderHostRows();
-      } catch (e) {
-        stop.disabled = false;
-        els.hostStatusMsg.textContent = "✗ " + e;
-        els.hostStatusMsg.className = "status-msg err";
-      }
-    });
+      ${a.attachable
+        ? `<button class="host-test sess-open">${escapeHtml(t("session_attach"))}</button>
+           <button class="host-del sess-stop" title="${escapeHtml(t("session_stop_hint"))}">✕</button>`
+        : `<span class="sess-bare" title="${escapeHtml(t("agent_local_hint"))}">${escapeHtml(t("agent_local"))}</span>`}`;
+    if (a.attachable) {
+      row.querySelector(".sess-open").addEventListener("click", () => attachFromMachine(m, a));
+      wireStopButton(row.querySelector(".sess-stop"), m, a.session);
+    }
+    wrap.appendChild(row);
+  }
+  // Opruimwerk onderaan, buiten de keuzes. Ze bestaan echt, dus verbergen zou
+  // verwarrender zijn dan ze benoemen -- maar een klik erop opent niets.
+  if (v.empty.length) {
+    const row = document.createElement("div");
+    row.className = "route-row";
+    row.innerHTML = `
+      <span class="host-dot pending"></span>
+      <span class="route-mux">${escapeHtml(t("agents_leftovers").replace("{n}", v.empty.length))}</span>
+      <button class="host-del sess-clean">${escapeHtml(t("agents_clean"))}</button>`;
+    wireCleanButton(row.querySelector(".sess-clean"), m, v.empty);
     wrap.appendChild(row);
   }
   box.appendChild(wrap);
 }
 
-// Aanhaken vanaf het machinescherm: dezelfde tab als het aparte aanhaak-dialoog
-// oplevert, maar zonder eerst een machine te moeten kiezen in een tweede lijst.
-async function attachFromMachine(m, s) {
+// Twee klikken: een sessie beëindigen is andermans werk afbreken, en dat mag geen
+// uitschieter zijn. De knop zegt zelf wat de tweede klik doet.
+function armTwice(btn, label, run) {
+  btn.addEventListener("click", async () => {
+    if (btn.dataset.armed !== "1") {
+      btn.dataset.armed = "1";
+      btn.dataset.was = btn.textContent;
+      btn.textContent = t("session_stop_sure");
+      btn.classList.add("armed");
+      setTimeout(() => {
+        if (!btn.isConnected) return;
+        btn.dataset.armed = "";
+        btn.textContent = btn.dataset.was || label;
+        btn.classList.remove("armed");
+      }, 4000);
+      return;
+    }
+    btn.disabled = true;
+    try {
+      await run();
+    } catch (e) {
+      btn.disabled = false;
+      els.hostStatusMsg.textContent = "✗ " + e;
+      els.hostStatusMsg.className = "status-msg err";
+      return;
+    }
+    renderHostRows();
+  });
+}
+
+function wireStopButton(btn, m, session) {
+  armTwice(btn, "✕", async () => {
+    const host = hostById(m.preferred) || m.routes[0];
+    await invoke("stop_remote_session", { hostId: host.id, session });
+    const st = machineAgents[m.key];
+    if (st && st.view) st.view.agents = st.view.agents.filter((x) => x.session !== session);
+  });
+}
+
+function wireCleanButton(btn, m, names) {
+  armTwice(btn, t("agents_clean"), async () => {
+    const host = hostById(m.preferred) || m.routes[0];
+    for (const n of names) {
+      await invoke("stop_remote_session", { hostId: host.id, session: n });
+    }
+    const st = machineAgents[m.key];
+    if (st && st.view) st.view.empty = [];
+  });
+}
+
+// Aanhaken aan een agent die op die machine draait.
+async function attachFromMachine(m, a) {
   const host = hostById(m.preferred) || m.routes[0];
-  const leaf = (s.cwd || "").split(/[\\/]/).filter(Boolean).pop();
   const id = "s" + (++seq);
   const session = spawnTerminal({
-    id, uuid: "", path: s.cwd || "", title: leaf || s.name, accent: "#7c9cff",
+    id, uuid: "", path: a.cwd || "", title: a.title || a.session, accent: "#7c9cff",
     mode: "", command: "", agent: "", model: "", hostId: host.id, projectId: "",
   });
   session.attached = true;
   try {
     await invoke("attach_remote_session", {
-      id, gen: session.gen, hostId: host.id, session: s.name,
+      id, gen: session.gen, hostId: host.id, session: a.session,
       cols: session.term.cols, rows: session.term.rows,
     });
     closeHostModal();
@@ -1397,46 +1449,35 @@ async function attachFromMachine(m, s) {
   }
 }
 
-// Verbinden met een machine: meteen een sessie in de standaardmap daar, zonder een
-// kaart achter te laten. Dit is het "mijn limiet is op, neem jij het tien minuten
-// over"-geval waarvoor #121 gebouwd is. Een kaart maken is de vorm voor een werkplek
-// waar je terugkomt, en dat is hier precies wat je niet wilt.
-async function connectToMachine(m) {
+// "Nieuwe agent…" op een machine: open het gewone startformulier met de map van die
+// machine voorgevuld.
+//
+// Heette eerst "Connect", en dat was geen eerlijke naam. Het startte iets naamloos in
+// een map die je niet gekozen had -- vandaar dat je in C:\Users\arjen terechtkwam
+// terwijl je bij je werk wilde zijn. Nu kies je wat er start, net als lokaal, en zie
+// je vooraf waar het begint.
+async function newAgentOnMachine(m) {
   const host = hostById(m.preferred) || m.routes[0];
   if (!host) return;
   const path = host.default_project || "";
-  // Geen map is hier geen detail: een sessie op een andere machine moet weten waar
-  // hij begint. Eerlijk zeggen wat ontbreekt is beter dan ergens landen.
   if (!path) {
     els.hostStatusMsg.textContent = t("machine_no_default").replace("{machine}", m.label);
     els.hostStatusMsg.className = "status-msg err";
     return;
   }
-  const id = "s" + (++seq);
-  const uuid = crypto.randomUUID();
-  const session = spawnTerminal({
-    id, uuid, path, title: m.label, accent: "#7c9cff",
-    mode: "default", command: "", agent: "claude", model: "", hostId: host.id, projectId: "",
-  });
-  try {
-    await invoke("create_session", {
-      id, gen: session.gen, path, title: m.label, task: "", sessionId: uuid,
-      mode: "default", fullPaths: settings.fullPaths, command: "", agent: "claude",
-      model: resolveModelArg("claude", ""), hostId: host.id,
-      cols: session.term.cols, rows: session.term.rows,
-      // Wegwerp betekent aan BEIDE kanten wegwerp: geen kaart hier, en geen
-      // herdr-sessie die daar blijft staan als de tab dicht gaat.
-      ephemeral: true,
-    });
-    closeHostModal();
-    showView(id);
-    persistSessionsToDisk();
-  } catch (e) {
-    sessions.delete(id); session.term.dispose(); session.el.remove();
-    renderTabs();
-    els.hostStatusMsg.textContent = "✗ " + e;
-    els.hostStatusMsg.className = "status-msg err";
-  }
+  const leaf = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || m.label;
+  closeHostModal();
+  await selectProject(
+    {
+      id: "", label: `${leaf} (${m.label})`, path, title: leaf, task: "",
+      accent: "#7c9cff", mode: "default", command: "", agent: "claude", model: "",
+      // De machine hoort bij deze start; het formulier toont de werkmap dan als
+      // "op de host" en de bladerknop verdwijnt -- dat pad bestaat hier niet.
+      host_id: host.id,
+    },
+    null
+  );
+  showView("new");
 }
 
 function openHostForm() {

@@ -2549,6 +2549,152 @@ foreach ($l in ($lines | Select-Object -Skip 1)) {
     })
 }
 
+// ---------- agents op een machine van jezelf (#128) ----------
+//
+// DE REGEL: Taurus toont AGENTS. ssh, tmux en herdr maken de weg vrij zodat er een
+// agent kan starten -- ze zijn leidingwerk en nooit iets wat je kiest. Geen agent
+// betekent dat er niets is om mee te verbinden; dat is geen keuze met een
+// waarschuwingslabel erop, het is geen keuze.
+//
+// Een agent kan er op twee manieren zijn, en voor wie kijkt is dat hetzelfde ding:
+//   - Taurus startte hem hier vandaan over ssh; dan weet herdr ervan.
+//   - Hij draait in de Taurus OP die machine; dan staat hij in de sessions.json daar.
+// GEMETEN op ursu: herdr kende drie sessies (nul agents) terwijl er twee agents
+// draaiden die alleen in die sessions.json stonden. Wie alleen herdr vraagt, ziet
+// dus precies het verkeerde.
+#[derive(serde::Serialize, Clone, Default, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RemoteAgent {
+    // De mux-sessie waaraan je kunt aanhaken. Leeg voor een agent die in de Taurus
+    // daar draait: die heeft er geen, en daarom kun je hem (nog) niet overnemen.
+    session: String,
+    title: String,
+    agent: String,
+    cwd: String,
+    status: String,
+    // "herdr" of "taurus" -- een detail op de regel, geen tweede lijst.
+    origin: String,
+    attachable: bool,
+}
+
+#[derive(serde::Serialize, Default, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct MachineAgents {
+    agents: Vec<RemoteAgent>,
+    // Sessies zonder agent. Geen keuze, wel opruimwerk -- ze bestaan echt.
+    empty: Vec<String>,
+    // Kon de Taurus op die machine bevraagd worden? "Nee" is iets anders dan
+    // "die draait daar niets".
+    taurus_seen: bool,
+}
+
+// Wat de laatste regel van de andere Taurus zegt over zijn eigen sessies. Alleen de
+// velden die hier iets betekenen; de rest van dat bestand gaat ons niet aan.
+#[derive(serde::Deserialize)]
+struct PeerSession {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    agent: String,
+    // Leeg = lokaal op die machine. Een sessie die dáár naar een derde machine
+    // wijst is niet van deze machine en hoort hier niet in de lijst.
+    #[serde(default)]
+    host_id: String,
+}
+
+// De twee bronnen samenvoegen. Puur, zodat de regel "geen agent is geen keuze"
+// toetsbaar is zonder machine ernaast.
+fn collect_agents(sessions: Vec<RemoteSession>, peer_json: Option<&str>) -> MachineAgents {
+    let mut out = MachineAgents::default();
+    for s in sessions {
+        if s.agent.trim().is_empty() {
+            // Geen agent: bestaat wel, is geen keuze.
+            out.empty.push(s.name);
+            continue;
+        }
+        // De mapnaam leest prettiger dan een sessienaam met een hash erachter.
+        let leaf = s
+            .cwd
+            .rsplit(['\\', '/'])
+            .find(|p| !p.is_empty())
+            .unwrap_or(&s.name)
+            .to_string();
+        out.agents.push(RemoteAgent {
+            title: leaf,
+            agent: s.agent,
+            cwd: s.cwd,
+            status: if s.agent_status.is_empty() { s.status } else { s.agent_status },
+            session: s.name,
+            origin: "herdr".into(),
+            attachable: true,
+        });
+    }
+    let Some(txt) = peer_json else { return out };
+    let Ok(peers) = serde_json::from_str::<Vec<PeerSession>>(txt) else {
+        return out;
+    };
+    out.taurus_seen = true;
+    for p in peers {
+        // Alleen wat op DIE machine zelf draait.
+        if !p.host_id.trim().is_empty() {
+            continue;
+        }
+        // Draait hij al als mux-sessie, dan is het dezelfde agent en niet een tweede.
+        if out.agents.iter().any(|a| paths_equal(&a.cwd, &p.path)) {
+            continue;
+        }
+        out.agents.push(RemoteAgent {
+            title: p.title,
+            agent: if p.agent.is_empty() { "claude".into() } else { p.agent },
+            cwd: p.path,
+            status: String::new(),
+            session: String::new(),
+            origin: "taurus".into(),
+            // Er is geen kanaal naar een sessie die in die Taurus zelf leeft. Tonen
+            // dus wel, aanbieden nog niet -- en dat moet de UI ook zo zeggen.
+            attachable: false,
+        });
+    }
+    out
+}
+
+// Windows-paden verschillen in hoofdletters en in de slash die je toevallig typte.
+fn paths_equal(a: &str, b: &str) -> bool {
+    let norm = |s: &str| s.trim().trim_end_matches(['\\', '/']).replace('/', "\\").to_lowercase();
+    !a.trim().is_empty() && norm(a) == norm(b)
+}
+
+// De sessions.json van de Taurus aan de andere kant uitlezen. Aparte ssh-ronde in
+// plaats van de bestaande sessie-scripts uitbreiden: die zijn precies afgeregeld en
+// gaan door twee quoting-lagen, en dit is een lijst die alleen op verzoek wordt
+// opgehaald -- correctheid weegt daar zwaarder dan een seconde.
+fn peer_sessions_command(host: &Host) -> Option<String> {
+    if effective_os(host) != "windows" || host.via == "wsl" {
+        // Op POSIX heeft config_dir geen stabiele plek (geen APPDATA), dus daar valt
+        // niets betrouwbaars te lezen. Liever niets dan een gokpad.
+        return None;
+    }
+    let ps = "$p = Join-Path $env:APPDATA 'Taurus\\sessions.json'\n\
+              if (Test-Path $p) { Get-Content $p -Raw } else { '[]' }";
+    Some(format!(
+        "powershell -NoProfile -EncodedCommand {}",
+        b64(&utf16le(ps))
+    ))
+}
+
+#[tauri::command]
+fn remote_agents(host_id: String) -> Result<MachineAgents, String> {
+    let host = lookup_host(&host_id)?
+        .ok_or_else(|| "Agents opsommen kan alleen op een andere machine.".to_string())?;
+    let sessions = remote_sessions(host_id)?;
+    let peer = peer_sessions_command(&host)
+        .and_then(|cmd| ssh_run(&host, &cmd).ok())
+        .map(|(out, _)| out);
+    Ok(collect_agents(sessions, peer.as_deref()))
+}
+
 // Het commando dat een sessie op de andere machine beëindigt (#124). Apart van de
 // tauri-command, want dit is de kant die te toetsen valt zonder machine ernaast.
 //
@@ -4604,6 +4750,7 @@ pub fn run() {
             save_projects,
             get_hosts,
             machines,
+            remote_agents,
             stop_remote_session,
             discovery_start,
             discovery_stop,
@@ -5132,6 +5279,85 @@ mod tests {
         assert_eq!(group_machines(vec![mk("a", "10.0.0.1", "ursu"), mk("b", "10.0.0.2", "ursu")]).len(), 1);
         // Hoofdlettergebruik mag geen tweede machine opleveren.
         assert_eq!(group_machines(vec![mk("a", "URSU", ""), mk("b", "ursu", "")]).len(), 1);
+    }
+
+    // GEMETEN op ursu, en precies de situatie die de klacht opleverde: herdr kende
+    // drie sessies waarvan NUL een agent had, terwijl er twee agents draaiden die
+    // alleen de Taurus daar kende. Alle drie de herdr-regels werden als keuze
+    // aangeboden en zetten je in een cmd-prompt.
+    #[test]
+    fn only_agents_are_choices_and_the_rest_is_cleanup() {
+        let sess = |name: &str, agent: &str, cwd: &str| RemoteSession {
+            name: name.into(),
+            status: "running".into(),
+            agent: agent.into(),
+            agent_status: String::new(),
+            cwd: cwd.into(),
+        };
+        let peer = r#"[
+          {"title":"Ontwikkel","path":"C:\\Users\\arjen\\ontwikkelmap","agent":"claude","host_id":""},
+          {"title":"random","path":"C:\\Users\\arjen","agent":"claude","host_id":""},
+          {"title":"elders","path":"/srv/x","agent":"claude","host_id":"andere-machine"}
+        ]"#;
+        let got = collect_agents(
+            vec![
+                sess("default", "", ""),
+                sess("taurus-ursu-c-users-arjen-28f85e64", "", r"C:\Users\arjen"),
+                sess("taurus-ursu-taurus-c-users-arjen-28f85e64", "", ""),
+            ],
+            Some(peer),
+        );
+        // Geen van de drie herdr-sessies is een keuze; ze zijn opruimwerk.
+        assert_eq!(got.empty.len(), 3);
+        // Wel de twee agents die er echt draaien.
+        let namen: Vec<&str> = got.agents.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(namen, vec!["Ontwikkel", "random"]);
+        // Een sessie die op DIE machine naar een derde machine wijst is niet van haar.
+        assert!(!got.agents.iter().any(|a| a.title == "elders"));
+        // Zonder mux-sessie is er niets om aan te haken, en dat zegt het model ook.
+        assert!(got.agents.iter().all(|a| !a.attachable && a.origin == "taurus"));
+        assert!(got.taurus_seen);
+    }
+
+    // Een herdr-sessie MET agent is wel gewoon een keuze, en de mapnaam leest
+    // prettiger dan een sessienaam met een hash erachter.
+    #[test]
+    fn a_herdr_session_with_an_agent_is_a_real_choice() {
+        let got = collect_agents(
+            vec![RemoteSession {
+                name: "taurus-ursu-c-users-arjen-proj-1a2b".into(),
+                status: "running".into(),
+                agent: "claude".into(),
+                agent_status: "werkt".into(),
+                cwd: r"C:\Users\arjen\proj".into(),
+                }],
+            None,
+        );
+        assert_eq!(got.agents.len(), 1);
+        assert_eq!(got.agents[0].title, "proj");
+        assert!(got.agents[0].attachable);
+        assert_eq!(got.agents[0].origin, "herdr");
+        assert_eq!(got.agents[0].status, "werkt");
+        // Geen antwoord van de Taurus daar is iets anders dan "hij draait niets".
+        assert!(!got.taurus_seen);
+    }
+
+    // Dezelfde agent langs twee kanten gezien blijft één regel: de Taurus daar kent
+    // hem ook, maar het is dezelfde map en dus hetzelfde werk.
+    #[test]
+    fn the_same_agent_seen_twice_stays_one_row() {
+        let got = collect_agents(
+            vec![RemoteSession {
+                name: "taurus-ursu-x".into(),
+                status: "running".into(),
+                agent: "claude".into(),
+                agent_status: String::new(),
+                cwd: r"C:\Users\arjen\proj".into(),
+            }],
+            Some(r#"[{"title":"proj","path":"c:/users/arjen/proj/","agent":"claude","host_id":""}]"#),
+        );
+        assert_eq!(got.agents.len(), 1, "{:?}", got.agents);
+        assert!(got.agents[0].attachable, "de aanhaakbare kant wint");
     }
 
     // GEMETEN nadat Connect een paar keer gebruikt was: op de andere machine
