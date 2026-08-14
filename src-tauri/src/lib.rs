@@ -1288,6 +1288,137 @@ fn get_sessions() -> Vec<PersistedSession> {
     Vec::new()
 }
 
+// ---------- sessiegeschiedenis (#129) ----------
+//
+// GEMETEN na een herstart voor een driverinstallatie (2026-08-14): van vier sessies
+// kwamen er twee terug en waren de andere twee niet "niet hersteld" maar VERDWENEN.
+// Dat is geen pech maar de code: restoreSessions slaat over wat het niet kan
+// hervatten, en persistSessionsToDisk schrijft daarna sessions.json opnieuw uit de
+// tabs die dan open staan. Het enige spoor dat Taurus bijhield was daarmee weg.
+//
+// Deze lijst is daarom een ANDER bestand met een andere regel: er wordt aan
+// toegevoegd en bijgewerkt, en een mislukte herstart haalt er nooit iets uit.
+// sessions.json blijft wat het is -- "wat stond er open" -- en dit is "wat is er
+// geweest".
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct HistoryEntry {
+    uuid: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    accent: String,
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    agent: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    host_id: String,
+    #[serde(default)]
+    project_id: String,
+    // Seconden sinds epoch, net als de rest van de tree (geen chrono).
+    #[serde(default)]
+    created: u64,
+    #[serde(default)]
+    last_seen: u64,
+    // Stond hij open toen Taurus voor het laatst sloot? Dat bepaalt of hij bij het
+    // opstarten voorgevinkt staat -- niet of hij bewaard blijft.
+    #[serde(default)]
+    was_open: bool,
+}
+
+fn history_path() -> std::path::PathBuf {
+    config_dir().join("history.json")
+}
+
+fn read_history() -> Vec<HistoryEntry> {
+    let p = history_path();
+    match std::fs::read_to_string(&p) {
+        Ok(txt) => match serde_json::from_str::<Vec<HistoryEntry>>(&txt) {
+            Ok(v) => v,
+            Err(_) => {
+                backup_invalid(&p);
+                Vec::new()
+            }
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+fn write_history(list: &[HistoryEntry]) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(config_dir());
+    let txt = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
+    std::fs::write(history_path(), txt).map_err(|e| e.to_string())
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// Bijwerken op uuid, nooit verwijderen. `created` van de eerste keer blijft staan;
+// dat is wat "wanneer begon dit werk" betekent.
+fn merge_history(mut list: Vec<HistoryEntry>, mut e: HistoryEntry, now: u64) -> Vec<HistoryEntry> {
+    if e.uuid.trim().is_empty() {
+        return list;
+    }
+    e.last_seen = now;
+    match list.iter_mut().find(|x| x.uuid == e.uuid) {
+        Some(old) => {
+            e.created = if old.created == 0 { now } else { old.created };
+            *old = e;
+        }
+        None => {
+            if e.created == 0 {
+                e.created = now;
+            }
+            list.push(e);
+        }
+    }
+    // Nieuwste bovenaan: dat is de volgorde waarin je ernaar zoekt.
+    list.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+    list
+}
+
+#[tauri::command]
+fn session_history() -> Vec<HistoryEntry> {
+    read_history()
+}
+
+#[tauri::command]
+fn history_record(entry: HistoryEntry) -> Result<(), String> {
+    let list = merge_history(read_history(), entry, now_secs());
+    write_history(&list)
+}
+
+// Welke sessies stonden er open toen Taurus sloot. Apart van `history_record`,
+// want dit is een eigenschap van het MOMENT en niet van de sessie: hij wordt in
+// één keer voor de hele lijst gezet, zodat een tab die je sluit ook echt afvalt.
+#[tauri::command]
+fn history_mark_open(uuids: Vec<String>) -> Result<(), String> {
+    let mut list = read_history();
+    for e in list.iter_mut() {
+        e.was_open = uuids.iter().any(|u| u == &e.uuid);
+    }
+    write_history(&list)
+}
+
+// Met de hand vergeten. De enige manier waarop hier iets uit verdwijnt -- niet
+// omdat een herstart niet lukte.
+#[tauri::command]
+fn history_forget(uuid: String) -> Result<Vec<HistoryEntry>, String> {
+    let mut list = read_history();
+    list.retain(|e| e.uuid != uuid);
+    write_history(&list)?;
+    Ok(list)
+}
+
 // Pad waar Claude Code het transcript van een sessie bewaart:
 // %USERPROFILE%\.claude\projects\<map-encoded>\<uuid>.jsonl
 // De map-encoding vervangt elk niet-alfanumeriek teken door '-'
@@ -4751,6 +4882,10 @@ pub fn run() {
             get_hosts,
             machines,
             remote_agents,
+            session_history,
+            history_record,
+            history_mark_open,
+            history_forget,
             stop_remote_session,
             discovery_start,
             discovery_stop,
@@ -5279,6 +5414,42 @@ mod tests {
         assert_eq!(group_machines(vec![mk("a", "10.0.0.1", "ursu"), mk("b", "10.0.0.2", "ursu")]).len(), 1);
         // Hoofdlettergebruik mag geen tweede machine opleveren.
         assert_eq!(group_machines(vec![mk("a", "URSU", ""), mk("b", "ursu", "")]).len(), 1);
+    }
+
+    // De hele reden dat dit bestand bestaat: een mislukte herstart mag een sessie
+    // niet uit de geschiedenis halen. GEMETEN: na een herstart kwamen 2 van de 4
+    // sessies terug en waren de andere twee helemaal weg uit Taurus.
+    #[test]
+    fn history_updates_and_never_loses_the_first_start() {
+        let e = |uuid: &str, title: &str| HistoryEntry {
+            uuid: uuid.into(),
+            title: title.into(),
+            ..Default::default()
+        };
+        let list = merge_history(Vec::new(), e("u1", "Ontwikkel"), 100);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].created, 100);
+
+        // Zelfde sessie later opnieuw gezien: bijgewerkt, niet verdubbeld, en
+        // "wanneer begon dit werk" blijft staan.
+        let list = merge_history(list, e("u1", "Ontwikkel hernoemd"), 500);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].created, 100, "created is van de eerste keer");
+        assert_eq!(list[0].last_seen, 500);
+        assert_eq!(list[0].title, "Ontwikkel hernoemd");
+
+        // Een tweede sessie komt erbij, nieuwste bovenaan.
+        let list = merge_history(list, e("u2", "random"), 900);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].uuid, "u2");
+    }
+
+    // Een lege uuid is geen sessie om te onthouden; die zou bij elke start een
+    // nieuwe regel opleveren.
+    #[test]
+    fn history_ignores_an_entry_without_a_uuid() {
+        let list = merge_history(Vec::new(), HistoryEntry::default(), 1);
+        assert!(list.is_empty());
     }
 
     // GEMETEN op ursu, en precies de situatie die de klacht opleverde: herdr kende

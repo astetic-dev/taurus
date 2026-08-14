@@ -959,3 +959,11 @@ select:-webkit-autofill {
 .consent-fp code { word-break: break-all; }
 .consent-timer { margin-top: 8px; font-size: 12px; color: var(--text-dim); }
 #consent-modal .modal-actions { justify-content: space-between; }
+
+/* Opstartvraag: welke sessies open je opnieuw (#129). Een rij is een label met een
+   vinkje, zodat de hele regel klikbaar is. */
+.restore-row { cursor: pointer; }
+.restore-row input[disabled] { cursor: not-allowed; }
+/* Niet te hervatten: de rij blijft staan mét reden, en dat mag geen alarm zijn --
+   verdwijnen was de fout, en rood zou suggereren dat er iets stuk is. */
+.restore-row input[disabled] ~ .host-main { opacity: .6; }

@@ -54,6 +54,16 @@ const I18N = {
     session_attach: "Aanhaken",
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
     session_stop_sure: "zeker weten?",
+    persist_ask: "Vragen welke sessies je opent",
+    persist_silent: "Stil hervatten wat openstond",
+    persist_clean: "Schoon beginnen",
+    restore_title: "Vorige sessies openen?",
+    restore_lead: "Aangevinkt is wat openstond toen Taurus sloot. Daaronder staat wat er eerder is geweest — die blijft bewaard, ook als je hem nu niet opent.",
+    restore_none: "Niets openen", restore_go: "Openen",
+    resume_no_host: "machine bestaat niet meer",
+    resume_no_transcript: "geen transcript gevonden",
+    resume_old: "{days} dagen oud",
+    ago_now: "zojuist", ago_min: "{n} min geleden", ago_hour: "{n} uur geleden", ago_day: "{n} dagen geleden",
     hosts_known: "Bekende machines",
     found_title: "Gevonden op dit netwerk",
     found_not_announcing: "Je bent zelf niet vindbaar: zet \"bereikbaar\" aan in Instellingen en vertrouw dit netwerk.",
@@ -132,7 +142,7 @@ const I18N = {
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
-    grp_sessions: "Sessies", set_persist: "Sessies onthouden en bij opstarten hervatten",
+    grp_sessions: "Sessies", set_persist: "Bij opstarten",
     tab_general: "Algemeen", tab_theme: "Thema", tab_html: "HTML-preview", tab_terminal: "Terminal", tab_voice: "Spraak",
     help_default: "Beweeg over een instelling voor uitleg.",
     help_lang: "Taal van de interface: Nederlands of Engels. Wijziging is zichtbaar na Opslaan.",
@@ -268,6 +278,16 @@ const I18N = {
     session_attach: "Attach",
     session_stop_hint: "End this session on the other machine",
     session_stop_sure: "are you sure?",
+    persist_ask: "Ask which sessions to open",
+    persist_silent: "Silently resume what was open",
+    persist_clean: "Start clean",
+    restore_title: "Reopen previous sessions?",
+    restore_lead: "Ticked is what was open when Taurus closed. Below that is what came before — it stays in the history whether you open it now or not.",
+    restore_none: "Open nothing", restore_go: "Open",
+    resume_no_host: "machine no longer exists",
+    resume_no_transcript: "no transcript found",
+    resume_old: "{days} days old",
+    ago_now: "just now", ago_min: "{n} min ago", ago_hour: "{n} h ago", ago_day: "{n} days ago",
     hosts_known: "Known machines",
     found_title: "Found on this network",
     found_not_announcing: "You are not findable yourself: switch on \"reachable\" in Settings and trust this network.",
@@ -346,7 +366,7 @@ const I18N = {
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
-    grp_sessions: "Sessions", set_persist: "Remember sessions and resume on startup",
+    grp_sessions: "Sessions", set_persist: "On startup",
     tab_general: "General", tab_theme: "Theme", tab_html: "HTML preview", tab_terminal: "Terminal", tab_voice: "Voice",
     help_default: "Hover a setting for an explanation.",
     help_lang: "Interface language: Dutch or English. Applies right after you Save.",
@@ -762,6 +782,9 @@ const DEFAULT_SETTINGS = {
   // er niets; daarboven vouwen sessies uit dezelfde bron samen.
   tabGroups: true, tabGroupAt: 10, tabRecap: true,
   fullPaths: true,
+  // Drie standen sinds #129: ask (default) / silent / clean. Het oude
+  // persistSessions-vinkje wordt nog gelezen zodat een bestaande config klopt.
+  persistMode: "ask",
   persistSessions: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
@@ -1440,6 +1463,7 @@ async function attachFromMachine(m, a) {
       cols: session.term.cols, rows: session.term.rows,
     });
     closeHostModal();
+    recordSession(session);
     showView(id);
   } catch (e) {
     sessions.delete(id); session.term.dispose(); session.el.remove();
@@ -1723,6 +1747,7 @@ async function connectToRemoteSession() {
       cols: session.term.cols, rows: session.term.rows,
     });
     els.attachModal.classList.add("hidden");
+    recordSession(session);
     showView(id);
   } catch (e) {
     sessions.delete(id); session.term.dispose(); session.el.remove();
@@ -2645,6 +2670,7 @@ async function startSession() {
   const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId });
   try {
     await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
+    recordSession(session);
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -2692,8 +2718,44 @@ async function addAgentFromForm() {
 /* ============ persistente sessies ============ */
 // Schrijf de huidige (herstartbare) sessies naar schijf. Command-override-sessies
 // (demo nep-Claude) hebben geen --resume-transcript en slaan we niet op.
+/* ============ sessiegeschiedenis (#129) ============ */
+// Drie standen in plaats van een vinkje: vragen (nieuwe default), stil hervatten
+// (wat het was) en schoon starten. "Schoon" wist alleen de OPEN-lijst; de
+// geschiedenis blijft, want daar zat de fout.
+function persistMode() {
+  const m = settings.persistMode || (settings.persistSessions === false ? "clean" : "ask");
+  return m === "silent" || m === "clean" ? m : "ask";
+}
+
+// Elke sessie die Taurus start belandt in de geschiedenis, en blijft daar. Een
+// aangehaakte of gespiegelde sessie heeft geen eigen transcript om te hervatten,
+// maar het spoor dat hij bestond hoort er wel te zijn.
+function recordSession(s) {
+  if (!s || !s.uuid) return;
+  invoke("history_record", {
+    entry: {
+      uuid: s.uuid, path: s.path || "", title: s.title || "",
+      accent: s.accent || "#7c9cff", mode: s.mode || "default",
+      agent: s.agent || "claude", model: s.model || "",
+      hostId: s.hostId || "", projectId: s.projectId || "",
+      created: 0, lastSeen: 0, wasOpen: true,
+    },
+  }).catch(() => {});
+}
+
+// Wat staat er NU open. Aparte vraag van "wat is er geweest", en daarom een aparte
+// aanroep: zo valt een tab die je sluit netjes af zonder uit de lijst te verdwijnen.
+function recordOpenSessions() {
+  const open = [...sessions.values()].filter((s) => s.uuid).map((s) => s.uuid);
+  invoke("history_mark_open", { uuids: open }).catch(() => {});
+}
+
 function persistSessionsToDisk() {
-  if (!settings.persistSessions) { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
+  // De geschiedenis loopt HIER buitenom (#129). Wat er open staat is een andere
+  // vraag dan wat er geweest is, en die tweede mag niet meegewist worden door de
+  // eerste -- dat was precies hoe twee sessies na een herstart verdwenen.
+  recordOpenSessions();
+  if (persistMode() === "clean") { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
   const list = [...sessions.values()]
     // Een aangehaakte sessie heeft geen uuid en geen commando dat Taurus kent;
     // hem hier opslaan zou bij de volgende start een resume proberen die nergens
@@ -2710,29 +2772,30 @@ function persistSessionsToDisk() {
 // te vragen. Ontbreekt het transcript (Claude heeft het opgeruimd) of is het ouder
 // dan 1 dag -> overslaan, niet eens proberen. Een echte spawn-fout -> tab opruimen
 // en melden welke (projectnaam) sessie niet lukte.
-async function restoreSessions() {
-  if (!settings.persistSessions) return;
-  let saved = [];
-  try { saved = await invoke("get_sessions"); } catch (_) { return; }
-  if (!saved.length) return;
+// Waarom een opgeslagen sessie NU niet te hervatten is. Een reden, geen stilte:
+// overslaan mag hem niet uit beeld halen, want dat was precies de fout (#129).
+async function resumeBlocker(meta) {
+  if (meta.host_id) {
+    return hostById(meta.host_id) ? "" : t("resume_no_host");
+  }
+  // Het transcript van een REMOTE sessie staat op de host, niet hier -- die check
+  // zou hem altijd overslaan. Draait er een multiplexer, dan haakt de herstart
+  // bovendien gewoon aan de nog levende sessie aan; zo niet, dan vindt
+  // claude --resume het transcript daar zelf.
+  let st = { exists: false, ageSecs: 0 };
+  try { st = await invoke("session_state", { path: meta.path, uuid: meta.uuid }); } catch (_) {}
+  if (!st.exists) return t("resume_no_transcript");
+  if (st.ageSecs > 86400) return t("resume_old").replace("{days}", Math.floor(st.ageSecs / 86400));
+  return "";
+}
 
-  const ONE_DAY = 86400;
+// Hervat precies wat er is aangevinkt. Geen filter meer hierbinnen: wat niet kon,
+// is al bij het vragen als reden getoond.
+async function restoreSessions(metas) {
   const failures = [];
-  for (const meta of saved) {
+  for (const meta of metas) {
     const uuid = meta.uuid;
     if (!uuid) continue;
-    // Het transcript van een REMOTE sessie staat op de host, niet hier -- die
-    // check zou hem altijd overslaan. Draait er een multiplexer, dan haakt de
-    // herstart bovendien gewoon aan de nog levende sessie aan; zo niet, dan
-    // vindt claude --resume het transcript daar zelf.
-    if (!meta.host_id) {
-      let st = { exists: false, ageSecs: 0 };
-      try { st = await invoke("session_state", { path: meta.path, uuid }); } catch (_) {}
-      if (!st.exists || st.ageSecs > ONE_DAY) continue; // stil overslaan
-    } else if (!hostById(meta.host_id)) {
-      continue; // host is inmiddels verwijderd
-    }
-
     const id = "s" + (++seq);
     const session = spawnTerminal({
       id, uuid, path: meta.path,
@@ -2760,8 +2823,93 @@ async function restoreSessions() {
     }
   }
   showView("new");            // herstelde tabs in de balk, maar blijf op het startscherm
-  persistSessionsToDisk();    // herschrijf zonder overgeslagen/verlopen sessies
+  persistSessionsToDisk();
   if (failures.length) toast(`${t("restore_failed")} ${failures.join(", ")}`, "err");
+}
+
+// Bij het opstarten. Drie standen: vragen (default), stil hervatten zoals het was,
+// of schoon beginnen. "Schoon" verliest niets -- de geschiedenis blijft staan.
+async function startupRestore() {
+  const mode = persistMode();
+  if (mode === "clean") return;
+  let saved = [];
+  try { saved = await invoke("get_sessions"); } catch (_) { return; }
+
+  if (mode === "silent") {
+    const ok = [];
+    for (const m of saved) {
+      if (m.uuid && !(await resumeBlocker(m))) ok.push(m);
+    }
+    if (ok.length) await restoreSessions(ok);
+    return;
+  }
+
+  // Vragen. Wat open stond staat voorgevinkt; de rest van de geschiedenis staat
+  // eronder, uitgevinkt. Wat niet te hervatten is krijgt een reden in plaats van
+  // te verdwijnen.
+  let hist = [];
+  try { hist = await invoke("session_history"); } catch (_) {}
+  const openUuids = new Set(saved.map((m) => m.uuid).filter(Boolean));
+  const rows = [];
+  for (const m of saved) {
+    if (!m.uuid) continue;
+    rows.push({ meta: m, open: true, reason: await resumeBlocker(m) });
+  }
+  for (const h of hist) {
+    if (!h.uuid || openUuids.has(h.uuid)) continue;
+    const meta = {
+      uuid: h.uuid, path: h.path, title: h.title, accent: h.accent,
+      mode: h.mode, agent: h.agent, model: h.model,
+      host_id: h.hostId || "", project_id: h.projectId || "",
+    };
+    rows.push({ meta, open: false, reason: await resumeBlocker(meta), lastSeen: h.lastSeen });
+  }
+  if (!rows.length) return;
+  openRestoreDialog(rows);
+}
+
+// De vraag zelf. Een rij die niet te hervatten is blijft staan mét de reden en is
+// niet aan te vinken -- verdwijnen was de fout, en een vinkje dat niets doet zou de
+// volgende zijn.
+function openRestoreDialog(rows) {
+  const box = document.querySelector("#restore-rows");
+  const modal = document.querySelector("#restore-modal");
+  if (!box || !modal) return;
+  box.innerHTML = "";
+  rows.forEach((r, i) => {
+    const row = document.createElement("label");
+    row.className = "host-row restore-row";
+    const meta = [r.meta.agent || "claude", r.meta.model, r.meta.host_id ? machineLabel(r.meta.host_id) : ""]
+      .filter(Boolean).join(" · ");
+    row.innerHTML = `
+      <input type="checkbox" data-i="${i}"${r.open && !r.reason ? " checked" : ""}${r.reason ? " disabled" : ""} />
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(r.meta.title || r.meta.path || r.meta.uuid.slice(0, 8))}</div>
+        <div class="host-sub">${escapeHtml(r.meta.path)}${meta ? " · " + escapeHtml(meta) : ""}</div>
+      </div>
+      ${r.reason ? `<span class="sess-bare">${escapeHtml(r.reason)}</span>` : ""}
+      ${r.lastSeen ? `<span class="route-mux">${escapeHtml(agoText(r.lastSeen))}</span>` : ""}`;
+    box.appendChild(row);
+  });
+  modal.classList.remove("hidden");
+
+  const close = () => modal.classList.add("hidden");
+  document.querySelector("#restore-none").onclick = close;
+  document.querySelector("#restore-go").onclick = async () => {
+    const picked = [...box.querySelectorAll("input:checked")].map((c) => rows[+c.dataset.i].meta);
+    close();
+    if (picked.length) await restoreSessions(picked);
+  };
+}
+
+// "12 min geleden". Seconden sinds epoch, net als de backend ze bewaart.
+function agoText(secs) {
+  if (!secs) return "";
+  const d = Math.max(0, Math.floor(Date.now() / 1000) - secs);
+  if (d < 90) return t("ago_now");
+  if (d < 5400) return t("ago_min").replace("{n}", Math.round(d / 60));
+  if (d < 172800) return t("ago_hour").replace("{n}", Math.round(d / 3600));
+  return t("ago_day").replace("{n}", Math.round(d / 86400));
 }
 
 let toastTimer = null;
@@ -3253,7 +3401,7 @@ function openSettings() {
   els.setTabRecap.checked = settings.tabRecap;
   els.setTabGroupAt.value = settings.tabGroups ? settings.tabGroupAt : 0;
   els.setFullPaths.checked = settings.fullPaths;
-  els.setPersist.checked = settings.persistSessions;
+  els.setPersistMode.value = persistMode();
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
   els.setSkin.value = settings.skin || brandingSkin || (brandHasTheme ? "brand" : "default");
@@ -3484,7 +3632,7 @@ function saveSettingsFromForm() {
   settings.tabGroupAt = Number.isFinite(drempel) && drempel > 0 ? drempel : DEFAULT_SETTINGS.tabGroupAt;
   settings.tabGroups = Number.isFinite(drempel) && drempel > 0;
   settings.fullPaths = els.setFullPaths.checked;
-  settings.persistSessions = els.setPersist.checked;
+  settings.persistMode = els.setPersistMode.value;
   settings.skin = els.setSkin.value;
   settings.ttsEnabled = els.ttsOn.checked;
   settings.ttsVoice = els.ttsVoiceSel.value;
@@ -3718,7 +3866,8 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); } return; }
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
+    document.querySelector("#restore-modal").classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
   // sluiten voordat de toets naar de terminal gaat (#90).
@@ -4119,7 +4268,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabRecap: document.querySelector("#set-tabrecap"),
     setTabGroupAt: document.querySelector("#set-tabgroupat"),
     setFullPaths: document.querySelector("#set-fullpaths"),
-    setPersist: document.querySelector("#set-persist"),
+    setPersistMode: document.querySelector("#set-persist-mode"),
     setSkin: document.querySelector("#set-skin"),
     recordWidget: document.querySelector("#record-widget"),
     recordBtn: document.querySelector("#record-btn"),
@@ -4363,8 +4512,8 @@ window.addEventListener("DOMContentLoaded", () => {
   markTestInstance();
   renderTabs();
   loadProjects();
-  // Hosts eerst: restoreSessions moet een opgeslagen host_id kunnen opzoeken.
-  loadHosts().then(restoreSessions);
+  // Hosts eerst: het herstellen moet een opgeslagen host_id kunnen opzoeken.
+  loadHosts().then(startupRestore);
 
   // Toon de app-versie discreet onderin de sidebar.
   invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});
