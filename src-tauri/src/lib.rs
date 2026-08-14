@@ -4502,8 +4502,14 @@ fn help_withdraw(app: AppHandle, state: State<AppState>) {
 pub(crate) fn help_token_matches(app: &AppHandle, token: &str) -> bool {
     let state = app.state::<AppState>();
     let ask = state.asking.lock().unwrap();
-    ask.as_ref()
-        .map(|a| !a.token.trim().is_empty() && a.token == token)
+    offer_matches(ask.as_ref(), token)
+}
+
+// Zelfde vergelijking als `take_offer`, maar zonder in te nemen. Apart benoemd zodat
+// de auth-fase en de exec-fase gegarandeerd dezelfde regel gebruiken: een leeg token
+// matcht nooit, ook niet met een lege gebruikersnaam.
+fn offer_matches(ask: Option<&HelpRequest>, token: &str) -> bool {
+    ask.map(|a| !a.token.trim().is_empty() && a.token == token)
         .unwrap_or(false)
 }
 
@@ -4512,14 +4518,28 @@ pub(crate) fn help_token_matches(app: &AppHandle, token: &str) -> bool {
 // gekomen is nodigt de rest van de gang voor niets uit.
 pub(crate) fn claim_help_offer(app: &AppHandle, token: &str) -> Option<String> {
     let state = app.state::<AppState>();
-    let ask = state.asking.lock().unwrap().clone()?;
+    let session = take_offer(&state.asking, token)?;
+    sync_announcement(app);
+    let _ = app.emit("help-answered", ());
+    Some(session)
+}
+
+// De beslissing zelf, los van de app: mag dit token binnen, en zo ja, welke sessie
+// hoort erbij. Apart omdat dit de plek is waar toegang wordt verleend zonder popup;
+// die moet te toetsen zijn zonder GUI eromheen.
+//
+// Het token is EENMALIG in de sterke zin: bij een geslaagde inwisseling gaat de
+// vraag er meteen af. Wie hem beantwoordt heeft hem beantwoord, en een tweede
+// verbinding met hetzelfde token vindt niets meer.
+fn take_offer(asking: &Mutex<Option<HelpRequest>>, token: &str) -> Option<String> {
+    let mut slot = asking.lock().unwrap();
+    let ask = slot.as_ref()?;
     if ask.token.trim().is_empty() || ask.token != token {
         return None;
     }
-    *state.asking.lock().unwrap() = None;
-    sync_announcement(app);
-    let _ = app.emit("help-answered", ());
-    Some(ask.session)
+    let session = ask.session.clone();
+    *slot = None;
+    Some(session)
 }
 
 // Meelezen met een lokale sessie: dezelfde bytes die naar het venster gaan.

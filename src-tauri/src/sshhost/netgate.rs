@@ -126,8 +126,22 @@ pub fn trusted_ipv4() -> Option<std::net::Ipv4Addr> {
     }
     adapter_ipv4s()
         .into_iter()
-        .find(|(guid, _)| ids.iter().any(|id| id.eq_ignore_ascii_case(guid)))
+        .find(|(guid, _)| ids.iter().any(|id| same_guid(id, guid)))
         .map(|(_, ip)| ip)
+}
+
+// De twee bronnen schrijven hetzelfde GUID anders op, en dat is niet cosmetisch.
+//
+// GEMETEN: de Network List Manager gaf `20BBA5A7-53A0-4E38-BC79-96E968EC14E4` en
+// `GetAdaptersAddresses` gaf `{20BBA5A7-53A0-4E38-BC79-96E968EC14E4}` -- mét
+// accolades. Een kale string-vergelijking matchte dus NOOIT, waardoor
+// `trusted_ipv4()` altijd None gaf en de aankondiging op elke machine stilzwijgend
+// achterwege bleef. Geen foutmelding, want "geen vertrouwd netwerk" is een geldige
+// toestand; precies het soort stilte waar je maanden overheen kijkt.
+fn same_guid(a: &str, b: &str) -> bool {
+    let norm = |s: &str| s.trim().trim_start_matches('{').trim_end_matches('}').to_ascii_lowercase();
+    let (a, b) = (norm(a), norm(b));
+    !a.is_empty() && a == b
 }
 
 // De adapter-GUIDs van de netwerken die we vertrouwen. Een netwerk kan meer dan
@@ -292,6 +306,27 @@ mod tests {
         }
         println!("vertrouwde adapters: {:?}", trusted_adapter_ids());
         println!("aankondigen op: {:?}", trusted_ipv4());
+    }
+
+    // GEMETEN op dit werkstation, en de reden dat deze functie bestaat: dezelfde
+    // adapter kwam als `20BBA5A7-...` uit de Network List Manager en als
+    // `{20BBA5A7-...}` uit GetAdaptersAddresses. Zonder normaliseren matchte dat
+    // nooit, en dan kondigt Taurus zich op geen enkele machine aan -- zonder fout,
+    // want "geen vertrouwd netwerk" is een geldig antwoord.
+    #[test]
+    fn a_guid_with_braces_is_the_same_adapter() {
+        assert!(same_guid(
+            "20BBA5A7-53A0-4E38-BC79-96E968EC14E4",
+            "{20BBA5A7-53A0-4E38-BC79-96E968EC14E4}"
+        ));
+        assert!(same_guid(
+            "{20bba5a7-53a0-4e38-bc79-96e968ec14e4}",
+            "20BBA5A7-53A0-4E38-BC79-96E968EC14E4"
+        ));
+        // Twee echt verschillende adapters blijven verschillend, en leeg matcht
+        // nooit -- anders zou een adapter zonder naam op alles passen.
+        assert!(!same_guid("{a}", "{b}"));
+        assert!(!same_guid("", "{}"));
     }
 
     #[test]
