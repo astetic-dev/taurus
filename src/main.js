@@ -198,6 +198,8 @@ const I18N = {
     consent_fp: "Vingerafdruk",
     consent_warn: "Toestaan betekent dat deze computer als jouw account mag werken, met jouw rechten en credentials.",
     consent_remember: "Niet meer vragen voor deze computer",
+    consent_full: "Vol beheer: een shell, niet alleen de agent",
+    consent_full_warn: "Met vol beheer krijgt deze sessie een shell op jouw account, zonder dat er iemand meekijkt. Zonder het vinkje start de agent in de map waar hij begint en vraagt hij het per stap. Dat is het permissiemodel van de agent, geen grens van het besturingssysteem.",
     consent_block: "Blokkeer", consent_deny: "Weiger", consent_join: "Meekijken", consent_allow: "Toestaan",
     consent_timer: "Weigert zichzelf over {secs} s",
     grp_inbound: "Draait nu op deze computer",
@@ -400,6 +402,8 @@ const I18N = {
     consent_fp: "Fingerprint",
     consent_warn: "Allowing means this computer may work as your account, with your rights and credentials.",
     consent_remember: "Don't ask again for this computer",
+    consent_full: "Full control: a shell, not just the agent",
+    consent_full_warn: "Full control gives this session a shell on your account, with nobody watching. Without the tick the agent starts in the folder it begins in and asks before each step. That is the agent's permission model, not a boundary of the operating system.",
     consent_block: "Block", consent_deny: "Deny", consent_join: "Join", consent_allow: "Allow",
     consent_timer: "Denies itself in {secs} s",
     grp_inbound: "Running on this computer right now",
@@ -3345,6 +3349,11 @@ function showNextConsent() {
   // Meekijken kan alleen bij een sessie: bij een pairing is er nog geen terminal.
   els.consentJoin.classList.toggle("hidden", pairing);
   els.consentRemember.checked = false;
+  // Vol beheer gaat over wat een SESSIE krijgt; bij een pairing is er nog niets
+  // om macht aan te geven. Meekijken geeft het sowieso, dus daar is het geen keuze.
+  els.consentFullRow.classList.toggle("hidden", pairing);
+  els.consentFull.checked = false;
+  els.consentFullWarn.classList.add("hidden");
   els.consentModal.classList.remove("hidden");
 
   // Uit de backend, zodat teller en server niet uit elkaar lopen.
@@ -3374,10 +3383,13 @@ function answerConsent(decision) {
   if (!consentActive) return;
   const id = consentActive.id;
   // "Niet meer vragen" is een sterkere vorm van toestaan, geen apart antwoord.
-  const d = decision === "allow" && els.consentRemember.checked ? "always" : decision;
+  let d = decision === "allow" && els.consentRemember.checked ? "always" : decision;
+  // Vol beheer is een tweede as: hij zegt niet WIE er binnen mag maar WAT die dan
+  // krijgt. Meekijken heeft hem niet nodig -- daar is toezicht de controle (#126).
+  if ((d === "allow" || d === "always") && els.consentFull.checked) d += "-full";
   invoke("ssh_consent_reply", { id, decision: d }).catch(() => {});
   closeConsent();
-  if (d === "block" || d === "always") refreshSshPeers();
+  if (d === "block" || d.startsWith("always")) refreshSshPeers();
 }
 
 function fillSttModelSelect() {
@@ -4069,6 +4081,9 @@ window.addEventListener("DOMContentLoaded", () => {
     consentWhat: document.querySelector("#consent-what"),
     consentFp: document.querySelector("#consent-fingerprint"),
     consentRemember: document.querySelector("#consent-remember"),
+    consentFull: document.querySelector("#consent-full"),
+    consentFullRow: document.querySelector("#consent-full-row"),
+    consentFullWarn: document.querySelector("#consent-full-warn"),
     consentRememberRow: document.querySelector("#consent-remember-row"),
     consentTimer: document.querySelector("#consent-timer"),
     consentAllow: document.querySelector("#consent-allow"),
@@ -4213,6 +4228,11 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   listen("ssh-host-changed", () => refreshSshStatus());
   els.consentAllow.addEventListener("click", () => answerConsent("allow"));
+  // De waarschuwing verschijnt pas als je het vinkje zet: hij hoort bij die keuze,
+  // en permanent zichtbaar zou hij wegkijken worden.
+  els.consentFull.addEventListener("change", () => {
+    els.consentFullWarn.classList.toggle("hidden", !els.consentFull.checked);
+  });
   els.consentJoin.addEventListener("click", () => answerConsent("join"));
   els.consentDeny.addEventListener("click", () => answerConsent("deny"));
   els.consentBlock.addEventListener("click", () => answerConsent("block"));

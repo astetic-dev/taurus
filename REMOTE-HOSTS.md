@@ -113,6 +113,42 @@ the placeholder with the public key from step 1.
 | `os` | `windows` or `linux` — decides how the command is quoted for the remote shell |
 | `mux` | `herdr`, `tmux`, `psmux` or `none` — what keeps the session alive. `taurus-agent` is still accepted but superseded by `herdr` |
 | `via` | empty, or `wsl` to run the agent inside WSL on a Windows host |
+| `machine` | which *physical* machine this is. Empty = fall back to `hostname` |
+
+## A machine is a machine, not a route (#124)
+
+An entry above is really a **route**, not a machine: the same computer appears once per
+way of reaching it — its sshd on 22, WSL on 2223, the Taurus host on 8287. That forced
+the distinction into the *name* ("ursu (Taurus-host)"), and from there it leaked into tab
+badges, the machine dropdowns and every agent card pointing at it.
+
+The machine screen shows **one row per machine**, with the routes small underneath, each
+with its own signal dot:
+
+```
+● ursu                                    ⇱ sessies   [Verbinden]
+    ○ sshd :22        herdr
+    ● Taurus :8287    voorkeur    none
+```
+
+- Routes to the same address collapse automatically, so an existing `hosts.json` needs no
+  rewrite. Set `machine` explicitly when one computer answers on two addresses.
+- The name shown is the **shortest** nickname among the routes — the long one is exactly
+  the disambiguating suffix being removed.
+- The **Taurus route wins** when a machine offers one: it needs no key exchange and no
+  sshd on the other side.
+- Dropdowns and badges name the machine, never the route.
+
+**Connect** starts a session in that machine's `default_project` straight away: no name to
+invent, no folder to pick, no card left in the sidebar. That is the "my limit is used up,
+can you take over for ten minutes" case — an agent *card* is the shape for a workplace you
+come back to, and here you do not.
+
+**⇱ sessies** lists what is running on that machine (one ssh round, so it is fetched only
+when asked) and lets you attach to it or end it. Ending takes two clicks, because it cuts
+off someone else's work. herdr's own `default` session is labelled *shell, geen agent*
+rather than hidden: it exists, and the thing to prevent is landing in a bare shell on
+someone else's machine without knowing it.
 
 ## What `mux` buys you
 
@@ -296,6 +332,40 @@ A hostile network can advertise a trusted network's name. Identity remains the k
 fingerprint and the consent popups; this only stops you listening somewhere you never
 meant to.
 
+### Being found, instead of being looked up (#125)
+
+While the listener is open on a trusted network, Taurus announces itself over mDNS as
+`_taurus._tcp.local.`, carrying its user name, host-key fingerprint, OS and default
+folder. A colleague opening the machine screen sees the machine under **Found on this
+network** and can connect without typing an address, a user name or a key path.
+
+Three properties of that are deliberate:
+
+- **It only advertises the trusted interface.** mDNS libraries will happily announce
+  every address on every adapter; measured here that meant the Hyper-V and WSL internal
+  ranges going out to the LAN, telling everyone how this machine is carved up inside and
+  offering nothing the other side can reach. Taurus resolves the adapter behind the
+  trusted network and announces that one address.
+- **It is passive.** Browsing runs only while the machine screen is open, and an
+  announcement never produces a notification, a badge or a popup. Interruptions have to
+  mean something: if every Taurus on the floor blinked whenever someone switched their
+  host on, the popup that does need an answer would drown in traffic that does not.
+- **Being found is not being let in.** The first connection promotes a found machine into
+  the known list, which removes the *lookup*, never the *permission* — every session
+  still asks the receiving side, exactly as before.
+
+**It needs its own firewall rule.** Every mDNS allow rule Windows ships is scoped to a
+program (`svchost.exe` for its own responder, `msedgewebview2.exe` for Edge); Taurus is
+neither, so `taurus.exe` on UDP 5353 needs an exception of its own, next to the TCP 8287
+one the listener already needs. The machine screen checks for both — counting only rules
+that actually apply to this executable — and offers to create them in one elevated step.
+If they are missing it says so, because an empty list that means "blocked" reads like
+"nobody is there", which is the wrong conclusion.
+
+There is no port scan and there will not be one, not even as a button: on a segment where
+multicast is blocked, a machine stays a hand-made entry. That is a better answer than
+shipping something that behaves like a network sweep.
+
 ### Who gets in: pairing, then per session
 
 Consent lives in the GUI instead of in `authorized_keys`, in two steps.
@@ -355,12 +425,36 @@ worse than none because it reads like safety. The controls that do hold:
 An audit transcript is exactly what went over the wire, so a token someone pastes into
 a session is in that file. The files stay local, under your own profile.
 
-**This is not the last word on it.** Every session getting the same full shell flattens
-two situations that are not alike: one where you joined and are watching every keystroke,
-and one where you allowed it and walked away. The agreed direction (#126) ties the level
-to supervision rather than to trust — a joined session keeps the shell, an unattended one
-starts the agent scoped to its folder instead. The consent model described here is what
-that builds on, not something it replaces.
+### Power follows supervision (#126)
+
+Every session getting the same full shell flattened two situations that are not alike:
+one where you joined and are watching every keystroke, and one where you allowed it and
+walked away. The level is now tied to **supervision** rather than to trust:
+
+| | what it starts | why |
+|---|---|---|
+| **Join** | a full shell, as before | you see every keystroke in a mirrored tab; watching *is* the control |
+| **Allow**, unattended | the agent, in ask mode, in the folder it starts in | nobody is looking, so the session should not be able to wander |
+
+A checkbox on the session popup — *Full control: a shell, not just the agent* — overrides
+that, and the warning next to it says what it grants rather than asking "are you sure".
+The audit line records which of the two was given, so `session-allow … [vol beheer]` and
+`session-allow … [agent, geen shell]` are distinguishable afterwards.
+
+**Be clear about what that unattended mode is.** It is a *structural* difference: there is
+no shell, so not everything is reachable by construction, and starting `claude
+--permission-mode plan` means the agent asks before each step. It is **not an OS
+boundary.** The agent can still run commands and its tools can touch paths outside the
+working directory. The containment is exactly as strong as the agent's own permission
+model — a real mechanism, but one that belongs to the agent, not to Taurus. A real
+boundary would need a separate restricted Windows account, or a Job Object / AppContainer
+with filesystem restrictions; both are heavy, and neither is in here.
+
+One more thing that is deliberately unchanged: an **exec request** (`ssh -t host "…"`,
+which is how Taurus opens a tab) runs what was asked, unattended too. That is not a gap
+in the above but the other half of the same principle — that command line was shown in
+the popup and approved as such. Second-guessing it afterwards would be command filtering,
+and the paragraph above says why that is not done.
 
 ### Things worth knowing
 

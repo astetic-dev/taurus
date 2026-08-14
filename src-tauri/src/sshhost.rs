@@ -200,20 +200,61 @@ pub enum Decision {
     Block,
     // Allow + onthoud dit, niet meer vragen.
     Always,
+    // Dezelfde twee, maar met vol beheer: het vinkje op de popup (#126).
+    AllowFull,
+    AlwaysFull,
+}
+
+// Hoeveel macht een sessie krijgt (#126). Niet gekoppeld aan VERTROUWEN maar aan
+// TOEZICHT: bij join ziet de ontvanger elke toetsaanslag in een spiegel-tab, en
+// dat meekijken IS de controle. Is er niemand die kijkt, dan hoort de sessie niet
+// te kunnen zwerven.
+//
+// WEES EERLIJK over wat "Sandboxed" is en niet is. Het is een STRUCTUREEL verschil:
+// er is geen shell, dus niet alles is per constructie bereikbaar. Het is GEEN
+// OS-grens: de agent kan zelf commando's draaien en zijn tools kunnen paden buiten
+// de werkmap raken. De inperking is precies zo sterk als het permissiemodel van de
+// agent -- een echt mechanisme, maar een dat van de agent is en niet van Taurus.
+// Een echte grens zou een apart beperkt Windows-account of een Job Object /
+// AppContainer vragen. Zeg in de UI dus wat het inperkt, niet het woord "sandbox".
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Power {
+    Sandboxed,
+    Full,
 }
 
 impl Decision {
     fn from_str(s: &str) -> Decision {
         match s {
             "allow" => Decision::Allow,
+            "allow-full" => Decision::AllowFull,
             "join" => Decision::Join,
             "block" => Decision::Block,
             "always" => Decision::Always,
+            "always-full" => Decision::AlwaysFull,
             _ => Decision::Deny,
         }
     }
     fn permits(self) -> bool {
-        matches!(self, Decision::Allow | Decision::Join | Decision::Always)
+        matches!(
+            self,
+            Decision::Allow
+                | Decision::Join
+                | Decision::Always
+                | Decision::AllowFull
+                | Decision::AlwaysFull
+        )
+    }
+    // Join geeft altijd vol beheer: daar wordt meegekeken. De andere twee alleen
+    // als de ontvanger dat expliciet aanvinkte.
+    fn power(self) -> Power {
+        match self {
+            Decision::Join | Decision::AllowFull | Decision::AlwaysFull => Power::Full,
+            _ => Power::Sandboxed,
+        }
+    }
+    fn remembers(self) -> bool {
+        matches!(self, Decision::Always | Decision::AlwaysFull)
     }
 }
 
@@ -560,6 +601,38 @@ fn shell_command(cmd: Option<&str>, cwd: Option<&str>) -> CommandBuilder {
     c
 }
 
+// Wat een inkomende sessie start (#126).
+//
+// De asymmetrie die dit oplost: bij JOIN kijkt de ontvanger mee, dus mag het een
+// volle shell zijn -- toezicht is de controle. Bij ALLOW-en-weglopen kijkt niemand,
+// en dan is een shell te veel, want vanuit een shell is alles per constructie
+// bereikbaar. Dan start de AGENT, in de map waar hij begint, in ask-modus.
+//
+// Twee grenzen die hier expliciet horen te staan:
+//   - Dit is geen OS-grens. Zie de opmerking bij `Power`.
+//   - Een EXEC-verzoek (`ssh -t host "..."`) draait wat er gevraagd is, ook
+//     onbeheerd. Dat is geen gat maar de andere helft van hetzelfde principe: die
+//     regel stond in de popup en is als zodanig goedgekeurd. Er hier alsnog langs
+//     kijken zou commandofilteren zijn, en #121 heeft dat afgewezen op de grond
+//     dat een grens die niet houdt, leest als veiligheid.
+fn session_command(cmd: Option<&str>, cwd: Option<&str>, power: Power) -> CommandBuilder {
+    if power == Power::Full || cmd.is_some() {
+        return shell_command(cmd, cwd);
+    }
+    let (program, prefix) = crate::resolve_program("claude");
+    let mut c = CommandBuilder::new(program);
+    for a in prefix {
+        c.arg(a);
+    }
+    // ask-modus: de agent vraagt het voordat hij iets doet. Dat is het mechanisme
+    // waar deze keuze op steunt, en het is dat van de agent -- niet van Taurus.
+    c.arg("--permission-mode");
+    c.arg("plan");
+    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
+    c.cwd(cwd.unwrap_or(&home));
+    c
+}
+
 impl HostSession {
     fn peer_name(&self) -> String {
         format!("{}@{}", self.user, self.address)
@@ -585,7 +658,7 @@ impl HostSession {
             )
             .await;
         match d {
-            Decision::Always => {
+            _ if d.remembers() => {
                 let fp = self.fingerprint.clone();
                 upsert_peer(&fp, |p| p.auto_allow = true);
                 self.auto_allow = true;
@@ -602,6 +675,10 @@ impl HostSession {
         // Join apart vastleggen: meekijken betekent dat er een tweede toetsenbord
         // op dezelfde terminal zit, en dat hoort achteraf terug te vinden te zijn.
         // "Iemand keek mee" is een ander feit dan "iemand mocht verbinden".
+        //
+        // En sinds #126 staat er ook bij WELKE MACHT er is verleend: onbeheerd met
+        // vol beheer is een ander feit dan onbeheerd zonder shell, en achteraf is
+        // dat precies het verschil dat je wilt kunnen nazoeken.
         audit(
             &self.app,
             match d {
@@ -610,7 +687,17 @@ impl HostSession {
                 _ => "session-deny",
             },
             &self.peer_name(),
-            what,
+            &if d.permits() {
+                format!(
+                    "{what} [{}]",
+                    match d.power() {
+                        Power::Full => "vol beheer",
+                        Power::Sandboxed => "agent, geen shell",
+                    }
+                )
+            } else {
+                what.to_string()
+            },
         );
         d
     }
@@ -626,13 +713,14 @@ impl HostSession {
         rows: u16,
         term: &str,
         mirror: bool,
+        power: Power,
     ) -> Result<(), String> {
         let pty = NativePtySystem::default();
         let pair = pty
             .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| format!("openpty: {e}"))?;
 
-        let mut builder = shell_command(cmd, None);
+        let mut builder = session_command(cmd, None, power);
         builder.env("TERM", if term.is_empty() { "xterm-256color" } else { term });
 
         let mut child = pair.slave.spawn_command(builder).map_err(|e| format!("starten: {e}"))?;
@@ -935,7 +1023,7 @@ impl Handler for HostSession {
             .cloned()
             .unwrap_or((80, 24, "xterm-256color".into()));
         let handle = session.handle();
-        match self.start(handle, channel, None, cols, rows, &term, d == Decision::Join) {
+        match self.start(handle, channel, None, cols, rows, &term, d == Decision::Join, d.power()) {
             Ok(()) => session.channel_success(channel)?,
             Err(e) => {
                 audit(&self.app, "error", &self.peer_name(), &format!("shell: {e}"));
@@ -971,6 +1059,7 @@ impl Handler for HostSession {
                     rows,
                     &term,
                     d == Decision::Join,
+                    d.power(),
                 ) {
                     Ok(()) => session.channel_success(channel)?,
                     Err(e) => {
@@ -1240,5 +1329,60 @@ mod tests {
         let exec = format!("{:?}", shell_command(Some("powershell -NoProfile -Enc AAA"), None));
         assert!(exec.contains("/C"), "{exec}");
         assert!(exec.contains("powershell"), "{exec}");
+    }
+
+    // #126: het vinkje is een TWEEDE as. Wie er binnen mag is de ene vraag, wat
+    // die dan krijgt de andere -- en meekijken geeft vol beheer zonder vinkje,
+    // want daar is het toezicht zelf de controle.
+    #[test]
+    fn power_follows_supervision_not_trust() {
+        assert_eq!(Decision::from_str("allow").power(), Power::Sandboxed);
+        assert_eq!(Decision::from_str("always").power(), Power::Sandboxed);
+        assert_eq!(Decision::from_str("join").power(), Power::Full);
+        assert_eq!(Decision::from_str("allow-full").power(), Power::Full);
+        assert_eq!(Decision::from_str("always-full").power(), Power::Full);
+        // De volle varianten laten binnen en worden onthouden, net als hun
+        // gewone tegenhangers -- ze zeggen alleen iets anders over de macht.
+        assert!(Decision::from_str("allow-full").permits());
+        assert!(Decision::from_str("always-full").remembers());
+        assert!(!Decision::from_str("allow").remembers());
+    }
+
+    // Alleen de argv, niet de Debug-vorm: die sleept de hele omgeving mee, en
+    // daar staat ComSpec=cmd.exe in -- waardoor "geen shell" altijd zou falen.
+    fn argv(c: &CommandBuilder) -> String {
+        c.get_argv()
+            .iter()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    // Onbeheerd en zonder expliciet commando: geen shell, maar de agent in
+    // ask-modus. Dit is het hele structurele verschil dat #126 oplevert.
+    #[test]
+    fn an_unattended_session_starts_the_agent_instead_of_a_shell() {
+        let sandboxed = argv(&session_command(None, None, Power::Sandboxed));
+        assert!(!sandboxed.contains("cmd.exe"), "geen shell: {sandboxed}");
+        assert!(sandboxed.contains("claude"), "{sandboxed}");
+        assert!(sandboxed.contains("--permission-mode plan"), "ask-modus: {sandboxed}");
+
+        // Meekijken geeft wel de shell, precies zoals #121 hem gaf.
+        let full = argv(&session_command(None, None, Power::Full));
+        assert!(full.contains("cmd.exe"), "{full}");
+    }
+
+    // Een exec-verzoek draait wat er gevraagd is, ook onbeheerd: die regel stond in
+    // de popup en is als zodanig goedgekeurd. Er alsnog langs kijken zou
+    // commandofilteren zijn, en dat is in #121 afgewezen.
+    #[test]
+    fn an_approved_command_still_runs_unattended() {
+        let cmd = argv(&session_command(
+            Some("powershell -NoProfile -Enc AAA"),
+            None,
+            Power::Sandboxed,
+        ));
+        assert!(cmd.contains("/C"), "{cmd}");
+        assert!(cmd.contains("powershell"), "{cmd}");
     }
 }

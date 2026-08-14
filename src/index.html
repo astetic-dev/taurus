@@ -348,6 +348,10 @@
         </div>
         <div id="consent-warn" class="hint" data-i18n="consent_warn">Toestaan betekent dat deze computer als jouw account mag werken, met jouw rechten en credentials.</div>
         <label class="srow check" id="consent-remember-row"><input id="consent-remember" type="checkbox" /> <span data-i18n="consent_remember">Niet meer vragen voor deze computer</span></label>
+        <!-- Macht volgt toezicht (#126): toestaan-en-weglopen start de agent zonder
+             shell; dit vinkje maakt er vol beheer van, met wat dat betekent erbij. -->
+        <label class="srow check" id="consent-full-row"><input id="consent-full" type="checkbox" /> <span data-i18n="consent_full">Vol beheer: een shell, niet alleen de agent</span></label>
+        <div id="consent-full-warn" class="hint hidden" data-i18n="consent_full_warn">Met vol beheer krijgt deze sessie een shell op jouw account, zonder dat er iemand meekijkt. Zonder het vinkje start de agent in de map waar hij begint en vraagt hij het per stap.</div>
         <div id="consent-timer" class="consent-timer"></div>
         <div class="modal-actions">
           <button id="consent-block" class="btn-ghost" data-i18n="consent_block">Blokkeer</button>
