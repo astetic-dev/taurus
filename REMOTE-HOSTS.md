@@ -355,6 +355,13 @@ worse than none because it reads like safety. The controls that do hold:
 An audit transcript is exactly what went over the wire, so a token someone pastes into
 a session is in that file. The files stay local, under your own profile.
 
+**This is not the last word on it.** Every session getting the same full shell flattens
+two situations that are not alike: one where you joined and are watching every keystroke,
+and one where you allowed it and walked away. The agreed direction (#126) ties the level
+to supervision rather than to trust — a joined session keeps the shell, an unattended one
+starts the agent scoped to its folder instead. The consent model described here is what
+that builds on, not something it replaces.
+
 ### Things worth knowing
 
 - **Inbound sessions are never elevated.** The embedded server does no Windows logon:
