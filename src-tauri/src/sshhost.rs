@@ -873,6 +873,34 @@ impl HostSession {
 impl Handler for HostSession {
     type Error = russh::Error;
 
+    // Een hulpvraag beantwoorden vraagt GEEN sleutel (#125). Het token in de
+    // gebruikersnaam is de credential; de sleutel wordt op dit pad nergens tegen
+    // gecontroleerd, dus eisen dat de helper er een heeft voegt niets toe.
+    //
+    // GEMETEN tussen twee echte instanties: zonder dit kwam de verbinding niet eens
+    // tot `auth_publickey`. Deze machine heeft geen `~/.ssh/id_*`, dus de client bood
+    // niets aan en kreeg "Permission denied" -- terwijl het token gewoon klopte en er
+    // aan de andere kant geen enkele auditregel verscheen. Iemand te hulp schieten
+    // zou dan afhangen van of je ooit een sleutel hebt aangemaakt.
+    //
+    // Dit is niet zwakker dan de vorige route: dáár werd elke sleutel geaccepteerd
+    // zodra het token klopte. Wat de toegang begrenst is het token zelf -- 24 tekens
+    // uit OS-entropie, alleen geldig zolang de vraag open staat, eenmalig, en het
+    // levert niets op dan meelezen met de aangeboden sessie.
+    async fn auth_none(&mut self, user: &str) -> Result<Auth, Self::Error> {
+        if let Some(tok) = user.strip_prefix("taurus-help-") {
+            if crate::help_token_matches(&self.app, tok) {
+                self.user = user.to_string();
+                self.help_token = tok.to_string();
+                audit(&self.app, "help-auth", &self.peer_name(), "token, zonder sleutel");
+                return Ok(Auth::Accept);
+            }
+        }
+        // Voor al het andere blijft dit precies wat het was: geen toegang, en de
+        // client gaat door naar publickey.
+        Ok(Auth::reject())
+    }
+
     // Dit is het pairing-moment. De naam is een claim; de fingerprint is identiteit.
     async fn auth_publickey(
         &mut self,
