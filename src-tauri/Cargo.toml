@@ -42,6 +42,17 @@ sha2 = "0.10"
 # Globale sneltoets (F9) voor push-to-talk, ook als het venster geen focus heeft.
 tauri-plugin-global-shortcut = "2"
 
+# Taurus als SSH-host (#121): dit werkstation bereikbaar maken zonder dat er een
+# OpenSSH Server op hoeft, met de toestemming in de GUI.
+# LET OP de features: russh kiest standaard aws-lc-rs, en die build BREEKT op
+# Windows met "NASM command not found". Met ring bouwt het zonder extra
+# toolchain. Niet terugzetten naar default-features bij een upgrade.
+russh = { version = "0.62", default-features = false, features = ["ring", "flate2", "rsa"] }
+# De DROPZONE stuurt met scp.exe, en dat is sinds OpenSSH 9 een SFTP-client.
+russh-sftp = "2.4"
+rand = "0.10"
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros"] }
+
 # Windows-only: nodig om de WebView2 browser-accelerator-keys (F5, Ctrl+R,
 # Ctrl+Shift+R, devtools) uit te zetten via een COM-call. Versies gepind op
 # wat Tauri 2 al in de tree heeft, zodat er geen extra versie bijkomt.
@@ -58,5 +69,11 @@ windows = { version = "0.61", features = [
   "Win32_System_JobObjects",
   "Win32_System_Threading",
   "Win32_UI_Shell",
+  # Network List Manager: dezelfde bron als de Prive/Openbaar-vraag van Windows.
+  # Geeft elk netwerk een stabiel GUID, zodat "vertrouw dit netwerk" iets
+  # betekent dat een SSID-hernoeming overleeft (#121).
+  "Win32_Networking_NetworkListManager",
+  "Win32_System_Com",
+  "Win32_System_Variant",
 ] }
 

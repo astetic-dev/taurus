@@ -11,6 +11,9 @@ use std::sync::Mutex;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use tauri::{AppHandle, Emitter, State};
 
+// Taurus als SSH-host: inkomende sessies met toestemming in de GUI (#121).
+mod sshhost;
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct Project {
     id: String,
@@ -48,12 +51,29 @@ fn default_projects() -> Vec<Project> {
 
 // Per-gebruiker config: %APPDATA%\Taurus\projects.json (schrijfbaar, geen
 // hardcoded dev-pad, werkt na installatie).
+//
+// TAURUS_CONFIG_DIR verlegt de HELE configmap. Bedoeld om een testexemplaar
+// naast een draaiende Taurus te zetten: die deelt anders sessions.json, en dan
+// hervat de tweede jouw lopende sessies en overschrijft ze daarna ook nog.
+// Bewust een eigen variabele en niet APPDATA verbuigen: APPDATA erven de
+// agents mee, en dan zoekt claude zijn credentials op de verkeerde plek.
 fn config_dir() -> std::path::PathBuf {
-    let base = std::env::var("APPDATA")
-        .ok()
+    resolve_config_dir(
+        std::env::var("TAURUS_CONFIG_DIR").ok(),
+        std::env::var("APPDATA").ok(),
+    )
+}
+
+// Apart gehouden zodat de keuze te testen is zonder aan de omgeving te zitten:
+// env-variabelen zijn procesbreed en tests draaien parallel.
+fn resolve_config_dir(override_dir: Option<String>, appdata: Option<String>) -> std::path::PathBuf {
+    if let Some(dir) = override_dir.filter(|s| !s.trim().is_empty()) {
+        return std::path::PathBuf::from(dir.trim());
+    }
+    appdata
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    base.join("Taurus")
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("Taurus")
 }
 fn config_path() -> std::path::PathBuf {
     config_dir().join("projects.json")
@@ -1445,6 +1465,8 @@ struct AppState {
     sessions: Mutex<HashMap<String, Session>>,
     // STT-opname: commando-kanaal naar de audio-thread + zichtbare status.
     stt: SttState,
+    // Inkomende SSH: listener, wachtende popups en draaiende sessies (#121).
+    ssh: std::sync::Arc<sshhost::HostState>,
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
@@ -1976,7 +1998,13 @@ fn herdr_windows_script(session: &str, cwd: &str, program: &str, args: &[String]
         // Gemeten: een server die je met Start-Process vanuit een sshd-sessie start,
         // wordt gekild zodra die verbinding sluit. Win32_Process.Create herparent
         // hem buiten de sessie, en dan overleeft hij het wel.
-        "  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ('\"' + $h + '\" --session ' + $s + ' server') } | Out-Null".to_string(),
+        // ShowWindow = 0 (SW_HIDE): zonder dit verschijnt er een consolevenster
+        // op het BUREAUBLAD van de host. Via sshd viel dat niet op -- die sessie
+        // is niet de interactieve desktop -- maar een Taurus-host (#121) draait
+        // wel in de sessie van de ingelogde gebruiker, en dan staat er ineens
+        // een zwart venster over zijn werk heen.
+        "  $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }".to_string(),
+        "  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ('\"' + $h + '\" --session ' + $s + ' server'); ProcessStartupInformation = $si } | Out-Null".to_string(),
         "  for ($i = 0; $i -lt 20; $i++) { if (& $h --session $s status 2>$null | Select-String 'status: running') { break }; Start-Sleep -Seconds 1 }".to_string(),
         "}".to_string(),
         format!("& $h --session $s pane get {} 2>$null | Out-Null", HERDR_PANE),
@@ -2228,8 +2256,15 @@ fn build_attach_payload(host: &Host, session: &str) -> Result<String, String> {
 // zonder die kop wijst herdr de sleutels af als onbekend.
 #[tauri::command(async)]
 fn tune_herdr(host: Host) -> Result<String, String> {
-    if host.mux != "herdr" || effective_os(&host) != "windows" || host.via == "wsl" {
+    if host.mux != "herdr" {
         return Ok("skip".into());
+    }
+    // GEMETEN op ursu-wsl: de aanname dat er op Linux/macOS "geen chrome te
+    // verbergen is" klopt alleen zolang er een agent in de pane draait. Zodra
+    // die weg is, valt build_attach_payload terug op de sessie-TUI -- en dan
+    // krijg je daar precies dezelfde dubbele sidebar en tabbalk als op Windows.
+    if effective_os(&host) != "windows" || host.via == "wsl" {
+        return tune_herdr_posix(&host);
     }
     let ps = r#"$p = Join-Path $env:APPDATA 'herdr\config.toml'
 $h = (Get-Command herdr -EA 0).Source
@@ -2261,6 +2296,48 @@ if ((& $h config check 2>&1) -match 'issues found') { Copy-Item ($p + '.taurus.b
         Some("fail") => Err("herdr wees de configuratie af; de back-up is teruggezet.".into()),
         _ => Err(format!("onverwacht antwoord van de host:\n{}", out.trim())),
     }
+}
+
+// Dezelfde ingreep op een POSIX-host. Config staat daar in
+// $XDG_CONFIG_HOME/herdr/config.toml (gemeten: ~/.config/herdr/config.toml).
+//
+// Het script gaat base64-gecodeerd de lijn over. Anders moet elke quote drie
+// parse-rondes overleven (PowerShell -> ssh -> remote sh) en dat is precies
+// waar de payload-code elders ook al op stukliep; zo is er maar EEN vorm.
+fn tune_herdr_posix(host: &Host) -> Result<String, String> {
+    let (out, _) = ssh_run(host, &herdr_tune_posix_command())?;
+    match out.lines().find_map(|l| l.trim().strip_prefix("TUNE=")) {
+        Some("ok") => Ok("ok".into()),
+        Some("skip") => Ok("skip".into()),
+        Some("fail") => Err("herdr wees de configuratie af; de back-up is teruggezet.".into()),
+        _ => Err(format!("onverwacht antwoord van de host:\n{}", out.trim())),
+    }
+}
+
+// Los van de aanroep zodat de vorm te testen is zonder een host nodig te hebben.
+fn herdr_tune_posix_command() -> String {
+    let script = r#"if command -v herdr >/dev/null 2>&1; then H=herdr
+elif [ -x "$HOME/.local/bin/herdr" ]; then H="$HOME/.local/bin/herdr"
+else echo TUNE=skip; exit 0
+fi
+D="${XDG_CONFIG_HOME:-$HOME/.config}/herdr"
+P="$D/config.toml"
+mkdir -p "$D"
+[ -f "$P" ] || : > "$P"
+if grep -q sidebar_start_collapsed "$P"; then echo TUNE=skip; exit 0; fi
+cp "$P" "$P.taurus.bak"
+if grep -q "^\[ui\]" "$P"; then
+  awk 'BEGIN{d=0} {print} /^\[ui\]/ && d==0 {print "sidebar_start_collapsed = true"; print "sidebar_collapsed_mode = \"hidden\""; print "hide_tab_bar_when_single_tab = true"; d=1}' "$P" > "$P.taurus.new" && mv "$P.taurus.new" "$P"
+else
+  printf '\n[ui]\nsidebar_start_collapsed = true\nsidebar_collapsed_mode = "hidden"\nhide_tab_bar_when_single_tab = true\n' >> "$P"
+fi
+if "$H" config check 2>&1 | grep -qi "issues found"; then cp "$P.taurus.bak" "$P"; echo TUNE=fail; exit 0; fi
+echo TUNE=ok"#;
+    // macOS' base64 kent -d niet altijd; even proberen welke variant werkt.
+    format!(
+        "if echo | base64 -d >/dev/null 2>&1; then DEC=\"base64 -d\"; else DEC=\"base64 -D\"; fi; echo {} | $DEC | sh",
+        b64(script.as_bytes())
+    )
 }
 
 // Wat er op een host draait. Leeg agent-veld = een sessie zonder (herkende) agent;
@@ -3767,6 +3844,166 @@ fn kill_all_sessions(app: &tauri::AppHandle) {
     map.clear();
 }
 
+// --------------------------------------------------------------------------
+// Taurus als SSH-host (#121)
+// --------------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+struct SshHostStatus {
+    // `desired` is het vinkje, `running` is of de deur ook echt open staat.
+    // Die twee lopen uiteen op een niet-vertrouwd netwerk, en dat verschil moet
+    // zichtbaar zijn -- anders lijkt het vinkje zichzelf te hebben uitgezet.
+    desired: bool,
+    running: bool,
+    port: u16,
+    // De fingerprint van ONZE hostkey: die kan een collega vergelijken met wat
+    // zijn ssh-client bij de eerste verbinding toont.
+    fingerprint: String,
+    networks: Vec<sshhost::netgate::NetInfo>,
+}
+
+fn ssh_status_of(state: &AppState) -> SshHostStatus {
+    SshHostStatus {
+        desired: state.ssh.is_desired(),
+        running: state.ssh.is_running(),
+        port: *state.ssh.port.lock().unwrap(),
+        fingerprint: sshhost::host_key_fingerprint(),
+        networks: sshhost::netgate::current_networks(),
+    }
+}
+
+// Draait dit exemplaar op een eigen configmap? De frontend zet dat in de
+// titelbalk. Niet vanuit Rust doen: branding zet de venstertitel na de start
+// opnieuw en wist zo'n markering meteen weer uit.
+#[tauri::command]
+fn is_test_instance() -> bool {
+    std::env::var("TAURUS_CONFIG_DIR").map(|s| !s.trim().is_empty()).unwrap_or(false)
+}
+
+#[tauri::command]
+fn ssh_host_status(state: State<AppState>) -> SshHostStatus {
+    ssh_status_of(&state)
+}
+
+// "Vertrouw dit netwerk". Pas daarna gaat de listener open -- en bij een
+// wisseling naar een onbekend netwerk vanzelf weer dicht.
+#[tauri::command]
+fn ssh_network_trust(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+    trusted: bool,
+) -> Result<SshHostStatus, String> {
+    sshhost::netgate::set_trusted(&id, trusted)?;
+    // Meteen laten meebewegen in plaats van tot de volgende ronde wachten.
+    if state.ssh.is_desired() {
+        let port = *state.ssh.port.lock().unwrap();
+        sshhost::set_enabled(app, state.ssh.clone(), true, port)?;
+    }
+    Ok(ssh_status_of(&state))
+}
+
+// Het vinkje in Instellingen. Uit is de default en blijft de default: dit zet
+// een deur open op het netwerk en dat hoort een bewuste handeling te zijn.
+#[tauri::command]
+fn ssh_host_set(
+    app: AppHandle,
+    state: State<AppState>,
+    enabled: bool,
+    port: Option<u16>,
+) -> Result<SshHostStatus, String> {
+    let p = port.unwrap_or(sshhost::DEFAULT_PORT);
+    sshhost::set_enabled(app, state.ssh.clone(), enabled, p)?;
+    Ok(ssh_status_of(&state))
+}
+
+// Antwoord op een popup: "deny" | "allow" | "join" | "block" | "always".
+#[tauri::command]
+fn ssh_consent_reply(state: State<AppState>, id: String, decision: String) {
+    state.ssh.consents.reply(&id, &decision);
+}
+
+#[tauri::command]
+fn ssh_peers() -> Vec<sshhost::Peer> {
+    sshhost::read_peers()
+}
+
+// Een gekoppelde collega alsnog blokkeren trekt ook de koppeling in: anders zou
+// "geblokkeerd" nog steeds een auto-allow met zich meedragen.
+#[tauri::command]
+fn ssh_peer_set(
+    fingerprint: String,
+    blocked: Option<bool>,
+    auto_allow: Option<bool>,
+) -> Result<Vec<sshhost::Peer>, String> {
+    let mut peers = sshhost::read_peers();
+    if let Some(p) = peers.iter_mut().find(|p| p.fingerprint == fingerprint) {
+        if let Some(b) = blocked {
+            p.blocked = b;
+            if b {
+                p.auto_allow = false;
+            }
+        }
+        if let Some(a) = auto_allow {
+            p.auto_allow = a;
+        }
+    }
+    sshhost::write_peers(&peers)?;
+    Ok(peers)
+}
+
+#[tauri::command]
+fn ssh_peer_forget(fingerprint: String) -> Result<Vec<sshhost::Peer>, String> {
+    let mut peers = sshhost::read_peers();
+    peers.retain(|p| p.fingerprint != fingerprint);
+    sshhost::write_peers(&peers)?;
+    Ok(peers)
+}
+
+#[tauri::command]
+fn ssh_inbound_sessions(state: State<AppState>) -> Vec<sshhost::InboundSession> {
+    state.ssh.sessions.lock().unwrap().values().cloned().collect()
+}
+
+// JOIN: de lokale tab typt in dezelfde terminal als de collega. Twee
+// toetsenborden op één agent -- dat is precies de bedoeling, dus hier zit geen
+// "wie is aan de beurt"-logica.
+#[tauri::command]
+fn ssh_mirror_write(state: State<AppState>, id: String, data: String) {
+    let io = state.ssh.io.lock().unwrap().get(&id).cloned();
+    if let Some(io) = io {
+        io.write(data.as_bytes());
+    }
+}
+
+// Twee vensters op één terminal: de kleinste maat wint (zoals tmux).
+#[tauri::command]
+fn ssh_mirror_resize(state: State<AppState>, id: String, cols: u16, rows: u16) {
+    let io = state.ssh.io.lock().unwrap().get(&id).cloned();
+    if let Some(io) = io {
+        io.set_local_size(cols, rows);
+    }
+}
+
+// De spiegel-tab sluiten stopt alleen het meekijken; de sessie van de collega
+// loopt door. Afkappen is een aparte, expliciete handeling (ssh_kill_session).
+#[tauri::command]
+fn ssh_mirror_detach(state: State<AppState>, id: String) {
+    let io = state.ssh.io.lock().unwrap().get(&id).cloned();
+    if let Some(io) = io {
+        io.drop_local();
+    }
+}
+
+#[tauri::command]
+fn ssh_kill_session(app: AppHandle, state: State<AppState>, id: String) {
+    let io = state.ssh.io.lock().unwrap().get(&id).cloned();
+    if let Some(io) = io {
+        sshhost::audit(&app, "session-kill", &id, "door de lokale gebruiker");
+        io.kill();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Audio-thread voor STT: cpal-streams zijn !Send, dus één eigen thread
@@ -3786,6 +4023,7 @@ pub fn run() {
                 recording: std::sync::atomic::AtomicBool::new(false),
                 level: mic_level,
             },
+            ssh: std::sync::Arc::new(sshhost::HostState::default()),
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -3813,6 +4051,21 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "windows")]
             disable_accelerator_keys(app.handle());
+            // Stond de SSH-host aan toen je Taurus afsloot? Dan weer aan -- de
+            // netwerk-gate beslist alsnog of er echt geluisterd wordt. Zonder
+            // dit moest je na elke start opnieuw aanvinken.
+            {
+                use tauri::Manager;
+                let pref = sshhost::read_pref();
+                if pref.enabled {
+                    let st = app.state::<AppState>();
+                    if let Err(e) =
+                        sshhost::set_enabled(app.handle().clone(), st.ssh.clone(), true, pref.port)
+                    {
+                        debug_log(format!("ssh-host bij opstarten: {e}"));
+                    }
+                }
+            }
             {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
                 // F9 alleen systeembreed claimen als STT ook echt bruikbaar is
@@ -3875,6 +4128,19 @@ pub fn run() {
             stt_download,
             stt_toggle,
             stt_level,
+            is_test_instance,
+            ssh_host_status,
+            ssh_host_set,
+            ssh_network_trust,
+            ssh_consent_reply,
+            ssh_peers,
+            ssh_peer_set,
+            ssh_peer_forget,
+            ssh_inbound_sessions,
+            ssh_mirror_write,
+            ssh_mirror_resize,
+            ssh_mirror_detach,
+            ssh_kill_session,
             debug_log
         ])
         .run(tauri::generate_context!())
@@ -4292,21 +4558,53 @@ mod tests {
         assert!(!list[0].mux_auto);
     }
 
+    // Zonder herdr is er geen chrome om te verbergen, en dan hoort Taurus van
+    // andermans configbestand af te blijven.
     #[test]
-    fn tuning_only_touches_a_windows_herdr_host() {
-        // Op POSIX hangt de tab rechtstreeks aan de agent-terminal: geen chrome,
-        // dus niets te verstellen. Aan een configbestand van iemand anders komen
-        // zonder dat het iets oplost, is precies wat je niet wilt.
+    fn tuning_is_only_for_herdr_hosts() {
         let mut h = test_host();
-        h.mux = "herdr".into();
-        h.os = "linux".into();
-        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
-        h.os = "windows".into();
-        h.via = "wsl".into();
-        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
-        h.via = String::new();
         h.mux = "tmux".into();
+        assert_eq!(tune_herdr(h.clone()).unwrap(), "skip");
+        h.mux = "none".into();
         assert_eq!(tune_herdr(h).unwrap(), "skip");
+    }
+
+    // Handmatig: `cargo test -- --ignored --nocapture toon_herdr` drukt het
+    // commando af dat naar een POSIX-host gaat, zodat je het tegen een echte
+    // machine kunt houden zonder de app te starten.
+    #[test]
+    #[ignore]
+    fn toon_herdr_tune_commando() {
+        println!("{}", herdr_tune_posix_command());
+    }
+
+    // GEMETEN op ursu-wsl: een POSIX-host valt WEL terug op de sessie-TUI zodra
+    // er geen agent in de pane draait, en dan staat daar dezelfde dubbele
+    // sidebar als op Windows. Deze test legt vast dat de ingreep daar nu ook
+    // gebeurt -- en dat hij net zo voorzichtig is als de Windows-variant.
+    #[test]
+    fn posix_tuning_is_reversible_and_validated() {
+        let cmd = herdr_tune_posix_command();
+        // Alles na de laatste "echo " tot de pipe is de base64-payload.
+        let payload = cmd
+            .rsplit("echo ")
+            .next()
+            .and_then(|rest| rest.split(' ').next())
+            .expect("base64-deel");
+        let script = String::from_utf8(b64_decode_for_test(payload)).expect("script is tekst");
+
+        assert!(script.contains("sidebar_start_collapsed = true"), "{script}");
+        assert!(script.contains("sidebar_collapsed_mode = \"hidden\""), "{script}");
+        assert!(script.contains("hide_tab_bar_when_single_tab = true"), "{script}");
+        // Eigen keuze van de gebruiker wint: al ingesteld = niet aankomen.
+        assert!(script.contains("if grep -q sidebar_start_collapsed"), "{script}");
+        // Back-up voor, terugzetten als herdr de config afkeurt.
+        assert!(script.contains("taurus.bak"), "{script}");
+        assert!(script.contains("config check"), "{script}");
+        assert!(script.contains("TUNE=fail"), "{script}");
+        // Een bestaande [ui]-tabel krijgt de sleutels erbij; een tweede [ui]
+        // zou ongeldige TOML zijn.
+        assert!(script.contains("grep -q \"^\\[ui\\]\""), "{script}");
     }
 
     #[test]
@@ -4696,6 +4994,30 @@ mod tests {
         assert_eq!(back.hostname, "work.tail.net");
         assert_eq!(back.mux, "tmux");
         assert_eq!(back.key_path, r"C:\Users\AST\.ssh\id_ed25519");
+    }
+
+    // Een testexemplaar naast een draaiende Taurus mag NOOIT dezelfde configmap
+    // pakken: dan hervat het je lopende sessies en overschrijft het ze daarna.
+    #[test]
+    fn config_dir_override_wins_over_appdata() {
+        let d = resolve_config_dir(Some(r"C:\Temp\TaurusTest".into()), Some(r"C:\Users\x\AppData\Roaming".into()));
+        assert_eq!(d, std::path::PathBuf::from(r"C:\Temp\TaurusTest"));
+        // Geen "Taurus" eronder plakken: de opgegeven map IS de configmap.
+        assert!(!d.ends_with("Taurus"));
+    }
+
+    #[test]
+    fn config_dir_falls_back_to_appdata() {
+        let d = resolve_config_dir(None, Some(r"C:\Users\x\AppData\Roaming".into()));
+        assert_eq!(d, std::path::PathBuf::from(r"C:\Users\x\AppData\Roaming\Taurus"));
+    }
+
+    // Een lege of witruimte-variabele is per ongeluk gezet, niet bedoeld als
+    // "gebruik de huidige map".
+    #[test]
+    fn empty_override_is_ignored() {
+        let d = resolve_config_dir(Some("   ".into()), Some(r"C:\Users\x\AppData\Roaming".into()));
+        assert_eq!(d, std::path::PathBuf::from(r"C:\Users\x\AppData\Roaming\Taurus"));
     }
 
     #[test]

@@ -159,6 +159,37 @@ const I18N = {
     stt_registry: "Modellenbibliotheek-URL", stt_refresh: "Vernieuw lijst",
     stt_failed: "✗ Transcriptie mislukt:", stt_rec: "● Opname… (laat F9 los = stop)",
     rec_idle: "Klik of F9 = dicteren", rec_listening: "● Luisteren…", rec_transcribing: "Transcriberen…",
+    tab_network: "Netwerk",
+    grp_reachable: "Bereikbaar op het netwerk",
+    ssh_enable: "Laat anderen op dit netwerk een sessie op deze computer starten",
+    grp_network: "Netwerk",
+    net_hint: "Alleen op een vertrouwd netwerk kan deze computer bereikbaar zijn. Wissel je van netwerk, dan gaat het vanzelf weer dicht.",
+    ssh_need_trust: "vertrouw eerst een netwerk hierboven",
+    ssh_port: "Poort",
+    ssh_hint: "Een sessie draait als jouw Windows-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
+    ssh_on_lbl: "bereikbaar op poort {port}", ssh_off_lbl: "uit",
+    ssh_blocked_lbl: "aan, maar dit netwerk is niet vertrouwd — er luistert niets",
+    net_trust: "Vertrouw dit netwerk", net_none: "Geen netwerkverbinding gevonden.",
+    net_cat_public: "openbaar netwerk", net_cat_private: "privé-netwerk", net_cat_domain: "domein",
+    ssh_fp_lbl: "Vingerafdruk van deze computer",
+    ssh_failed: "✗ Kan niet gaan luisteren:",
+    grp_peers: "Gekoppelde computers",
+    peers_hint: "Identiteit is de vingerafdruk van de sleutel, niet de naam — die verzint de client zelf.",
+    peers_none: "Er is nog geen computer gekoppeld.",
+    peer_blocked: "geblokkeerd", peer_auto: "vraagt nooit",
+    peer_block: "Blokkeer", peer_unblock: "Deblokkeer", peer_forget: "Vergeet",
+    consent_pair_title: "Nieuwe computer wil verbinden",
+    consent_session_title: "Verzoek om een sessie",
+    consent_who: "{user} op {address}",
+    consent_fp: "Vingerafdruk",
+    consent_warn: "Toestaan betekent dat deze computer als jouw account mag werken, met jouw rechten en credentials.",
+    consent_remember: "Niet meer vragen voor deze computer",
+    consent_block: "Blokkeer", consent_deny: "Weiger", consent_join: "Meekijken", consent_allow: "Toestaan",
+    consent_timer: "Weigert zichzelf over {secs} s",
+    grp_inbound: "Draait nu op deze computer",
+    inbound_none: "Er draait niets namens iemand anders.",
+    inbound_joined: "je kijkt mee", inbound_stop: "Stop",
+    join_tab: "Meekijken",
   },
   en: {
     brand_sub: "Agent Launcher", projects: "Agents",
@@ -316,6 +347,37 @@ const I18N = {
     stt_registry: "Model library URL", stt_refresh: "Refresh list",
     stt_failed: "✗ Transcription failed:", stt_rec: "● Recording… (release F9 to stop)",
     rec_idle: "Click or F9 to dictate", rec_listening: "● Listening…", rec_transcribing: "Transcribing…",
+    tab_network: "Network",
+    grp_reachable: "Reachable on the network",
+    ssh_enable: "Let others on this network start a session on this computer",
+    grp_network: "Network",
+    net_hint: "This computer can only be reachable on a trusted network. Switch networks and it closes again by itself.",
+    ssh_need_trust: "trust a network above first",
+    ssh_port: "Port",
+    ssh_hint: "A session runs as your Windows account, with your rights. Every connection asks permission first; everything is recorded in an audit trail.",
+    ssh_on_lbl: "reachable on port {port}", ssh_off_lbl: "off",
+    ssh_blocked_lbl: "on, but this network is not trusted — nothing is listening",
+    net_trust: "Trust this network", net_none: "No network connection found.",
+    net_cat_public: "public network", net_cat_private: "private network", net_cat_domain: "domain",
+    ssh_fp_lbl: "This computer's fingerprint",
+    ssh_failed: "✗ Could not start listening:",
+    grp_peers: "Paired computers",
+    peers_hint: "Identity is the key's fingerprint, not the name — the client makes that up itself.",
+    peers_none: "No computer has been paired yet.",
+    peer_blocked: "blocked", peer_auto: "never asks",
+    peer_block: "Block", peer_unblock: "Unblock", peer_forget: "Forget",
+    consent_pair_title: "New computer wants to connect",
+    consent_session_title: "Session request",
+    consent_who: "{user} at {address}",
+    consent_fp: "Fingerprint",
+    consent_warn: "Allowing means this computer may work as your account, with your rights and credentials.",
+    consent_remember: "Don't ask again for this computer",
+    consent_block: "Block", consent_deny: "Deny", consent_join: "Join", consent_allow: "Allow",
+    consent_timer: "Denies itself in {secs} s",
+    grp_inbound: "Running on this computer right now",
+    inbound_none: "Nothing is running on someone else's behalf.",
+    inbound_joined: "you are watching", inbound_stop: "Stop",
+    join_tab: "Joined session",
   },
 };
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
@@ -331,6 +393,21 @@ function applyI18n() {
 // Optionele branding uit %APPDATA%\Taurus\branding.json (via de Rust-command).
 // Lege velden = geen override, dus zonder bestand blijft alles gewoon Taurus.
 // Draait NA applyI18n zodat een ingestelde ondertitel niet overschreven wordt.
+// Draait dit exemplaar op een eigen configmap (TAURUS_CONFIG_DIR)? Dan hoort
+// dat in de titelbalk: twee identiek ogende vensters waarvan er een je echte
+// sessies draait, is vragen om in het verkeerde te typen.
+async function markTestInstance() {
+  let test = false;
+  try { test = await invoke("is_test_instance"); } catch (_) { return; }
+  if (!test) return;
+  const merk = (s) => (s.includes("⚗") ? s : `${s}  ⚗ TEST`);
+  document.title = merk(document.title || "Taurus");
+  try {
+    const w = window.__TAURI__.window.getCurrentWindow();
+    w.setTitle(merk(await w.title()));
+  } catch (_) {}
+}
+
 async function applyBranding() {
   let b;
   try { b = await invoke("branding"); } catch (_) { return; }
@@ -377,6 +454,9 @@ async function applyBranding() {
     document.title = b.windowTitle;
     try { window.__TAURI__.window.getCurrentWindow().setTitle(b.windowTitle); } catch (_) {}
   }
+  // Een testexemplaar (eigen configmap) merken we HIER, want branding zet de
+  // venstertitel na de start opnieuw en wist een markering uit Rust.
+  markTestInstance();
   // Branding mag het garble-effect uitzetten (garble:false).
   if (b.garble === false) brandGarble = false;
   // Effectieve skin: expliciete keuze in Instellingen wint, anders de
@@ -1036,7 +1116,9 @@ async function addAndTestHost() {
 // bij het toevoegen of hertesten van de machine. Mislukt het, dan is dat geen
 // reden om de host niet op te slaan: de tab werkt ook mét chrome.
 async function tuneHerdrChrome(host) {
-  if (host.mux !== "herdr" || host.os !== "windows" || host.via === "wsl") return "";
+  // Ook op Linux/macOS: zodra er geen agent in de pane draait valt de tab terug
+  // op herdr's sessie-TUI, en dan is daar dezelfde dubbele chrome te verbergen.
+  if (host.mux !== "herdr") return "";
   try {
     return await invoke("tune_herdr", { host });
   } catch (e) {
@@ -1858,7 +1940,7 @@ function showView(target) {
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId, mirror }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -1958,14 +2040,22 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     // Van welke agentkaart komt deze sessie (#90)? Leeg = losse sessie, via
     // map-verkennen gestart. Bepaalt onder welke tab hij gebundeld wordt.
     projectId: projectId || "",
+    // Gevuld = deze tab kijkt mee met een INKOMENDE sessie van een collega
+    // (JOIN, #121). Er is geen eigen proces: toetsen en maat gaan naar diens
+    // terminal, en sluiten stopt alleen het meekijken.
+    mirror: mirror || "",
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
   };
   sessions.set(id, session);
 
-  term.onData((d) => invoke("write_session", { id, data: d }));
-  term.onResize(({ cols, rows }) => invoke("resize_session", { id, cols, rows }));
+  term.onData((d) => session.mirror
+    ? invoke("ssh_mirror_write", { id: session.mirror, data: d })
+    : invoke("write_session", { id, data: d }));
+  term.onResize(({ cols, rows }) => session.mirror
+    ? invoke("ssh_mirror_resize", { id: session.mirror, cols, rows })
+    : invoke("resize_session", { id, cols, rows }));
   // Kopieren bij selectie via xterm's onSelectionChange (vuurt betrouwbaar; een
   // DOM mouseup op het paneel komt niet door xterm's eigen muis-afhandeling).
   // We leggen de laatste niet-lege selectie vast en kopieren met een korte
@@ -2157,7 +2247,9 @@ function persistSessionsToDisk() {
     // hem hier opslaan zou bij de volgende start een resume proberen die nergens
     // op slaat. De sessie zelf blijft op de host draaien -- je haakt gewoon
     // opnieuw aan via ⇱.
-    .filter((s) => !s.command && !s.attached)
+    // Een spiegel-tab (JOIN) hoort er ook niet in: die heeft geen eigen proces
+    // en bij de volgende start bestaat de sessie van de collega niet meer.
+    .filter((s) => !s.command && !s.attached && !s.mirror)
     .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "" }));
   invoke("save_sessions", { sessions: list }).catch(() => {});
 }
@@ -2233,7 +2325,9 @@ function toast(msg, kind) {
 async function closeSession(id) {
   const s = sessions.get(id);
   if (!s) return;
-  await invoke("close_session", { id });
+  // Meekijken stoppen mag de sessie van de collega niet afbreken.
+  if (s.mirror) await invoke("ssh_mirror_detach", { id: s.mirror }).catch(() => {});
+  else await invoke("close_session", { id });
   s.term.dispose(); s.el.remove(); sessions.delete(id);
   persistSessionsToDisk();
   if (current === id) showView([...sessions.keys()].pop() || "new"); else renderTabs();
@@ -2246,7 +2340,11 @@ function applyLayout(s) {
 }
 function refitTerm(s) {
   if (s.previewMode === "full") return;
-  requestAnimationFrame(() => { try { s.fit.fit(); } catch (_) {} invoke("resize_session", { id: s.id, cols: s.term.cols, rows: s.term.rows }); });
+  requestAnimationFrame(() => {
+    try { s.fit.fit(); } catch (_) {}
+    if (s.mirror) invoke("ssh_mirror_resize", { id: s.mirror, cols: s.term.cols, rows: s.term.rows });
+    else invoke("resize_session", { id: s.id, cols: s.term.cols, rows: s.term.rows });
+  });
 }
 async function openPreview(id) {
   closeTabMenu();
@@ -2496,6 +2594,48 @@ listen("pty-output", (event) => {
   }
   if (render) renderTabs();
 });
+// JOIN (#121): dezelfde bytes die naar de collega gaan, ook hier tekenen. De
+// tab ontstaat zodra de eerste output komt -- dat is het moment waarop er echt
+// iets te zien is, en de sessie-id is dan bekend.
+const mirrorTabs = new Map(); // inkomende sessie-id -> lokale tab-id
+listen("ssh-mirror-output", (event) => {
+  const [sid, data] = event.payload;
+  let tabId = mirrorTabs.get(sid);
+  if (!tabId || !sessions.has(tabId)) {
+    tabId = `join-${sid}`;
+    mirrorTabs.set(sid, tabId);
+    const inbound = (sshSessions.find((x) => x.id === sid) || {});
+    spawnTerminal({
+      id: tabId,
+      uuid: "",
+      path: "",
+      title: `👥 ${inbound.label || t("join_tab")}`,
+      accent: "",
+      mode: "default",
+      command: "",
+      agent: "",
+      model: "",
+      hostId: "",
+      projectId: "",
+      mirror: sid,
+    });
+    showView(tabId);
+  }
+  const s = sessions.get(tabId);
+  if (s) s.term.write(Uint8Array.from(atob(data), (c) => c.charCodeAt(0)));
+});
+listen("ssh-mirror-exit", (event) => {
+  const sid = event.payload;
+  const tabId = mirrorTabs.get(sid);
+  mirrorTabs.delete(sid);
+  const s = tabId && sessions.get(tabId);
+  if (!s) return;
+  s.exited = true; s.working = false; s.status = null;
+  s.term.write(`\r\n\x1b[2m${t("ended")}\x1b[0m\r\n`);
+  renderTabs();
+});
+listen("ssh-sessions-changed", () => refreshSshSessions());
+
 listen("pty-exit", (event) => {
   const [sid, gen] = event.payload;
   const s = sessions.get(sid);
@@ -2699,7 +2839,161 @@ function openSettings() {
   els.sttRegistryInput.value = settings.sttRegistry || "";
   fillSttModelSelect();
   refreshSttStatus();
+  refreshSshStatus();
+  refreshSshPeers();
+  refreshSshSessions();
   els.settingsModal.classList.remove("hidden");
+}
+
+/* ============ Taurus als SSH-host (#121) ============ */
+// De status komt van de Rust-kant, niet uit localStorage: daar staat wat de
+// listener DOET, en dat is het enige eerlijke antwoord op "ben ik bereikbaar?".
+let sshStatus = { running: false, port: 8287, fingerprint: "" };
+// Wat er NU op deze computer draait namens iemand anders. Zichtbaarheid is een
+// van de drie echte knoppen; zonder deze lijst weet je niet wat je toestond.
+let sshSessions = [];
+
+async function refreshSshSessions() {
+  try { sshSessions = await invoke("ssh_inbound_sessions"); } catch (_) { return; }
+  if (!els.sshSessions) return;
+  if (!sshSessions.length) {
+    els.sshSessions.innerHTML = `<div class="hint">${escapeHtml(t("inbound_none"))}</div>`;
+    return;
+  }
+  els.sshSessions.innerHTML = sshSessions
+    .map((s) => `<div class="peer-row" data-sid="${escapeHtml(s.id)}">
+      <div class="peer-id"><b>${escapeHtml(s.label)}</b>${s.mirrored ? ` <span class="peer-tag">${escapeHtml(t("inbound_joined"))}</span>` : ""}
+        <div class="peer-fp"><code>${escapeHtml(s.what)}</code></div></div>
+      <div class="peer-actions"><button class="icon-btn" data-act="kill">${escapeHtml(t("inbound_stop"))}</button></div>
+    </div>`)
+    .join("");
+}
+
+async function refreshSshStatus() {
+  try { sshStatus = await invoke("ssh_host_status"); } catch (_) { return; }
+  // Het vinkje toont de WENS, niet of de deur toevallig open staat: op een
+  // onbekend netwerk blijft hij aan staan en legt de regel eronder uit waarom
+  // er niets luistert. Het vinkje zichzelf zien uitzetten is verwarrender.
+  const nets = sshStatus.networks || [];
+  // Het netwerk vertrouwen is de VOORWAARDE, niet een detail ernaast: zolang
+  // niets vertrouwd is, valt er niets aan te zetten. Anders zet je een vinkje
+  // aan waar niets van gebeurt -- dat leest als een kapotte functie.
+  const netTrusted = nets.some((n) => n.trusted);
+  if (els.sshOn) { els.sshOn.checked = sshStatus.desired; els.sshOn.disabled = !netTrusted; }
+  if (els.sshPort) { els.sshPort.value = sshStatus.port || 8287; els.sshPort.disabled = !netTrusted; }
+  const groep = document.querySelector("#ssh-reach-group");
+  if (groep) groep.classList.toggle("locked", !netTrusted);
+  if (els.sshState) {
+    const lbl = sshStatus.running
+      ? t("ssh_on_lbl").replace("{port}", sshStatus.port)
+      : !netTrusted
+        ? t("ssh_need_trust")
+        : sshStatus.desired
+          ? t("ssh_blocked_lbl")
+          : t("ssh_off_lbl");
+    // Gewenst maar niet luisterend is een waarschuwing, geen mededeling: je
+    // denkt dat je bereikbaar bent terwijl er niets openstaat.
+    els.sshState.className = "stt-state" + (sshStatus.running ? " ok" : sshStatus.desired ? " warn" : "");
+    els.sshState.innerHTML =
+      `<b>${escapeHtml(lbl)}</b>` +
+      (sshStatus.fingerprint
+        ? `<div class="hint">${escapeHtml(t("ssh_fp_lbl"))}: <code>${escapeHtml(sshStatus.fingerprint)}</code></div>`
+        : "");
+  }
+  if (els.sshNetworks) {
+    els.sshNetworks.innerHTML = nets.length
+      ? nets.map((n) => {
+          // Wat Windows van het netwerk vindt, staat erbij: op een OPENBAAR
+          // netwerk is "laat collega's aankloppen" zelden wat je bedoelde.
+          const cat = n.category ? t(`net_cat_${n.category}`) : "";
+          const waarschuw = n.category === "public";
+          return `<label class="peer-row net-row">
+            <span class="peer-id"><b>${escapeHtml(n.name || "?")}</b>
+              ${cat ? `<span class="peer-tag${waarschuw ? " blocked" : ""}">${escapeHtml(cat)}</span>` : ""}
+              <div class="peer-fp">${escapeHtml(t("net_trust"))}</div></span>
+            <input type="checkbox" data-net="${escapeHtml(n.id)}"${n.trusted ? " checked" : ""} />
+          </label>`;
+        }).join("")
+      : `<div class="hint">${escapeHtml(t("net_none"))}</div>`;
+  }
+}
+
+async function refreshSshPeers() {
+  if (!els.sshPeers) return;
+  let peers = [];
+  try { peers = await invoke("ssh_peers"); } catch (_) {}
+  if (!peers.length) {
+    els.sshPeers.innerHTML = `<div class="hint">${escapeHtml(t("peers_none"))}</div>`;
+    return;
+  }
+  els.sshPeers.innerHTML = peers
+    .map((p) => {
+      const tags = [];
+      if (p.blocked) tags.push(`<span class="peer-tag blocked">${escapeHtml(t("peer_blocked"))}</span>`);
+      if (p.auto_allow) tags.push(`<span class="peer-tag">${escapeHtml(t("peer_auto"))}</span>`);
+      return `<div class="peer-row" data-fp="${escapeHtml(p.fingerprint)}">
+        <div class="peer-id"><b>${escapeHtml(p.label || "?")}</b> <span class="dim">${escapeHtml(p.address || "")}</span>${tags.join("")}
+          <div class="peer-fp"><code>${escapeHtml(p.fingerprint)}</code></div></div>
+        <div class="peer-actions">
+          <button class="icon-btn" data-act="${p.blocked ? "unblock" : "block"}">${escapeHtml(t(p.blocked ? "peer_unblock" : "peer_block"))}</button>
+          <button class="icon-btn" data-act="forget">${escapeHtml(t("peer_forget"))}</button>
+        </div></div>`;
+    })
+    .join("");
+}
+
+// Toestemmingsvragen komen als event binnen en worden op volgorde afgehandeld:
+// twee popups tegelijk zou betekenen dat je per ongeluk de verkeerde beantwoordt.
+const consentQueue = [];
+let consentActive = null;
+let consentTick = null;
+
+function showNextConsent() {
+  if (consentActive || !consentQueue.length) return;
+  const req = (consentActive = consentQueue.shift());
+  const pairing = req.kind === "pair";
+  els.consentTitle.textContent = t(pairing ? "consent_pair_title" : "consent_session_title");
+  els.consentWho.textContent = t("consent_who")
+    .replace("{user}", req.user || "?")
+    .replace("{address}", req.address || "?");
+  els.consentWhat.textContent = req.what || "";
+  els.consentFp.textContent = req.fingerprint || "";
+  // Meekijken kan alleen bij een sessie: bij een pairing is er nog geen terminal.
+  els.consentJoin.classList.toggle("hidden", pairing);
+  els.consentRemember.checked = false;
+  els.consentModal.classList.remove("hidden");
+
+  // Uit de backend, zodat teller en server niet uit elkaar lopen.
+  let left = req.timeout || 45;
+  const paint = () => {
+    els.consentTimer.textContent = t("consent_timer").replace("{secs}", left);
+  };
+  paint();
+  clearInterval(consentTick);
+  consentTick = setInterval(() => {
+    left -= 1;
+    paint();
+    // De Rust-kant weigert zelf bij het verlopen; hier alleen de popup opruimen.
+    if (left <= 0) closeConsent();
+  }, 1000);
+}
+
+function closeConsent() {
+  clearInterval(consentTick);
+  consentTick = null;
+  consentActive = null;
+  els.consentModal.classList.add("hidden");
+  showNextConsent();
+}
+
+function answerConsent(decision) {
+  if (!consentActive) return;
+  const id = consentActive.id;
+  // "Niet meer vragen" is een sterkere vorm van toestaan, geen apart antwoord.
+  const d = decision === "allow" && els.consentRemember.checked ? "always" : decision;
+  invoke("ssh_consent_reply", { id, decision: d }).catch(() => {});
+  closeConsent();
+  if (d === "block" || d === "always") refreshSshPeers();
 }
 
 function fillSttModelSelect() {
@@ -2738,6 +3032,15 @@ function saveSettingsFromForm() {
   settings.sttAutoSend = els.sttAutoSend.checked;
   settings.sttModel = els.sttModelSel.value;
   settings.sttRegistry = els.sttRegistryInput.value.trim();
+  // De SSH-host staat NIET in settings.json: de listener is de waarheid, en die
+  // leeft aan de Rust-kant. Hier alleen de gewenste stand doorgeven.
+  const wantSsh = els.sshOn.checked;
+  const wantPort = Math.min(65535, Math.max(1024, parseInt(els.sshPort.value, 10) || 8287));
+  if (wantSsh !== sshStatus.desired || (wantSsh && wantPort !== sshStatus.port)) {
+    invoke("ssh_host_set", { enabled: wantSsh, port: wantPort })
+      .then((s) => { sshStatus = s; })
+      .catch((e) => toast(`${t("ssh_failed")} ${e}`));
+  }
   applySkin(settings.skin);
   saveSettings();
   persistSessionsToDisk();
@@ -3369,6 +3672,25 @@ window.addEventListener("DOMContentLoaded", () => {
     sttState: document.querySelector("#stt-state"),
     sttAutoSend: document.querySelector("#set-stt-autosend"),
     sttRegistryInput: document.querySelector("#set-stt-registry"),
+    // Taurus als SSH-host (#121)
+    sshOn: document.querySelector("#set-ssh-on"),
+    sshPort: document.querySelector("#set-ssh-port"),
+    sshState: document.querySelector("#ssh-state"),
+    sshPeers: document.querySelector("#ssh-peers"),
+    sshSessions: document.querySelector("#ssh-sessions"),
+    sshNetworks: document.querySelector("#ssh-networks"),
+    consentModal: document.querySelector("#consent-modal"),
+    consentTitle: document.querySelector("#consent-title"),
+    consentWho: document.querySelector("#consent-who"),
+    consentWhat: document.querySelector("#consent-what"),
+    consentFp: document.querySelector("#consent-fingerprint"),
+    consentRemember: document.querySelector("#consent-remember"),
+    consentRememberRow: document.querySelector("#consent-remember-row"),
+    consentTimer: document.querySelector("#consent-timer"),
+    consentAllow: document.querySelector("#consent-allow"),
+    consentJoin: document.querySelector("#consent-join"),
+    consentDeny: document.querySelector("#consent-deny"),
+    consentBlock: document.querySelector("#consent-block"),
     toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
     agentInput: document.querySelector("#agent-input"),
@@ -3491,6 +3813,51 @@ window.addEventListener("DOMContentLoaded", () => {
     fillSttModelSelect();
   });
   document.querySelector("#settings-save").addEventListener("click", saveSettingsFromForm);
+
+  // --- Taurus als SSH-host (#121) ---
+  // Een verzoek komt binnen terwijl de gebruiker iets anders doet, dus de popup
+  // moet zichzelf tonen: hij is de enige plek waar het antwoord vandaan komt.
+  listen("ssh-consent", (ev) => { consentQueue.push(ev.payload || {}); showNextConsent(); });
+  // De Rust-kant heeft zelf al geweigerd (time-out); popup weghalen.
+  listen("ssh-consent-done", (ev) => {
+    const id = ev.payload;
+    if (consentActive && consentActive.id === id) closeConsent();
+    else {
+      const i = consentQueue.findIndex((c) => c.id === id);
+      if (i >= 0) consentQueue.splice(i, 1);
+    }
+  });
+  listen("ssh-host-changed", () => refreshSshStatus());
+  els.consentAllow.addEventListener("click", () => answerConsent("allow"));
+  els.consentJoin.addEventListener("click", () => answerConsent("join"));
+  els.consentDeny.addEventListener("click", () => answerConsent("deny"));
+  els.consentBlock.addEventListener("click", () => answerConsent("block"));
+  els.sshPeers.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const fp = btn.closest(".peer-row")?.dataset.fp;
+    if (!fp) return;
+    try {
+      if (btn.dataset.act === "forget") await invoke("ssh_peer_forget", { fingerprint: fp });
+      else await invoke("ssh_peer_set", { fingerprint: fp, blocked: btn.dataset.act === "block" });
+    } catch (err) { toast("✗ " + err, "err"); }
+    refreshSshPeers();
+  });
+  els.sshNetworks.addEventListener("change", async (e) => {
+    const box = e.target.closest("input[data-net]");
+    if (!box) return;
+    try { sshStatus = await invoke("ssh_network_trust", { id: box.dataset.net, trusted: box.checked }); }
+    catch (err) { toast("✗ " + err, "err"); }
+    refreshSshStatus();
+  });
+  els.sshSessions.addEventListener("click", async (e) => {
+    const btn = e.target.closest('button[data-act="kill"]');
+    if (!btn) return;
+    const sid = btn.closest(".peer-row")?.dataset.sid;
+    if (!sid) return;
+    try { await invoke("ssh_kill_session", { id: sid }); } catch (err) { toast("✗ " + err, "err"); }
+    refreshSshSessions();
+  });
   // Tabs in het instellingen-menu + hover-uitleg per instelling.
   els.settingsModal.querySelectorAll(".stab").forEach((b) => b.addEventListener("click", () => switchSettingsTab(b.dataset.tab)));
   els.settingsModal.addEventListener("mouseover", (e) => { const row = e.target.closest("[data-help-key]"); if (row) showHelpTip(row); else hideHelpTip(); });
@@ -3523,6 +3890,9 @@ window.addEventListener("DOMContentLoaded", () => {
   // daarna eventueel de branding-default in als er geen keuze is gemaakt.
   if (settings.skin) applySkin(settings.skin);
   applyBranding();
+  // Ook los aanroepen: zonder branding.json komt applyBranding niet aan de
+  // titel toe, en dan zou een testexemplaar er ongemarkeerd bij staan.
+  markTestInstance();
   renderTabs();
   loadProjects();
   // Hosts eerst: restoreSessions moet een opgeslagen host_id kunnen opzoeken.

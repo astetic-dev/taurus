@@ -10,6 +10,17 @@
   --green: #5ccf9e;
   --orange: #f0a85c;
   --red: #ff6b6b;
+  /* SIGNAALKLEUREN STAAN BUITEN DE THEMA'S -- skins.css zet ze bewust NIET.
+     Elke skin verzet --red/--green/--orange naar zijn eigen palet, en in de
+     NEXUS-huisstijl is rood juist de MERKkleur (logo, primaire knoppen). Pakt
+     een statusstip diezelfde rode, dan is niet meer te zien of rood "merk" of
+     "er is iets mis" betekent -- en dat is precies waar een signaal voor dient.
+     Vandaar eigen namen die geen enkel thema aanraakt.
+     Bereikbaar is rustig donkergroen: het staat er altijd en hoeft geen
+     aandacht te trekken zoals --green (spinner, live-tab) dat wel wil. */
+  --signal-ok: #2f8f63;
+  --signal-warn: #b8791f;
+  --signal-bad: #c62f2f;
   /* Terminal-kleuren (xterm). Skins overschrijven deze; spawnTerminal leest ze. */
   --term-bg: #14161c;
   --term-fg: #e6e8ee;
@@ -361,8 +372,8 @@ select:-webkit-autofill {
 }
 .add-agent-btn:hover { border-color: var(--accent); color: var(--accent); }
 .status-msg { margin-top: 16px; font-size: 13px; min-height: 18px; }
-.status-msg.ok { color: var(--green); }
-.status-msg.err { color: var(--red); white-space: pre-line; }
+.status-msg.ok { color: var(--signal-ok); }
+.status-msg.err { color: var(--signal-bad); white-space: pre-line; }
 
 /* ---- Terminals ---- */
 .terminals { position: absolute; inset: 0; background: var(--bg); }
@@ -701,17 +712,23 @@ select:-webkit-autofill {
 .rate-lbl { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
 .rate-slider { flex: 1; min-width: 120px; accent-color: var(--accent); }
 .stt-state { font-size: 12px; padding: 2px 0 6px; color: var(--text-dim); }
-.stt-state.ok { color: var(--green); }
+.stt-state.ok { color: var(--signal-ok); }
 .stt-state.miss { color: var(--orange); }
 #mic-btn.rec { color: #fff; background: var(--red); border-color: var(--red); animation: mic-pulse 1.2s infinite; }
 @keyframes mic-pulse { 50% { opacity: .55; } }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 
 /* Instellingen: tab-strip + panes + hover-uitleg */
-.settings-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+/* Wrappen, niet afkappen: bij een tab erbij (Netwerk, #121) liep de rij buiten
+   het modal en was alleen "Netwe" nog leesbaar. Een tabblad dat je niet kunt
+   lezen is een tabblad dat niet bestaat. */
+.settings-tabs {
+  display: flex; flex-wrap: wrap; gap: 2px 0;
+  border-bottom: 1px solid var(--border); margin-bottom: 18px;
+}
 .stab {
   background: transparent; border: none; color: var(--text-dim);
-  padding: 8px 14px; font-size: 13px; cursor: pointer;
+  padding: 8px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .stab:hover { color: var(--text); }
@@ -809,9 +826,11 @@ select:-webkit-autofill {
 .host-sub { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Bereikbaarheid: grijs zolang de check loopt, dan groen of rood. */
 .host-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--text-dim); }
-.host-dot.pending { background: var(--text-dim); opacity: .45; }
-.host-dot.up { background: var(--green); }
-.host-dot.down { background: var(--red); }
+/* Nog niet gemeten: hol bolletje. Een grijze stip lijkt te veel op een
+   uitspraak ("grijs = ?"), terwijl dit letterlijk "nog niets bekend" is. */
+.host-dot.pending { background: transparent; border: 1px solid var(--text-dim); opacity: .5; }
+.host-dot.up { background: var(--signal-ok); }
+.host-dot.down { background: var(--signal-bad); }
 .host-test, .host-del {
   background: none; border: 1px solid var(--border); color: var(--text-dim);
   border-radius: 5px; cursor: pointer; padding: 3px 8px; font-size: 12px;
@@ -826,7 +845,7 @@ select:-webkit-autofill {
   background: var(--bg-card); border: 1px solid var(--border);
   font-size: 12px; color: var(--text-dim); display: flex; flex-direction: column; gap: 3px;
 }
-.status-msg.ok { color: var(--green); }
+.status-msg.ok { color: var(--signal-ok); }
 .e-pathrow { display: flex; gap: 6px; }
 .e-pathrow .e-path { flex: 1; }
 .e-browse {
@@ -850,3 +869,37 @@ select:-webkit-autofill {
 }
 .toast.err { border-left-color: var(--red); }
 .toast.hidden { display: none; }
+
+/* ===== Taurus als SSH-host: gekoppelde computers + toestemming (#121) ===== */
+.peer-list { display: flex; flex-direction: column; gap: 6px; }
+.peer-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+}
+.peer-id { min-width: 0; }
+.peer-fp code { font-size: 11px; color: var(--text-dim); word-break: break-all; }
+.peer-tag {
+  margin-left: 6px; padding: 1px 6px; border-radius: 10px; font-size: 11px;
+  border: 1px solid var(--border); color: var(--text-dim);
+}
+.peer-tag.blocked { border-color: var(--signal-bad); color: var(--signal-bad); }
+.peer-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.stt-state.warn { color: var(--signal-warn); }
+/* Nog niet beschikbaar: zichtbaar maar duidelijk uit. Verbergen zou de vraag
+   "waar staat dat vinkje dan?" oproepen; dit laat zien dat er nog een stap voor zit. */
+.setting-group.locked { opacity: .5; }
+.setting-group.locked input { cursor: not-allowed; }
+.net-row { cursor: pointer; }
+.net-row .peer-fp { color: var(--text-dim); font-size: 11px; }
+
+/* De vingerafdruk is het enige betrouwbare stuk identiteit in deze popup, dus
+   die krijgt eigen nadruk -- de naam ernaast is een claim van de client. */
+.consent-who { font-size: 15px; font-weight: 600; margin: 4px 0 2px; }
+.consent-what { color: var(--text-dim); margin: 0 0 10px; word-break: break-word; }
+.consent-fp {
+  display: flex; align-items: baseline; gap: 8px; padding: 8px 10px; margin-bottom: 10px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; font-size: 12px;
+}
+.consent-fp code { word-break: break-all; }
+.consent-timer { margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+#consent-modal .modal-actions { justify-content: space-between; }

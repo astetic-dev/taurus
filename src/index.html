@@ -194,6 +194,7 @@
           <button type="button" class="stab" data-tab="html" data-i18n="tab_html">HTML-preview</button>
           <button type="button" class="stab" data-tab="terminal" data-i18n="tab_terminal">Terminal</button>
           <button type="button" class="stab" data-tab="voice" data-i18n="tab_voice">Spraak</button>
+          <button type="button" class="stab" data-tab="network" data-i18n="tab_network">Netwerk</button>
         </div>
 
         <div class="settings-panes">
@@ -296,6 +297,34 @@
               </label>
             </div>
           </div>
+
+          <!-- Netwerk: dit werkstation bereikbaar maken voor collega's (#121) -->
+          <div class="spane" data-pane="network">
+            <!-- Eerst het netwerk vertrouwen; pas daarna komt de rest vrij. -->
+            <div class="setting-group">
+              <h3 data-i18n="grp_network">Netwerk</h3>
+              <div id="ssh-networks" class="peer-list"></div>
+              <div class="hint" data-i18n="net_hint">Alleen op een vertrouwd netwerk kan deze computer bereikbaar zijn. Wissel je van netwerk, dan gaat het vanzelf weer dicht.</div>
+            </div>
+            <div class="setting-group" id="ssh-reach-group">
+              <h3 data-i18n="grp_reachable">Bereikbaar op het netwerk</h3>
+              <label class="srow check" data-help-key="help_ssh_on"><input id="set-ssh-on" type="checkbox" /> <span data-i18n="ssh_enable">Laat anderen op dit netwerk een sessie op deze computer starten</span></label>
+              <label class="srow" data-help-key="help_ssh_port"><span data-i18n="ssh_port">Poort</span>
+                <input id="set-ssh-port" type="number" min="1024" max="65535" />
+              </label>
+              <div id="ssh-state" class="stt-state"></div>
+              <div class="hint" data-i18n="ssh_hint">Een sessie draait als jouw Windows-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.</div>
+            </div>
+            <div class="setting-group">
+              <h3 data-i18n="grp_inbound">Draait nu op deze computer</h3>
+              <div id="ssh-sessions" class="peer-list"></div>
+            </div>
+            <div class="setting-group">
+              <h3 data-i18n="grp_peers">Gekoppelde computers</h3>
+              <div id="ssh-peers" class="peer-list"></div>
+              <div class="hint" data-i18n="peers_hint">Identiteit is de vingerafdruk van de sleutel, niet de naam — die verzint de client zelf.</div>
+            </div>
+          </div>
         </div>
 
         <div id="help-tip" class="help-panel" data-i18n="help_default">Beweeg over een instelling voor uitleg.</div>
@@ -303,6 +332,28 @@
         <div class="modal-actions">
           <button id="settings-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
           <button id="settings-save" class="btn-primary" data-i18n="save">Opslaan</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Toestemming voor een inkomende verbinding (#121) ===== -->
+    <div id="consent-modal" class="modal hidden">
+      <div class="modal-box">
+        <h2 id="consent-title">Verbindingsverzoek</h2>
+        <p id="consent-who" class="consent-who"></p>
+        <p id="consent-what" class="consent-what"></p>
+        <div class="consent-fp">
+          <span data-i18n="consent_fp">Vingerafdruk</span>
+          <code id="consent-fingerprint"></code>
+        </div>
+        <div id="consent-warn" class="hint" data-i18n="consent_warn">Toestaan betekent dat deze computer als jouw account mag werken, met jouw rechten en credentials.</div>
+        <label class="srow check" id="consent-remember-row"><input id="consent-remember" type="checkbox" /> <span data-i18n="consent_remember">Niet meer vragen voor deze computer</span></label>
+        <div id="consent-timer" class="consent-timer"></div>
+        <div class="modal-actions">
+          <button id="consent-block" class="btn-ghost" data-i18n="consent_block">Blokkeer</button>
+          <button id="consent-deny" class="btn-ghost" data-i18n="consent_deny">Weiger</button>
+          <button id="consent-join" class="btn-ghost" data-i18n="consent_join">Meekijken</button>
+          <button id="consent-allow" class="btn-primary" data-i18n="consent_allow">Toestaan</button>
         </div>
       </div>
     </div>

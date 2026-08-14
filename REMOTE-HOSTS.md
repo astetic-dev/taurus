@@ -171,9 +171,15 @@ Two things are worth knowing, both measured rather than read:
   and silently ignores them. Taurus keeps a `.taurus.bak`, never touches the
   keys if `sidebar_start_collapsed` is already set (your own choice wins), and
   validates the result with `herdr config check` — if that reports a problem the
-  backup goes back. It applies from the next session, and only on Windows: on
-  Linux and macOS Taurus attaches to the agent terminal directly and there is no
-  chrome to hide.
+  backup goes back.
+
+  **This happens on Linux and macOS too** (`~/.config/herdr/config.toml`), and
+  for the same reason. Attaching goes straight to the agent terminal only while
+  an agent is actually running in the pane; once it has exited — the normal
+  state of a session you come back to, and what ⇱ lists as *"no agent"* — the
+  tab falls back to the session view and the chrome is right back. herdr reads
+  the config when a session starts, so a session that is already running keeps
+  its chrome until it is recreated.
 - **Windows builds are preview-only.** herdr refuses `channel set stable` there
   until stable Windows releases exist. That is the trade for reattach on a
   Windows host; `mux` is per host, so anything you are not comfortable with can
@@ -249,6 +255,130 @@ With that in place the machine is simply a **Linux host** on that port —
 `os: linux`, no `via` — and the DROPZONE works to it as well. Without it,
 `via: wsl` over the Windows SSH server is the more reliable route, because that
 starts WSL on demand.
+
+## Making *this* computer reachable
+
+Everything above is Taurus reaching out. The reverse — a colleague reaching **your**
+machine — needs no OpenSSH Server and none of the traps above. Settings → Netwerk →
+**"Let colleagues start a session on this computer"** starts an SSH server inside
+Taurus itself, on port **8287**.
+
+It is off by default, and it is a full shell, deliberately: Taurus gets a full shell on
+every host it reaches, so it offers the same in the other direction. A Taurus host is
+therefore an ordinary host to the other side — "Add & test" probes it, agent tabs work,
+the DROPZONE transfers files, ⇱ lists what is running.
+
+What it is for:
+
+- **Handing off a run.** Your usage limit is hit mid-task; a colleague finishes it from
+  their desk.
+- **Working together, or teaching.** Two people on one agent session — see *Join* below.
+- **Your own other machines.** A lab box or second workstation that runs Taurus anyway
+  is reachable without a dedicated sshd setup.
+
+### First: trust the network
+
+The setting only takes effect on a network you have marked as trusted. Settings →
+Netwerk lists the networks this machine is on, each with a **Trust this network** box —
+tick your office LAN, leave café Wi-Fi alone. Taurus follows you around: the listener
+closes when you land on an unknown network and reopens when you are back, without you
+touching the setting. The checkbox keeps showing what you *want*; the line underneath
+says whether anything is actually listening, because a checkbox that appears to switch
+itself off is worse than one that explains itself.
+
+Networks are remembered by the GUID Windows' Network List Manager assigns them — the
+same source as the Private/Public prompt — so renaming an SSID does not lose the
+decision. Network changes are noticed by polling every 15 seconds rather than by a COM
+event sink: you walk between networks, you do not switch them every second.
+
+Be clear-eyed about what this is: a guard against *accidents*, not a security boundary.
+A hostile network can advertise a trusted network's name. Identity remains the key
+fingerprint and the consent popups; this only stops you listening somewhere you never
+meant to.
+
+### Who gets in: pairing, then per session
+
+Consent lives in the GUI instead of in `authorized_keys`, in two steps.
+
+1. **An unknown key** produces a pairing popup: claimed username, address, and the key
+   fingerprint → **Deny / Allow / Block**. Allowed fingerprints are remembered in
+   `%APPDATA%\Taurus\peers.json`, and the pair appears under "Paired computers".
+2. **A session request** produces a second popup naming what is being asked →
+   **Deny / Allow / Join**. Tick *"Don't ask again for this computer"* on a machine of
+   your own, where nobody is sitting there to click Allow.
+
+**Block** is the mute button for a colleague who keeps knocking: further attempts from
+that fingerprint are refused at the auth step with no popup at all, though they still
+land in the audit trail. Blocking a paired computer also revokes its pairing. It works
+per key fingerprint — someone who generates a fresh key gets a fresh pairing popup, so
+treat it as a mute, not an access control list.
+
+No answer within 45 seconds counts as **Deny**. A popup nobody sees must never grant
+access.
+
+The name in the popup is a claim the client makes up; the **fingerprint** is the only
+identity. That is why it is shown, and why Deny is the default outcome.
+
+### Join — two keyboards, one agent
+
+**Join** is Allow plus a tab on your own screen showing that same session. It is not a
+screen share: Taurus owns the terminal, so both sides read and write the *same* one.
+Whatever the colleague types appears in your tab, and whatever you type lands in their
+session. That is the point — for pair-working with an agent, and for guiding someone who
+does not know the tool yet.
+
+The tab appears as soon as the session produces output, marked 👥. Two windows rarely
+have the same size, so the **smaller one wins**, the way tmux handles it: someone loses
+empty space rather than having text run off screen.
+
+Closing the joined tab only stops you watching; the colleague's session continues. It is
+not remembered across restarts either — there is no command Taurus could replay to
+rebuild it. Ending the session itself is a separate, deliberate action: Settings →
+Netwerk → *Running on this computer right now* → **Stop**, which also lists every
+inbound session whether you joined it or not.
+
+### What is *not* restricted, and what replaces it
+
+There is no command filter, and that is a decision rather than an omission. The session
+exists to run an agent with shell access; "no delete actions" cannot be enforced across
+cmd, PowerShell, .NET and the agent's own tools, and a filter that does not hold is
+worse than none because it reads like safety. The controls that do hold:
+
+- **consent**, per pairing and per session;
+- an **audit trail** under `%APPDATA%\Taurus\audit\` — `events.log` records every
+  authentication, decision and non-interactive command, and each session gets its own
+  full transcript;
+- **visibility**: connected peers are shown, and turning the setting off closes the
+  listener and ends inbound sessions;
+- for real restriction: the agent's own permission mode (`plan` / ask) and OS ACLs.
+
+An audit transcript is exactly what went over the wire, so a token someone pastes into
+a session is in that file. The files stay local, under your own profile.
+
+**This is not the last word on it.** Every session getting the same full shell flattens
+two situations that are not alike: one where you joined and are watching every keystroke,
+and one where you allowed it and walked away. The agreed direction (#126) ties the level
+to supervision rather than to trust — a joined session keeps the shell, an unattended one
+starts the agent scoped to its folder instead. The consent model described here is what
+that builds on, not something it replaces.
+
+### Things worth knowing
+
+- **Inbound sessions are never elevated.** The embedded server does no Windows logon:
+  publickey only, and everything runs as the account Taurus runs as. That is an
+  improvement on stock Windows sshd, which gives an Administrators-group account an
+  elevated session.
+- **The agent uses your credential.** In the usage-limit hand-off, a colleague finishing
+  your run keeps burning *your* (exhausted) limit unless they switch account inside the
+  session with the agent's own `/login`.
+- **The first start triggers the Windows Firewall prompt.** Allow it on Private
+  networks; it is effectively a second consent layer.
+- **Sessions live in Taurus.** A dropped connection loses nothing — reconnecting lands in
+  the same terminal — but closing Taurus ends them, exactly like local sessions (#77). A
+  peer who needs launcher-independent persistence sets `mux: herdr` against this host;
+  the two compose, with herdr keeping the agent and Taurus keeping the door.
+- Port 8287 sits in an unassigned IANA range and is configurable; the connecting side
+  already has a `port` field in `hosts.json`.
 
 ## Moving an agent to another machine
 
