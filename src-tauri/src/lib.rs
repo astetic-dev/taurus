@@ -4184,9 +4184,18 @@ fn host_id_from(name: &str, address: &str) -> String {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FirewallStatus {
-    // Bestaat er een inbound-regel die deze poort toelaat?
+    // Staan ONZE eigen regels er: aan, inbound, toestaan?
     tcp: bool,
     udp: bool,
+    // Regels die deze exe expliciet BLOKKEREN. Geen bijzaak: een block-regel wint in
+    // Windows Firewall van elke allow-regel, dus zolang die er staat is Taurus dicht,
+    // hoeveel uitzonderingen je er ook naast zet.
+    //
+    // GEMETEN op dit werkstation: er stonden er twee, "TCP Query User{...}" en
+    // "UDP Query User{...}", allebei op het pad van taurus.exe. Dat zijn de
+    // automatisch aangemaakte regels van een weggeklikte Defender-prompt -- precies
+    // wat er tijdens de spike gebeurde en toen met de hand weg moest.
+    blocked: u32,
     // Kon het überhaupt nagekeken worden? Op een niet-Windows-machine, of als de
     // cmdlet ontbreekt, is "nee" iets anders dan "geen regel".
     checked: bool,
@@ -4195,44 +4204,60 @@ struct FirewallStatus {
 const FW_TCP_RULE: &str = "Taurus";
 const FW_UDP_RULE: &str = "Taurus mDNS";
 
-#[tauri::command]
-fn firewall_status(port: Option<u16>) -> FirewallStatus {
-    let p = port.unwrap_or(sshhost::DEFAULT_PORT);
-    let exe = std::env::current_exe()
+fn this_exe() -> String {
+    std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
-    // GEMETEN, en de reden dat dit niet alleen naar de poort kijkt: een eerste
-    // versie die alleen protocol+poort vergeleek antwoordde "UDP 5353 mag al",
-    // terwijl elke regel die daarop matcht PROGRAMMA-gebonden is aan svchost.exe
-    // (Windows' eigen mDNS-responder) of msedgewebview2.exe. Taurus valt daar niet
-    // onder en zou alsnog geblokkeerd zijn -- een groen vinkje dat niets waard is.
-    //
-    // Dus: een regel telt alleen mee als zijn programmafilter Any is of naar deze
-    // exe wijst. De drie collecties worden in één keer opgehaald en in het geheugen
-    // gekoppeld; per regel een cmdlet aanroepen duurt vele malen langer.
-    let script = format!(
+        .unwrap_or_default()
+}
+
+// Twee vragen die snel te stellen zijn: staan onze eigen regels er, en blokkeert
+// iets deze exe?
+//
+// De derde vraag -- "laat een WILLEKEURIGE regel deze poort door?" -- is geprobeerd
+// en weer weggegooid, om twee gemeten redenen:
+//
+//   1. `Get-NetFirewallPortFilter` als LOSSE lijst is niet op InstanceID te koppelen
+//      aan `Get-NetFirewallRule`. De 599 objecten die hij teruggaf bevatten de
+//      InstanceID van onze eigen regel niet, terwijl de associatie
+//      (`$rule | Get-NetFirewallPortFilter`) hem wél geeft. Een eerdere versie
+//      koppelde zo en antwoordde daardoor ALTIJD "nee" -- ook nadat de regels
+//      aantoonbaar waren aangemaakt. (De app-filters koppelen wél gewoon op
+//      InstanceID; alleen de poortfilters niet.)
+//   2. Het via de associatie in bulk doen klopt wel, maar duurde 39,7 seconden.
+//
+// Deze versie doet er 6. Een handgemaakte regel onder een andere naam telt niet mee;
+// daarom zegt de tekst "een eigen uitzondering", en het ergste gevolg is een
+// overbodige regel erbij.
+fn firewall_script(exe: &str) -> String {
+    format!(
         "$ErrorActionPreference='SilentlyContinue'\n\
-         $rules = @{{}}\n\
-         foreach ($r in Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True) {{ $rules[$r.InstanceID] = $true }}\n\
+         $exe = '{exe}'\n\
+         function Mine($naam) {{\n\
+         \x20 $r = Get-NetFirewallRule -DisplayName $naam -EA 0 | Where-Object {{ $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' }}\n\
+         \x20 return [bool]$r\n\
+         }}\n\
+         'TCP=' + (Mine '{tcp}')\n\
+         'UDP=' + (Mine '{udp}')\n\
          $apps = @{{}}\n\
          foreach ($a in Get-NetFirewallApplicationFilter) {{ $apps[$a.InstanceID] = $a.Program }}\n\
-         $exe = '{exe}'\n\
-         function Allows($proto,$port) {{\n\
-         \x20 foreach ($f in Get-NetFirewallPortFilter) {{\n\
-         \x20   if ($f.Protocol -ne $proto) {{ continue }}\n\
-         \x20   if ($f.LocalPort -ne $port -and $f.LocalPort -ne 'Any') {{ continue }}\n\
-         \x20   if (-not $rules.ContainsKey($f.InstanceID)) {{ continue }}\n\
-         \x20   $prog = $apps[$f.InstanceID]\n\
-         \x20   if (-not $prog -or $prog -eq 'Any' -or $prog -eq $exe) {{ return $true }}\n\
-         \x20 }}\n\
-         \x20 return $false\n\
+         $n = 0\n\
+         foreach ($r in Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True) {{\n\
+         \x20 $p = $apps[$r.InstanceID]\n\
+         \x20 if ($p -and [Environment]::ExpandEnvironmentVariables($p) -eq $exe) {{ $n = $n + 1 }}\n\
          }}\n\
-         'TCP=' + (Allows 'TCP' {p})\n\
-         'UDP=' + (Allows 'UDP' 5353)\n",
+         'BLOCKED=' + $n\n",
         exe = exe.replace('\'', "''"),
-    );
-    let Ok(o) = ps_encoded(&script).output() else {
-        return FirewallStatus { tcp: false, udp: false, checked: false };
+        tcp = FW_TCP_RULE,
+        udp = FW_UDP_RULE,
+    )
+}
+
+#[tauri::command]
+fn firewall_status(port: Option<u16>) -> FirewallStatus {
+    let _ = port; // de poort zit in de regelnaam, niet in de vraag
+    let dicht = FirewallStatus { tcp: false, udp: false, blocked: 0, checked: false };
+    let Ok(o) = ps_encoded(&firewall_script(&this_exe())).output() else {
+        return dicht;
     };
     let out = String::from_utf8_lossy(&o.stdout);
     let flag = |k: &str| {
@@ -4240,40 +4265,56 @@ fn firewall_status(port: Option<u16>) -> FirewallStatus {
             .find_map(|l| l.trim().strip_prefix(k))
             .map(|v| v.trim().eq_ignore_ascii_case("true"))
     };
-    match (flag("TCP="), flag("UDP=")) {
-        (Some(t), Some(u)) => FirewallStatus { tcp: t, udp: u, checked: true },
-        _ => FirewallStatus { tcp: false, udp: false, checked: false },
+    let count = out
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("BLOCKED="))
+        .and_then(|v| v.trim().parse::<u32>().ok());
+    match (flag("TCP="), flag("UDP="), count) {
+        (Some(t), Some(u), Some(b)) => FirewallStatus { tcp: t, udp: u, blocked: b, checked: true },
+        _ => dicht,
     }
 }
 
-// Beide regels in één UAC-prompt. Wat er al is wordt niet nog een keer gemaakt, en
-// een geweigerde prompt is een nette fout -- niet iets om stilletjes te negeren,
-// want dan blijft de gebruiker zich afvragen waarom er niemand te zien is.
+// Alles wat nodig is in ÉÉN UAC-prompt: de ontbrekende regels erbij, en de
+// block-regels tegen deze exe eraf. Dat laatste hoort erbij en niet apart -- een
+// allow-regel is zinloos zolang er een block-regel naast staat, en wie "maak de
+// regels" aanklikt bedoelt "zorg dat Taurus erdoor kan".
+//
+// Bewust smal: alleen INBOUND, alleen BLOCK, en alleen als het programmafilter
+// precies deze exe is. Er wordt niets anders aangeraakt.
 #[tauri::command]
 fn firewall_allow(port: Option<u16>) -> Result<(), String> {
     let p = port.unwrap_or(sshhost::DEFAULT_PORT);
+    let exe = this_exe();
     let st = firewall_status(Some(p));
-    if st.checked && st.tcp && st.udp {
+    if st.checked && st.tcp && st.udp && st.blocked == 0 {
         return Ok(());
     }
     // Windows PowerShell 5.1, ASCII: dit draait op de machine van de gebruiker en
-    // niet per se op pwsh 7.
-    let mut inner = String::from("$ErrorActionPreference='Stop'\n");
-    if !st.tcp {
-        inner.push_str(&format!(
-            "if (-not (Get-NetFirewallRule -DisplayName '{n}' -EA 0)) {{ New-NetFirewallRule -DisplayName '{n}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort {p} | Out-Null }}\n",
-            n = FW_TCP_RULE
-        ));
-    }
-    if !st.udp {
-        inner.push_str(&format!(
-            "if (-not (Get-NetFirewallRule -DisplayName '{n}' -EA 0)) {{ New-NetFirewallRule -DisplayName '{n}' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5353 | Out-Null }}\n",
-            n = FW_UDP_RULE
-        ));
-    }
+    // niet per se op pwsh 7. De verhoogde kant kijkt zélf opnieuw wat er moet
+    // gebeuren; namen van buiten meegeven zou quoting-gevoelig zijn, want een
+    // "TCP Query User{...}C:\pad\taurus.exe" zit vol accolades en backslashes.
+    let inner = format!(
+        "$ErrorActionPreference='Stop'\n\
+         $exe = '{exe}'\n\
+         if (-not (Get-NetFirewallRule -DisplayName '{tcp}' -EA 0)) {{ New-NetFirewallRule -DisplayName '{tcp}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort {p} | Out-Null }}\n\
+         if (-not (Get-NetFirewallRule -DisplayName '{udp}' -EA 0)) {{ New-NetFirewallRule -DisplayName '{udp}' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5353 | Out-Null }}\n\
+         $apps = @{{}}\n\
+         foreach ($a in Get-NetFirewallApplicationFilter) {{ $apps[$a.InstanceID] = $a.Program }}\n\
+         foreach ($r in Get-NetFirewallRule -Direction Inbound -Action Block) {{\n\
+         \x20 $prog = $apps[$r.InstanceID]\n\
+         \x20 if ($prog -and [Environment]::ExpandEnvironmentVariables($prog) -eq $exe) {{\n\
+         \x20   Remove-NetFirewallRule -Name $r.Name -EA 0\n\
+         \x20 }}\n\
+         }}\n",
+        exe = exe.replace('\'', "''"),
+        tcp = FW_TCP_RULE,
+        udp = FW_UDP_RULE,
+    );
     let utf16: Vec<u8> = inner.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    // -WindowStyle Hidden: anders knippert er een consolevenster over het scherm.
     let launcher = format!(
-        "try {{ $p = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-EncodedCommand','{}'; 'CODE=' + $p.ExitCode }} catch {{ 'ERR=' + $_.Exception.Message }}",
+        "try {{ $p = Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList '-NoProfile','-EncodedCommand','{}'; 'CODE=' + $p.ExitCode }} catch {{ 'ERR=' + $_.Exception.Message }}",
         b64(&utf16)
     );
     let o = ps_encoded(&launcher)
@@ -4282,7 +4323,7 @@ fn firewall_allow(port: Option<u16>) -> Result<(), String> {
     let out = String::from_utf8_lossy(&o.stdout);
     if let Some(err) = out.lines().find_map(|l| l.trim().strip_prefix("ERR=")) {
         // De meest voorkomende: de UAC-prompt is weggeklikt.
-        return Err(format!("De firewall-regels zijn niet aangemaakt ({err})."));
+        return Err(format!("De firewall-regels zijn niet aangepast ({err})."));
     }
     let code = out
         .lines()
@@ -4290,7 +4331,17 @@ fn firewall_allow(port: Option<u16>) -> Result<(), String> {
         .and_then(|v| v.trim().parse::<i32>().ok())
         .unwrap_or(-1);
     if code != 0 {
-        return Err(format!("De firewall-regels zijn niet aangemaakt (afsluitcode {code})."));
+        return Err(format!("De firewall-regels zijn niet aangepast (afsluitcode {code})."));
+    }
+    // Meteen nakijken of het ook echt gelukt is. Zonder deze controle meldt de knop
+    // succes zodra de prompt is weggeklikt, ook als er niets veranderde -- en dat is
+    // precies hoe je een melding krijgt die blijft staan zonder uitleg.
+    let na = firewall_status(Some(p));
+    if na.checked && (!na.tcp || !na.udp || na.blocked > 0) {
+        return Err(
+            "De prompt is doorlopen, maar de firewall staat er nog hetzelfde bij. Kijk of beleid van de organisatie deze regels terugzet."
+                .to_string(),
+        );
     }
     Ok(())
 }

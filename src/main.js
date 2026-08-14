@@ -52,6 +52,9 @@ const I18N = {
     found_not_announcing: "Je bent zelf niet vindbaar: zet \"bereikbaar\" aan in Instellingen en vertrouw dit netwerk.",
     found_firewall: "Taurus heeft nog geen eigen firewall-uitzondering. Zonder die regels ziet niemand je, en kan niemand aankloppen.",
     found_firewall_fix: "Firewall-regels aanmaken (vraagt om beheerdersrechten)",
+    found_firewall_blocked: "Windows blokkeert taurus.exe met {n} eigen regel(s) - waarschijnlijk van een weggeklikte Defender-vraag. Zo'n blokkade wint van elke uitzondering, dus die moet eerst weg.",
+    found_firewall_unblock: "Blokkade weghalen en regels aanmaken (vraagt om beheerdersrechten)",
+    found_firewall_busy: "Bezig - dit duurt een paar seconden…",
     host_need_fields: "Naam, hostnaam en gebruikersnaam zijn verplicht.",
     host_none: "Nog geen machines. Voeg er een toe om een agent elders te draaien.",
     host_ok: "Verbinding gelukt", host_reachable: "bereikbaar", host_unreachable: "onbereikbaar",
@@ -256,6 +259,9 @@ const I18N = {
     found_not_announcing: "You are not findable yourself: switch on \"reachable\" in Settings and trust this network.",
     found_firewall: "Taurus has no firewall exception of its own yet. Without those rules nobody sees you, and nobody can knock.",
     found_firewall_fix: "Create firewall rules (asks for administrator rights)",
+    found_firewall_blocked: "Windows blocks taurus.exe with {n} rule(s) of its own - most likely from a dismissed Defender prompt. A block beats any exception, so that has to go first.",
+    found_firewall_unblock: "Remove the block and create the rules (asks for administrator rights)",
+    found_firewall_busy: "Working - this takes a few seconds…",
     host_need_fields: "Name, hostname and username are required.",
     host_none: "No machines yet. Add one to run an agent elsewhere.",
     host_ok: "Connection succeeded", host_reachable: "reachable", host_unreachable: "unreachable",
@@ -1219,23 +1225,31 @@ function renderFound() {
   // dan een netwerk waar niemand op zit.
   const lines = [];
   if (discoNote) lines.push(discoNote);
-  if (firewall && firewall.checked && !(firewall.tcp && firewall.udp)) {
-    lines.push(t("found_firewall"));
-  }
+  // Geblokkeerd en "geen regel" zijn twee verschillende problemen en verdienen twee
+  // verschillende zinnen. Een block-regel WINT van elke uitzondering, dus wie alleen
+  // "maak de regels aan" leest terwijl Defender de exe blokkeert, blijft klikken op
+  // iets dat niets oplost.
+  const fwBlocked = !!(firewall && firewall.checked && firewall.blocked > 0);
+  const fwMissing = !!(firewall && firewall.checked && !(firewall.tcp && firewall.udp));
+  if (fwBlocked) lines.push(t("found_firewall_blocked").replace("{n}", firewall.blocked));
+  if (fwMissing) lines.push(t("found_firewall"));
   note.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
-  if (firewall && firewall.checked && !(firewall.tcp && firewall.udp)) {
+  if (fwBlocked || fwMissing) {
     const b = document.createElement("button");
     b.className = "btn-ghost add";
-    b.textContent = t("found_firewall_fix");
+    b.textContent = t(fwBlocked ? "found_firewall_unblock" : "found_firewall_fix");
     b.addEventListener("click", async () => {
       b.disabled = true;
+      b.textContent = t("found_firewall_busy");
       try {
         await invoke("firewall_allow", { port: null });
-        firewall = await invoke("firewall_status", { port: null });
       } catch (e) {
         els.hostStatusMsg.textContent = "✗ " + e;
         els.hostStatusMsg.className = "status-msg err";
       }
+      // Ook na een fout opnieuw meten: dan klopt wat er staat met de werkelijkheid,
+      // in plaats van met wat de knop dácht te doen.
+      try { firewall = await invoke("firewall_status", { port: null }); } catch (_) {}
       b.disabled = false;
       renderFound();
     });
