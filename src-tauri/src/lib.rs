@@ -4652,34 +4652,6 @@ fn answer_help_request(
     )
 }
 
-// Een id voor hosts.json uit een aangekondigde naam. Alleen [a-z0-9-], net als de
-// ids die het formulier maakt; een naam die daar niets van overhoudt (bijvoorbeeld
-// volledig niet-latijns) valt terug op het adres, want een leeg id is geen id.
-fn host_id_from(name: &str, address: &str) -> String {
-    let mut out = String::new();
-    let mut last_dash = true;
-    for c in name.chars() {
-        let c = c.to_ascii_lowercase();
-        if c.is_ascii_alphanumeric() {
-            out.push(c);
-            last_dash = false;
-        } else if !last_dash {
-            out.push('-');
-            last_dash = true;
-        }
-        if out.len() >= 40 {
-            break;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        out = address.replace('.', "-");
-    }
-    out
-}
-
 // ---------- de twee firewall-uitzonderingen, in één handeling (#125) ----------
 //
 // GEMETEN: elke bestaande allow-regel voor mDNS op deze machine is PROGRAMMA-
@@ -4855,60 +4827,6 @@ fn firewall_allow(port: Option<u16>) -> Result<(), String> {
     Ok(())
 }
 
-
-// Een gevonden machine wordt een gewone machine. Dat haalt het OPZOEKEN weg, niet
-// de TOESTEMMING: elke sessie vraagt het de ontvangende kant nog steeds, precies
-// zoals nu. "Bekend" betekent "ik hoef je niet meer op te zoeken".
-//
-// Geen probe vooraf: die zou een tweede verbinding zijn en dus een tweede popup op
-// de andere machine. Alles wat nodig is om te kunnen starten (OS, werkmap) staat in
-// de aankondiging zelf, want de machine die zich aankondigt weet dat van zichzelf.
-#[tauri::command]
-fn adopt_found_machine(found: discovery::Found) -> Result<Host, String> {
-    if found.address.trim().is_empty() {
-        return Err("Deze aankondiging heeft geen adres.".to_string());
-    }
-    let mut hosts = get_hosts();
-    // Al bekend onder dit adres: die gebruiken we, in plaats van een tweede route
-    // naar dezelfde machine aan te maken.
-    if let Some(h) = hosts
-        .iter()
-        .find(|h| h.hostname.eq_ignore_ascii_case(&found.address) && h.port == found.port)
-    {
-        return Ok(h.clone());
-    }
-    let base = host_id_from(&found.name, &found.address);
-    let mut id = base.clone();
-    let mut n = 2;
-    while hosts.iter().any(|h| h.id == id) {
-        id = format!("{base}-{n}");
-        n += 1;
-    }
-    let host = Host {
-        id,
-        nickname: found.name.clone(),
-        hostname: found.address.clone(),
-        // Dezelfde machine kan later ook via sshd bekend worden; dan horen die
-        // twee routes bij elkaar. Het adres is daarvoor de sleutel (#124).
-        machine: found.address.clone(),
-        user: found.user.clone(),
-        port: found.port,
-        // Een Taurus-route heeft geen sleutelbestand nodig: de identiteit is de
-        // host-key van de andere kant plus de toestemmingspopup daar (#121).
-        key_path: String::new(),
-        default_project: found.home.clone(),
-        via: String::new(),
-        os: found.os.clone(),
-        // Nog niet gemeten. mux_auto laat de eerste hertest dit vanzelf invullen;
-        // een wegwerpsessie heeft geen persistentie nodig.
-        mux: String::new(),
-        agent_version: String::new(),
-        mux_auto: true,
-    };
-    hosts.push(host.clone());
-    save_hosts(hosts)?;
-    Ok(host)
-}
 
 // Antwoord op een popup: "deny" | "allow" | "join" | "block" | "always".
 #[tauri::command]
