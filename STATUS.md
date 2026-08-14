@@ -1,22 +1,21 @@
-# Waar het staat — 14 augustus 2026
+# Waar het staat — 15 augustus 2026
 
-Laatst uitgeleverd: **0.5.2** (PR #120). `main` staat op `a6fd7a3`.
-Op **`feat/124-machine-screen`** staan **#124, #125, #126, #128 en #129** af.
-**PR #127** is open en sluit alle vijf.
+**0.5.3 is uit.** `main` staat op `66e06ca`; PR #127 (vijf issues) en PR #131 (de
+release) zijn gemerged. Er staat geen werk meer open op een branch.
 
 | onderdeel | stand |
 |---|---|
-| #121 SSH-host | gemerged en volledig bewezen — spiegel-tab nu ook, in beide richtingen |
-| #123 herdr-chrome POSIX | gemerged, issue gesloten |
-| #124 machinescherm | **code af** |
-| #125 vraagmodus | **code af** |
-| #126 macht volgt toezicht | **code af** |
-| #128 agents i.p.v. shells | **code af** |
-| #129 sessiegeschiedenis | **code af** |
-| tests | 92 groen, 10 ignored |
-| release-build | 14 aug 23:27, ook op ursu klaargezet (`7533ABE8…`) |
-| versie | 0.5.2 — nog niet gebumpt |
-| lus twee instanties | **gelopen en geslaagd** — hand omhoog, gezien via mDNS, meegedaan, beide kanten getypt |
+| #121 SSH-host | volledig bewezen, spiegel-tab in beide richtingen |
+| #124 machinescherm | uitgeleverd in 0.5.3 |
+| #125 vraagmodus | uitgeleverd in 0.5.3 |
+| #126 macht volgt toezicht | uitgeleverd in 0.5.3, onbeheerd = `dontAsk` |
+| #128 agents i.p.v. shells | uitgeleverd in 0.5.3 |
+| #129 sessiegeschiedenis | uitgeleverd in 0.5.3 |
+| #130 permissiemodi | uitgeleverd in 0.5.3, alle zes |
+| tests | 95 groen, 10 ignored |
+| release-build | 15 aug 01:08, ook op ursu klaargezet (`188D6029…`) |
+| versie | **0.5.3** |
+| nog te doen | ursu bijwerken (`update-taurus.ps1`), en een ronde over de echte LAN |
 
 ---
 
