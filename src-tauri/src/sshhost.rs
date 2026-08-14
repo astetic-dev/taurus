@@ -3,9 +3,14 @@
 // plaats van in authorized_keys: een onbekende sleutel levert een pairing-popup,
 // een sessie levert een tweede popup met deny/allow/join.
 //
-// Bewust een VOLLEDIGE shell, net als wat Taurus zelf op elke host krijgt. De
-// echte knoppen zijn toestemming, zichtbaarheid en een audit-spoor -- niet een
-// commandofilter, want dat is in een shell toch niet af te dwingen.
+// Wat hier start is een AGENT, geen shell. Een agent draait in een shell, dus zo
+// mag je erover praten, maar een kale prompt op andermans machine is nooit het
+// product -- uitgaand vraagt Taurus ook om `ssh -t host "<agent>"` en niet om een
+// login. Een verzoek MET commandoregel draait die regel, want die stond in de
+// popup; een verzoek zonder start de agent (#126).
+//
+// De echte knoppen zijn toestemming, zichtbaarheid en een audit-spoor -- niet een
+// commandofilter, want dat is achter een agent-CLI toch niet af te dwingen.
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::net::SocketAddr;
@@ -603,10 +608,15 @@ fn shell_command(cmd: Option<&str>, cwd: Option<&str>) -> CommandBuilder {
 
 // Wat een inkomende sessie start (#126).
 //
-// De asymmetrie die dit oplost: bij JOIN kijkt de ontvanger mee, dus mag het een
-// volle shell zijn -- toezicht is de controle. Bij ALLOW-en-weglopen kijkt niemand,
-// en dan is een shell te veel, want vanuit een shell is alles per constructie
-// bereikbaar. Dan start de AGENT, in de map waar hij begint, in ask-modus.
+// UITGANGSPUNT: Taurus start AGENTS, geen shells. Een agent draait in een shell --
+// zo mag je er in de UI ook over praten -- maar een kale prompt op andermans
+// machine is nooit het product. Dat gold al voor de uitgaande kant (`ssh -t host
+// "<agent>"`), en het hoort hier net zo te gelden. Dit is de reden dat er geen
+// enkel pad meer is waarop een verzoek ZONDER commando op cmd.exe uitkomt.
+//
+// Wat toezicht dan wél verandert, is hoeveel die agent uit zichzelf mag:
+//   - onbeheerd toegestaan -> ask-modus, de agent vraagt het per stap;
+//   - meegekeken (join), of expliciet aangevinkt -> de eigen modus van de agent.
 //
 // Twee grenzen die hier expliciet horen te staan:
 //   - Dit is geen OS-grens. Zie de opmerking bij `Power`.
@@ -616,7 +626,9 @@ fn shell_command(cmd: Option<&str>, cwd: Option<&str>) -> CommandBuilder {
 //     kijken zou commandofilteren zijn, en #121 heeft dat afgewezen op de grond
 //     dat een grens die niet houdt, leest als veiligheid.
 fn session_command(cmd: Option<&str>, cwd: Option<&str>, power: Power) -> CommandBuilder {
-    if power == Power::Full || cmd.is_some() {
+    // Een expliciet commando is precies wat er in de popup stond; dat draait zoals
+    // gevraagd, door de shell die de regel kan lezen.
+    if cmd.is_some() {
         return shell_command(cmd, cwd);
     }
     let (program, prefix) = crate::resolve_program("claude");
@@ -624,10 +636,12 @@ fn session_command(cmd: Option<&str>, cwd: Option<&str>, power: Power) -> Comman
     for a in prefix {
         c.arg(a);
     }
-    // ask-modus: de agent vraagt het voordat hij iets doet. Dat is het mechanisme
-    // waar deze keuze op steunt, en het is dat van de agent -- niet van Taurus.
-    c.arg("--permission-mode");
-    c.arg("plan");
+    // Alleen bij onbeheerd de rem erop. Bij vol beheer geen vlag: dan geldt de
+    // eigen default van de agent, en die hoort niet hier overschreven te worden.
+    if power == Power::Sandboxed {
+        c.arg("--permission-mode");
+        c.arg("plan");
+    }
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
     c.cwd(cwd.unwrap_or(&home));
     c
@@ -1358,18 +1372,21 @@ mod tests {
             .join(" ")
     }
 
-    // Onbeheerd en zonder expliciet commando: geen shell, maar de agent in
-    // ask-modus. Dit is het hele structurele verschil dat #126 oplevert.
+    // Taurus start agents, geen shells -- in GEEN van beide gevallen. Een verzoek
+    // zonder commando komt nooit op cmd.exe uit; wat toezicht verandert is hoeveel
+    // die agent uit zichzelf mag.
     #[test]
-    fn an_unattended_session_starts_the_agent_instead_of_a_shell() {
+    fn a_session_without_a_command_starts_the_agent_never_a_shell() {
         let sandboxed = argv(&session_command(None, None, Power::Sandboxed));
         assert!(!sandboxed.contains("cmd.exe"), "geen shell: {sandboxed}");
         assert!(sandboxed.contains("claude"), "{sandboxed}");
         assert!(sandboxed.contains("--permission-mode plan"), "ask-modus: {sandboxed}");
 
-        // Meekijken geeft wel de shell, precies zoals #121 hem gaf.
+        // Meekijken geeft meer ruimte, maar nog steeds de agent -- geen prompt.
         let full = argv(&session_command(None, None, Power::Full));
-        assert!(full.contains("cmd.exe"), "{full}");
+        assert!(!full.contains("cmd.exe"), "ook hier geen shell: {full}");
+        assert!(full.contains("claude"), "{full}");
+        assert!(!full.contains("--permission-mode"), "eigen default van de agent: {full}");
     }
 
     // Een exec-verzoek draait wat er gevraagd is, ook onbeheerd: die regel stond in

@@ -299,10 +299,15 @@ machine — needs no OpenSSH Server and none of the traps above. Settings → Ne
 **"Let colleagues start a session on this computer"** starts an SSH server inside
 Taurus itself, on port **8287**.
 
-It is off by default, and it is a full shell, deliberately: Taurus gets a full shell on
-every host it reaches, so it offers the same in the other direction. A Taurus host is
-therefore an ordinary host to the other side — "Add & test" probes it, agent tabs work,
-the DROPZONE transfers files, ⇱ lists what is running.
+It is off by default. A Taurus host is an ordinary host to the other side — "Add & test"
+probes it, agent tabs work, the DROPZONE transfers files, ⇱ lists what is running.
+
+**What it starts is an agent, not a shell.** The agent runs *in* a shell, so speaking of
+it that way is fine, but a bare prompt on someone else's machine is never the product —
+that is as true inbound as it already was outbound, where Taurus asks every host for
+`ssh -t host "<agent>"` and not for a login. A request carrying a command line runs that
+line, because it stood in the popup and was approved as such; a request without one starts
+the agent in the folder it begins in.
 
 What it is for:
 
@@ -427,24 +432,25 @@ a session is in that file. The files stay local, under your own profile.
 
 ### Power follows supervision (#126)
 
-Every session getting the same full shell flattened two situations that are not alike:
-one where you joined and are watching every keystroke, and one where you allowed it and
-walked away. The level is now tied to **supervision** rather than to trust:
+Every session getting the same amount of room flattened two situations that are not
+alike: one where you joined and are watching every keystroke, and one where you allowed
+it and walked away. How much the agent may do on its own is now tied to **supervision**
+rather than to trust:
 
 | | what it starts | why |
 |---|---|---|
-| **Join** | a full shell, as before | you see every keystroke in a mirrored tab; watching *is* the control |
-| **Allow**, unattended | the agent, in ask mode, in the folder it starts in | nobody is looking, so the session should not be able to wander |
+| **Join** | the agent in its own mode | you see every keystroke in a mirrored tab; watching *is* the control |
+| **Allow**, unattended | the agent in ask mode, in the folder it starts in | nobody is looking, so the session should not be able to wander |
 
-A checkbox on the session popup — *Full control: a shell, not just the agent* — overrides
-that, and the warning next to it says what it grants rather than asking "are you sure".
+Both start an agent — that part never varies. A checkbox on the session popup — *Vol
+beheer: de agent zonder rem* — gives an unattended session the same room a joined one
+has, and the warning next to it says what that grants rather than asking "are you sure".
 The audit line records which of the two was given, so `session-allow … [vol beheer]` and
 `session-allow … [agent, geen shell]` are distinguishable afterwards.
 
-**Be clear about what that unattended mode is.** It is a *structural* difference: there is
-no shell, so not everything is reachable by construction, and starting `claude
---permission-mode plan` means the agent asks before each step. It is **not an OS
-boundary.** The agent can still run commands and its tools can touch paths outside the
+**Be clear about what that unattended mode is.** It is a *structural* difference: nothing
+hands out a bare prompt, and `--permission-mode plan` means the agent asks before each
+step. It is **not an OS boundary.** The agent can still run commands and its tools can touch paths outside the
 working directory. The containment is exactly as strong as the agent's own permission
 model — a real mechanism, but one that belongs to the agent, not to Taurus. A real
 boundary would need a separate restricted Windows account, or a Job Object / AppContainer
