@@ -20,7 +20,17 @@ const I18N = {
     grp_screen: "Scherm", set_font: "Lettergrootte", set_scroll: "Scrollback (regels)", set_cursor: "Cursor knippert",
     grp_html: "HTML-preview", html_split: "Naast de terminal (split)", html_full: "Volledig (verberg terminal)",
     set_fullpaths: "Vraag Claude volledige paden te tonen (klikbaar)",
-    launch_mode: "Modus", mode_default: "Standaard", mode_plan: "Plan-modus", mode_auto: "Auto (accepteert acties)",
+    launch_mode: "Modus",
+    // Labels zeggen wat de modus DOET, niet hoe hij heet. De teksten volgen wat de
+    // CLI er zelf over zegt (#130).
+    mode_inherit: "Zoals in je eigen instellingen",
+    mode_manual: "Vraagt het per stap",
+    mode_accept_edits: "Bewerkt bestanden zelf, vraagt voor de rest",
+    mode_plan: "Alleen plannen, voert niets uit",
+    mode_auto: "Model beoordeelt elk verzoek",
+    mode_dont_ask: "Vraagt nooit; wat niet vooraf mag, gaat niet door",
+    mode_bypass: "Geen enkele controle (eenmalig te aanvaarden, beleid kan het blokkeren)",
+    mode_default: "Standaard",
     mode_sandbox: "Sandbox (beperkte rechten)",
     launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
     launch_model: "Model", model_ph: "standaard",
@@ -250,7 +260,15 @@ const I18N = {
     grp_screen: "Screen", set_font: "Font size", set_scroll: "Scrollback (lines)", set_cursor: "Cursor blinks",
     grp_html: "HTML preview", html_split: "Beside the terminal (split)", html_full: "Full (hide terminal)",
     set_fullpaths: "Ask Claude to print full paths (clickable)",
-    launch_mode: "Mode", mode_default: "Default", mode_plan: "Plan mode", mode_auto: "Auto (accepts actions)",
+    launch_mode: "Mode",
+    mode_inherit: "Whatever your own settings say",
+    mode_manual: "Asks before each step",
+    mode_accept_edits: "Edits files itself, asks for the rest",
+    mode_plan: "Plans only, executes nothing",
+    mode_auto: "A model judges every request",
+    mode_dont_ask: "Never asks; anything not pre-approved does not happen",
+    mode_bypass: "No checks at all (accept once; policy can block it)",
+    mode_default: "Default",
     mode_sandbox: "Sandbox (restricted)",
     launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
     launch_model: "Model", model_ph: "default",
@@ -734,15 +752,32 @@ function updateModelDatalist(dl, agent) {
   refreshLiveModels(agent).then((fresh) => { if (fresh) fillModelDatalist(dl, agent); });
 }
 
-// Modus-opties verschillen per agent. claude: --permission-mode default/plan/auto.
+// Modus-opties verschillen per agent.
+//
+// claude 2.1.232 accepteert er ZES: acceptEdits, auto, bypassPermissions, manual,
+// dontAsk, plan. Taurus bood er drie aan, met de oude woordenschat -- "default"
+// heet in de CLI inmiddels "manual" (#130). GEMETEN: `default` wordt nog wél
+// geaccepteerd, maar als niet-gedocumenteerde alias (`Default` en een onzinwaarde
+// worden geweigerd met de lijst van zes). De labels hieronder komen letterlijk uit
+// wat de CLI zelf over die modi zegt, niet uit een aanname.
+//
+// "default" blijft bestaan als opgeslagen waarde en betekent: GEEN vlag meesturen,
+// dus de eigen instelling van de agent geldt. Dat is geen legacy-rest maar een
+// echte keuze -- wie in zijn settings.json `defaultMode: acceptEdits` heeft staan,
+// wil niet dat Taurus daar stilletjes overheen gaat.
+//
 // agy: geen --permission-mode, wel --sandbox (beperkt) en
 // --dangerously-skip-permissions (auto). Waarden komen overeen met de mapping in
 // build_command() in de Rust-backend.
 const MODE_OPTIONS = {
   claude: [
-    { value: "default", key: "mode_default" },
+    { value: "default", key: "mode_inherit" },
+    { value: "manual", key: "mode_manual" },
+    { value: "acceptEdits", key: "mode_accept_edits" },
     { value: "plan", key: "mode_plan" },
     { value: "auto", key: "mode_auto" },
+    { value: "dontAsk", key: "mode_dont_ask" },
+    { value: "bypassPermissions", key: "mode_bypass" },
   ],
   agy: [
     { value: "default", key: "mode_default" },

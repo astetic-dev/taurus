@@ -1924,6 +1924,33 @@ fn remote_agent_program(agent: &str, os: &str) -> String {
     }
 }
 
+// Welke waarde er achter `--permission-mode` mag, en None als er helemaal geen vlag
+// mee moet (#130).
+//
+// De lijst is die van claude 2.1.232: acceptEdits, auto, bypassPermissions, manual,
+// dontAsk, plan. Een whitelist en geen doorgeefluik, want een kaart kan een modus
+// bewaren die bij een ANDERE agent hoorde -- zet je een agy-kaart met "sandbox" om
+// naar claude, dan zou dat anders een ongeldige vlag worden en krijg je de fout drie
+// lagen diep uit een remote shell. Onbekend valt daarom terug op "geen vlag", wat
+// altijd werkt.
+//
+// "default" is geen modus maar de afwezigheid van een keuze: geen vlag, dus de eigen
+// instelling van de agent geldt. Dat is bewust -- wie `defaultMode: acceptEdits` in
+// zijn settings.json heeft staan, wil niet dat Taurus daar overheen gaat. De CLI
+// accepteert `default` overigens nog steeds als niet-gedocumenteerde alias, maar
+// meesturen zou juist die eigen instelling overschrijven.
+fn claude_permission_mode(mode: &str) -> Option<&'static str> {
+    match mode.trim() {
+        "manual" => Some("manual"),
+        "acceptEdits" => Some("acceptEdits"),
+        "plan" => Some("plan"),
+        "auto" => Some("auto"),
+        "dontAsk" => Some("dontAsk"),
+        "bypassPermissions" => Some("bypassPermissions"),
+        _ => None,
+    }
+}
+
 fn build_command(
     agent: &str,
     kind: LaunchKind,
@@ -1991,9 +2018,9 @@ fn build_command(
             }
             a.push("-n".into());
             a.push(norm_title(title));
-            if !mode.is_empty() && mode != "default" {
+            if let Some(m) = claude_permission_mode(mode) {
                 a.push("--permission-mode".into());
-                a.push(mode.into());
+                a.push(m.into());
             }
             if !model.trim().is_empty() {
                 a.push("--model".into());
@@ -6315,6 +6342,40 @@ mod tests {
     }
 
     #[test]
+    // De zes waarden die claude 2.1.232 accepteert, plus de twee die juist GEEN
+    // vlag mogen opleveren. GEMETEN met `claude --permission-mode <x> --version`:
+    // een onbekende waarde geeft "argument '<x>' is invalid. Allowed choices are
+    // acceptEdits, auto, bypassPermissions, manual, dontAsk, plan".
+    #[test]
+    fn every_permission_mode_the_cli_accepts_is_reachable() {
+        for m in ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"] {
+            assert_eq!(claude_permission_mode(m), Some(m), "{m} hoort door te komen");
+        }
+        // "default" is geen modus maar de afwezigheid van een keuze: geen vlag,
+        // zodat de eigen instelling van de agent blijft gelden.
+        assert_eq!(claude_permission_mode("default"), None);
+        assert_eq!(claude_permission_mode(""), None);
+    }
+
+    // Een kaart kan een modus bewaren die bij een andere agent hoorde. Die mag nooit
+    // als vlag doorkomen -- dat geeft een fout drie lagen diep in een remote shell.
+    #[test]
+    fn a_mode_from_another_agent_never_becomes_a_flag() {
+        assert_eq!(claude_permission_mode("sandbox"), None, "agy-modus");
+        assert_eq!(claude_permission_mode("Manual"), None, "hoofdletters telt de CLI ook niet");
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "sandbox", "", false, None);
+        assert!(!a.contains(&"--permission-mode".to_string()), "{a:?}");
+    }
+
+    // De nieuwe modi komen ook echt op de commandoregel terecht.
+    #[test]
+    fn accept_edits_and_dont_ask_reach_the_command_line() {
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "acceptEdits", "", false, None);
+        assert!(a.windows(2).any(|w| w == ["--permission-mode", "acceptEdits"]), "{a:?}");
+        let (_, b) = build_command("claude", LaunchKind::Create, "u1", "t", "", "dontAsk", "", false, None);
+        assert!(b.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]), "{b:?}");
+    }
+
     fn build_command_claude_create_and_resume() {
         let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true, None);
         assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
