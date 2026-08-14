@@ -126,9 +126,11 @@ The machine screen shows **one row per machine**, with the routes small undernea
 with its own signal dot:
 
 ```
-● ursu                                    ⇱ sessies   [Verbinden]
-    ○ sshd :22        herdr
-    ● Taurus :8287    voorkeur    none
+● ursu                                 ⇱ agents   [Nieuwe agent...]
+    ○ sshd :22        windows · herdr
+    ● Taurus :8287    voorkeur   windows · none
+      ● Ontwikkel     claude · C:\Users\arjen\ontwikkelmap   [Aanhaken]
+      ○ 2 lege sessies die Taurus liet staan               [Opruimen]
 ```
 
 - Routes to the same address collapse automatically, so an existing `hosts.json` needs no
@@ -139,29 +141,54 @@ with its own signal dot:
   sshd on the other side.
 - Dropdowns and badges name the machine, never the route.
 
-**Connect** starts a session in that machine's `default_project` straight away: no name to
-invent, no folder to pick, no card left in the sidebar. That is the "my limit is used up,
-can you take over for ten minutes" case — an agent *card* is the shape for a workplace you
-come back to, and here you do not.
+**Nieuwe agent...** opens the normal launch form with that machine's folder filled in. It
+used to be called Connect and started something nameless in a folder you had not chosen,
+which is how you ended up in C:\Users\arjen instead of at your work.
 
-**⇱ sessies** lists what herdr keeps on that machine (one ssh round, so it is fetched only
-when asked) and lets you attach to one or end it. Ending takes two clicks, because it cuts
-off someone else's work, and it runs `herdr session stop` followed by `herdr session
-delete` — stop alone leaves the entry in the list, which is the thing being complained
-about in the first place.
+**⇱ agents** lists the **agents** running on that machine — that is the only noun on this
+screen. ssh, tmux and herdr clear the way so an agent can start; they are plumbing, and
+they are never something you pick. The route is a detail on the machine row.
 
-A session **without a recognised agent** is tagged *shell, geen agent*, and that includes
-herdr's own `default` as well as any leftover of Taurus's own making. It is a label rather
-than a hidden row: those sessions exist, and what has to be prevented is landing in a bare
-shell — or in a failed `claude --resume` — on someone else's machine without knowing it.
+Two sources answer, and to the person looking they are the same thing:
+
+- agents Taurus started there over SSH, which herdr knows about;
+- agents running in the Taurus **on** that machine, read from the `sessions.json` it
+  already rewrites on every change.
+
+The same folder seen from both sides collapses to one row. An agent living inside the
+other Taurus is shown but not offered — there is no channel to it yet, and the row says so
+rather than failing on click.
+
+**No agent means there is nothing to connect to.** Not a choice with a warning label on
+it: no choice. Empty mux sessions still exist, so they sit under the agents as cleanup
+with a two-click removal — `herdr session stop` followed by `herdr session delete`, since
+stop alone leaves the entry in the list, which was the original complaint. A machine
+without Taurus can only answer with what herdr knows, and says so, so the difference stays
+visible instead of being papered over.
 
 Note that a machine has **three** kinds of "session" and they are not the same list:
 
 | where you see it | what it is |
 |---|---|
-| ⇱ sessies on the machine screen | herdr sessions — what Taurus started *there over SSH* |
+| ⇱ on the machine screen | agents on that machine |
 | Settings → Netwerk on that machine | inbound sessions a peer opened *on* it (#121) |
-| the tabs in the Taurus over there | its own local sessions — not visible from here yet (#128) |
+| ⇱ in the sidebar | your own work: this computer first, then your machines |
+
+## Coming back to your work (#129)
+
+The ⇱ button in the sidebar is where you return to work, and it is explicitly **yours**:
+this computer first, then the machines you configured. A colleague never appears here —
+they raise a hand, and that is the section further down.
+
+Startup no longer silently resumes. It asks, with what was open pre-ticked and the rest of
+the history below it. An entry that cannot resume right now keeps its row and shows why —
+no transcript, machine gone, N days old — instead of vanishing, because vanishing was the
+bug: a failed restore used to erase the only record that the session had existed. History
+lives in its own `history.json`, is added to and updated, and is never trimmed because a
+restart did not work. "Open nothing" and Escape lose nothing.
+
+The setting under Settings → Sessies has three states: **ask** (default), **silently
+resume**, and **start clean**. Clean only empties the open-list; the history stays.
 
 ## What `mux` buys you
 
@@ -350,38 +377,57 @@ A hostile network can advertise a trusted network's name. Identity remains the k
 fingerprint and the consent popups; this only stops you listening somewhere you never
 meant to.
 
-### Being found, instead of being looked up (#125)
+### Asking for help (#125)
 
-While the listener is open on a trusted network, Taurus announces itself over mDNS as
-`_taurus._tcp.local.`, carrying its user name, host-key fingerprint, OS and default
-folder. A colleague opening the machine screen sees the machine under **Found on this
-network** and can connect without typing an address, a user name or a key path.
+Two sides of one rule, and mDNS only exists on the second:
 
-Three properties of that are deliberate:
+| | your own machines | a colleague's machine |
+|---|---|---|
+| how it is found | you configure it, in `hosts.json` | mDNS, and only while they are asking |
+| what you may do | start an agent, unattended; return to one that runs | join the one agent they offer |
+| consent | your own computer — pair once | their invitation *is* the consent, per session |
+| take it over? | yes, it is yours | **no** — the work stays in their session |
 
-- **It only advertises the trusted interface.** mDNS libraries will happily announce
-  every address on every adapter; measured here that meant the Hyper-V and WSL internal
-  ranges going out to the LAN, telling everyone how this machine is carved up inside and
-  offering nothing the other side can reach. Taurus resolves the adapter behind the
-  trusted network and announces that one address.
-- **It is passive.** Browsing runs only while the machine screen is open, and an
-  announcement never produces a notification, a badge or a popup. Interruptions have to
-  mean something: if every Taurus on the floor blinked whenever someone switched their
-  host on, the popup that does need an answer would drown in traffic that does not.
-- **Being found is not being let in.** The first connection promotes a found machine into
-  the known list, which removes the *lookup*, never the *permission* — every session
-  still asks the receiving side, exactly as before.
+So mDNS is not a directory of machines. It announces **a request, while the request is
+open** — the way a Bluetooth device is discoverable while pairing and invisible the rest
+of the time. A Taurus that is merely reachable announces nothing.
+
+Right-click a tab of a session running on this computer and pick **Vraag om hulp**. The
+announcement carries one agent: who is asking, which machine, which agent, its folder,
+the host key fingerprint and a one-time token. A quiet bar under the tab bar shows the
+hand is up, with *Intrekken*. Nothing interrupts you — you switched it on yourself.
+
+On every other Taurus with the machine screen open, the request appears at the top under
+**Iemand vraagt hulp**. Answering connects with the token as the SSH username; the asking
+side recognises it during authentication and lets it in **without a pairing popup**,
+because the person who would have to answer that popup is the one who asked. That
+acceptance is deliberately narrow: with a help token, reading along with the offered
+session is the only thing the connection can do. Anything else is refused and audited,
+and the ordinary consent path for ordinary sessions is untouched.
+
+**Joining starts nothing.** You land in the terminal that is already running on the other
+machine, and what you type goes into it — two keyboards on one agent, the same shape as
+#121's join. Taking the work over onto your own machine is not possible, on purpose: it
+stays in the session of the person with the problem, which keeps "who owns half-finished
+work" from ever being a question.
+
+An empty list is a real answer here: nobody needs help. That is worth more than the old
+list, which said who happened to be switched on.
 
 **It needs its own firewall rule.** Every mDNS allow rule Windows ships is scoped to a
 program (`svchost.exe` for its own responder, `msedgewebview2.exe` for Edge); Taurus is
 neither, so `taurus.exe` on UDP 5353 needs an exception of its own, next to the TCP 8287
 one the listener already needs. The machine screen checks for both — counting only rules
-that actually apply to this executable — and offers to create them in one elevated step.
-If they are missing it says so, because an empty list that means "blocked" reads like
-"nobody is there", which is the wrong conclusion.
+that actually apply to this executable, and counting **block** rules against it, which
+beat any allow — and offers to fix all of it in one elevated step.
+
+The announcement binds to the trusted interface only. mDNS libraries will happily
+announce every address on every adapter; measured here that meant the Hyper-V and WSL
+internal ranges going out to the LAN, telling everyone how this machine is carved up
+inside and offering nothing the other side can reach.
 
 There is no port scan and there will not be one, not even as a button: on a segment where
-multicast is blocked, a machine stays a hand-made entry. That is a better answer than
+multicast is blocked, that machine stays a hand-made entry. That is a better answer than
 shipping something that behaves like a network sweep.
 
 ### Who gets in: pairing, then per session
