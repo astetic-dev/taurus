@@ -6,13 +6,29 @@
 # testexemplaar zijn eigen projects/hosts/sessions/peers heeft.
 #
 # Het venster heet "... TEST" zodat je ze uit elkaar houdt.
+#
+# -Exe wijst naar een andere build. Nodig zodra dit testexemplaar zelf draait: het
+# houdt target\release\taurus.exe vergrendeld, dus een nieuwe build moet dan naar
+# een aparte map (cargo build --release --target-dir target\fixbuild). Zo kun je die
+# starten zonder eerst te kopieren.
+param(
+    [string]$Exe
+)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$exe  = Join-Path $root 'src-tauri\target\release\taurus.exe'
+$exe  = if ($Exe) { $Exe } else { Join-Path $root 'src-tauri\target\release\taurus.exe' }
 $cfg  = Join-Path $env:APPDATA 'Taurus-TEST'
 
 if (-not (Test-Path $exe)) {
     Write-Host "Geen build gevonden op $exe - draai eerst: cargo build --release (in src-tauri)"
+    return
+}
+
+# Twee testexemplaren delen anders dezelfde Taurus-TEST-map, en dan doen ze elkaar
+# precies aan wat dit script voorkomt tussen test en echt.
+$al = @(Get-Process taurus -EA 0 | Where-Object { $_.Path -and $_.Path -like "$root*" })
+if ($al.Count -gt 0) {
+    Write-Host "Er draait al een testexemplaar (pid $($al.Id -join ', ')). Sluit dat eerst - beide zouden $cfg gebruiken."
     return
 }
 New-Item -ItemType Directory -Force -Path $cfg | Out-Null
