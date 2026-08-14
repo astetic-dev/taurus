@@ -141,6 +141,77 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- machines: een machine is geen route (#124) ----------
+
+// Waaronder een route wordt gegroepeerd. Expliciet gezette `machine` wint;
+// anders het adres, want twee routes naar hetzelfde adres zijn per definitie
+// dezelfde computer.
+fn machine_key(h: &Host) -> String {
+    let m = h.machine.trim();
+    if m.is_empty() {
+        h.hostname.trim().to_lowercase()
+    } else {
+        m.to_lowercase()
+    }
+}
+
+// Eén regel per machine, met de routes eronder. De naam van de machine is de
+// KORTSTE bijnaam van zijn routes: die bevat de onderscheidende toevoeging niet
+// ("ursu" i.p.v. "ursu (Taurus-host)"), en juist die toevoeging wilden we kwijt.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MachineView {
+    key: String,
+    label: String,
+    routes: Vec<Host>,
+    // De route die Taurus zelf zou kiezen: de Taurus-host als die er is, want
+    // die vraagt geen sleuteluitwisseling en geen sshd op de andere machine.
+    preferred: String,
+}
+
+const TAURUS_PORT: u16 = sshhost::DEFAULT_PORT;
+
+fn preferred_route(routes: &[Host]) -> String {
+    routes
+        .iter()
+        .find(|h| h.port == TAURUS_PORT)
+        .or_else(|| routes.first())
+        .map(|h| h.id.clone())
+        .unwrap_or_default()
+}
+
+fn group_machines(hosts: Vec<Host>) -> Vec<MachineView> {
+    let mut order: Vec<String> = Vec::new();
+    let mut buckets: HashMap<String, Vec<Host>> = HashMap::new();
+    for h in hosts {
+        let k = machine_key(&h);
+        if !buckets.contains_key(&k) {
+            order.push(k.clone());
+        }
+        buckets.entry(k).or_default().push(h);
+    }
+    order
+        .into_iter()
+        .map(|k| {
+            let routes = buckets.remove(&k).unwrap_or_default();
+            let label = routes
+                .iter()
+                .map(|h| h.nickname.trim())
+                .filter(|n| !n.is_empty())
+                .min_by_key(|n| n.chars().count())
+                .unwrap_or(k.as_str())
+                .to_string();
+            let preferred = preferred_route(&routes);
+            MachineView { key: k, label, routes, preferred }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn machines() -> Vec<MachineView> {
+    group_machines(get_hosts())
+}
+
 // ---------- remote hosts (#98) ----------
 
 // Een machine waarop een tab een agent kan draaien. Bewaard in
@@ -151,6 +222,16 @@ struct Host {
     id: String,
     nickname: String,
     hostname: String,
+    // Welke FYSIEKE machine dit is (#124). Een `Host` is namelijk geen machine
+    // maar een ROUTE ernaartoe: dezelfde computer staat er drie keer in zodra je
+    // hem over sshd, over WSL en over een Taurus-host kunt bereiken. Daardoor
+    // moest de naam het onderscheid dragen ("ursu (Taurus-host)"), en dat lekte
+    // door naar tabbadges en agentkaarten.
+    //
+    // Leeg = val terug op `hostname`, zodat een bestaande hosts.json vanzelf
+    // samenvalt tot een rij per adres zonder dat iemand iets hoeft te herschrijven.
+    #[serde(default)]
+    machine: String,
     #[serde(default)]
     user: String,
     #[serde(default = "default_ssh_port")]
@@ -4090,6 +4171,7 @@ pub fn run() {
             get_projects,
             save_projects,
             get_hosts,
+            machines,
             save_hosts,
             check_hosts,
             probe_host,
@@ -4158,6 +4240,7 @@ mod tests {
             id: "h1".into(),
             nickname: "Support".into(),
             hostname: "support01".into(),
+            machine: String::new(),
             user: "arjen".into(),
             port: 22,
             key_path: String::new(),
@@ -4558,6 +4641,60 @@ mod tests {
         assert!(!list[0].mux_auto);
     }
 
+    // GEMETEN op een echte opstelling: dezelfde computer stond er drie keer in
+    // (sshd, WSL, Taurus-host), waardoor de bijnaam het onderscheid moest dragen
+    // en "(Taurus-host)" doorlekte naar tabbadges en agentkaarten (#124).
+    #[test]
+    fn routes_to_one_address_collapse_into_one_machine() {
+        let mk = |id: &str, nick: &str, port: u16| {
+            let mut h = test_host();
+            h.id = id.into();
+            h.nickname = nick.into();
+            h.hostname = "192.168.2.9".into();
+            h.port = port;
+            h
+        };
+        let m = group_machines(vec![
+            mk("ursu", "ursu", 22),
+            mk("ursu-wsl", "ursu-wsl", 2223),
+            mk("ursu-taurus", "ursu (Taurus-host)", 8287),
+        ]);
+        assert_eq!(m.len(), 1, "een adres is een machine");
+        // De kortste bijnaam wint: juist de toevoeging wilden we kwijt.
+        assert_eq!(m[0].label, "ursu");
+        assert_eq!(m[0].routes.len(), 3);
+        // De Taurus-route heeft voorkeur: geen sleutelruil, geen sshd nodig.
+        assert_eq!(m[0].preferred, "ursu-taurus");
+    }
+
+    // Zonder Taurus-route valt de voorkeur terug op wat er wel is.
+    #[test]
+    fn without_a_taurus_route_the_first_one_is_used() {
+        let mut a = test_host();
+        a.id = "ursu".into();
+        a.hostname = "192.168.2.9".into();
+        a.port = 22;
+        let m = group_machines(vec![a]);
+        assert_eq!(m[0].preferred, "ursu");
+    }
+
+    // Twee echt verschillende machines blijven twee regels; en een expliciete
+    // `machine` wint van het adres (zelfde computer achter twee adressen).
+    #[test]
+    fn different_machines_stay_apart_and_machine_field_wins() {
+        let mk = |id: &str, host: &str, machine: &str| {
+            let mut h = test_host();
+            h.id = id.into();
+            h.hostname = host.into();
+            h.machine = machine.into();
+            h
+        };
+        assert_eq!(group_machines(vec![mk("a", "10.0.0.1", ""), mk("b", "10.0.0.2", "")]).len(), 2);
+        assert_eq!(group_machines(vec![mk("a", "10.0.0.1", "ursu"), mk("b", "10.0.0.2", "ursu")]).len(), 1);
+        // Hoofdlettergebruik mag geen tweede machine opleveren.
+        assert_eq!(group_machines(vec![mk("a", "URSU", ""), mk("b", "ursu", "")]).len(), 1);
+    }
+
     // Zonder herdr is er geen chrome om te verbergen, en dan hoort Taurus van
     // andermans configbestand af te blijven.
     #[test]
@@ -4877,6 +5014,7 @@ mod tests {
             id: "ursu".into(),
             nickname: "ursu".into(),
             hostname: std::env::var("TAURUS_TEST_HOST").expect("TAURUS_TEST_HOST"),
+            machine: String::new(),
             user: std::env::var("TAURUS_TEST_USER").unwrap_or_default(),
             port: 22,
             key_path: std::env::var("TAURUS_TEST_KEY").unwrap_or_default(),
@@ -4978,6 +5116,7 @@ mod tests {
             id: "h2".into(),
             nickname: "Work".into(),
             hostname: "work.tail.net".into(),
+            machine: String::new(),
             user: "arjen".into(),
             port: 2222,
             key_path: r"C:\Users\AST\.ssh\id_ed25519".into(),
