@@ -623,7 +623,8 @@ fn shell_command(cmd: Option<&str>, cwd: Option<&str>) -> CommandBuilder {
 // enkel pad meer is waarop een verzoek ZONDER commando op cmd.exe uitkomt.
 //
 // Wat toezicht dan wél verandert, is hoeveel die agent uit zichzelf mag:
-//   - onbeheerd toegestaan -> ask-modus, de agent vraagt het per stap;
+//   - onbeheerd toegestaan -> `dontAsk`: vraagt niets en weigert wat niet vooraf
+//     is toegestaan;
 //   - meegekeken (join), of expliciet aangevinkt -> de eigen modus van de agent.
 //
 // Twee grenzen die hier expliciet horen te staan:
@@ -646,9 +647,16 @@ fn session_command(cmd: Option<&str>, cwd: Option<&str>, power: Power) -> Comman
     }
     // Alleen bij onbeheerd de rem erop. Bij vol beheer geen vlag: dan geldt de
     // eigen default van de agent, en die hoort niet hier overschreven te worden.
+    //
+    // `dontAsk` en niet `plan` (#130). Plan-modus voert HELEMAAL NIETS uit, dus een
+    // onbeheerde sessie kon het werk waarvoor hij was toegestaan niet doen -- je gaf
+    // iemand toegang tot een agent die alleen mocht nadenken. `dontAsk` vraagt niets
+    // en weigert wat niet vooraf is toegestaan, en dat is precies de goede kant om
+    // op te falen als er niemand kijkt: een popup die niemand beantwoordt is een
+    // hangende sessie, en dat is geen veiligheid maar een vastloper.
     if power == Power::Sandboxed {
         c.arg("--permission-mode");
-        c.arg("plan");
+        c.arg("dontAsk");
     }
     let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
     c.cwd(cwd.unwrap_or(&home));
@@ -1503,7 +1511,10 @@ mod tests {
         let sandboxed = argv(&session_command(None, None, Power::Sandboxed));
         assert!(!sandboxed.contains("cmd.exe"), "geen shell: {sandboxed}");
         assert!(sandboxed.contains("claude"), "{sandboxed}");
-        assert!(sandboxed.contains("--permission-mode plan"), "ask-modus: {sandboxed}");
+        assert!(sandboxed.contains("--permission-mode dontAsk"), "vraagt niets: {sandboxed}");
+        // Juist NIET plan: dat voert niets uit, en dan kan de sessie het werk
+        // waarvoor hij is toegestaan niet doen (#130).
+        assert!(!sandboxed.contains("plan"), "{sandboxed}");
 
         // Meekijken geeft meer ruimte, maar nog steeds de agent -- geen prompt.
         let full = argv(&session_command(None, None, Power::Full));

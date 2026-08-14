@@ -89,7 +89,8 @@ in. Twee toetsenborden op één agent; het werk blijft waar het probleem zit.
 ### #126 — macht volgt toezicht
 
 Ongewijzigd van bedoeling, gecorrigeerd in aanname: Taurus start agents, geen shells.
-Onbeheerd krijgt `--permission-mode plan`, meegekeken de eigen modus van de agent.
+Onbeheerd krijgt `--permission-mode dontAsk` (vraagt niets, weigert wat niet vooraf mag),
+meegekeken de eigen modus van de agent.
 
 ---
 

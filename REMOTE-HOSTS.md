@@ -499,7 +499,7 @@ rather than to trust:
 | | what it starts | why |
 |---|---|---|
 | **Join** | the agent in its own mode | you see every keystroke in a mirrored tab; watching *is* the control |
-| **Allow**, unattended | the agent in ask mode, in the folder it starts in | nobody is looking, so the session should not be able to wander |
+| **Allow**, unattended | the agent in `dontAsk` mode, in the folder it starts in | nobody is looking, so it must not stall on a prompt and must not wander |
 
 Both start an agent — that part never varies. A checkbox on the session popup — *Vol
 beheer: de agent zonder rem* — gives an unattended session the same room a joined one
@@ -508,8 +508,11 @@ The audit line records which of the two was given, so `session-allow … [vol be
 `session-allow … [agent, geen shell]` are distinguishable afterwards.
 
 **Be clear about what that unattended mode is.** It is a *structural* difference: nothing
-hands out a bare prompt, and `--permission-mode plan` means the agent asks before each
-step. It is **not an OS boundary.** The agent can still run commands and its tools can touch paths outside the
+hands out a bare prompt, and `--permission-mode dontAsk` means the agent never prompts and
+denies whatever was not pre-approved. That is the right direction to fail in when nobody
+is watching — plan mode would execute nothing at all, so the session could not do the work
+it was allowed to do, and a prompt nobody answers is a hung session rather than a safe one.
+It is **not an OS boundary.** The agent can still run commands and its tools can touch paths outside the
 working directory. The containment is exactly as strong as the agent's own permission
 model — a real mechanism, but one that belongs to the agent, not to Taurus. A real
 boundary would need a separate restricted Windows account, or a Job Object / AppContainer
