@@ -5542,6 +5542,57 @@ mod tests {
         assert_eq!(group_machines(vec![mk("a", "URSU", ""), mk("b", "ursu", "")]).len(), 1);
     }
 
+    // Wat de firewallcheck op DEZE machine antwoordt. Genegeerd in de gewone run,
+    // want de uitkomst hangt af van hoe deze machine is ingericht -- maar het is
+    // wel de enige manier om te zien of hij de waarheid vertelt, en een eerdere
+    // versie deed dat aantoonbaar niet:
+    //
+    //   cargo test --lib -- --ignored --nocapture toon_firewall
+    #[test]
+    #[ignore]
+    fn toon_firewall() {
+        // Standaard de testbinary; met TAURUS_TEST_EXE kijk je naar de echte. De
+        // check is namelijk PER EXE, en dat is precies het punt: een block-regel op
+        // taurus.exe zegt niets over dit testproces, en andersom ook niet.
+        let exe = std::env::var("TAURUS_TEST_EXE").unwrap_or_else(|_| this_exe());
+        let out = ps_encoded(&firewall_script(&exe))
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        println!("exe: {exe}\n{}", out.trim());
+    }
+
+    // Tegen een ECHTE machine uit je eigen hosts.json. Genegeerd in de gewone run
+    // (hij doet twee ssh-rondes en hangt dus aan een netwerk en een sleutel), maar
+    // dit is de enige manier om te zien of de twee bronnen samen kloppen zonder de
+    // GUI te starten:
+    //
+    //   cargo test --lib -- --ignored --nocapture toon_agents_op
+    //
+    // Zet TAURUS_TEST_HOST op het host-id; zonder die variabele doet hij niets.
+    #[test]
+    #[ignore]
+    fn toon_agents_op() {
+        let Ok(id) = std::env::var("TAURUS_TEST_HOST") else {
+            println!("zet TAURUS_TEST_HOST=<host-id> om dit te draaien");
+            return;
+        };
+        match remote_agents(id.clone()) {
+            Err(e) => println!("{id}: FOUT {e}"),
+            Ok(v) => {
+                println!("{id}: {} agent(s), {} lege sessie(s), taurus gezien: {}",
+                    v.agents.len(), v.empty.len(), v.taurus_seen);
+                for a in &v.agents {
+                    println!("  [{}] {} | {} | {} | aanhaakbaar={}",
+                        a.origin, a.title, a.agent, a.cwd, a.attachable);
+                }
+                for e in &v.empty {
+                    println!("  (leeg) {e}");
+                }
+            }
+        }
+    }
+
     // De hele reden dat dit bestand bestaat: een mislukte herstart mag een sessie
     // niet uit de geschiedenis halen. GEMETEN: na een herstart kwamen 2 van de 4
     // sessies terug en waren de andere twee helemaal weg uit Taurus.

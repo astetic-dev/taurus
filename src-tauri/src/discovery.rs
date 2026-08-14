@@ -329,6 +329,11 @@ mod tests {
             ("fp".to_string(), "SHA256:test".to_string()),
             ("os".to_string(), "windows".to_string()),
             ("home".to_string(), r"C:\Users\arjen".to_string()),
+            // Zonder token is het geen VRAAG maar aanwezigheid, en die wordt
+            // bewust genegeerd -- dus zonder deze drie toetst de test niets.
+            ("task".to_string(), "ZGV-SAML-debug".to_string()),
+            ("cwd".to_string(), r"C:\Users\arjen\zgv".to_string()),
+            ("tok".to_string(), "testtoken123".to_string()),
         ];
         let info = ServiceInfo::new(
             SERVICE,
@@ -360,5 +365,9 @@ mod tests {
         assert_eq!(f.user, "arjen");
         assert_eq!(f.os, "windows");
         assert_eq!(f.home, r"C:\Users\arjen");
+        // De vraag zelf: één agent, en het token waarmee je hem beantwoordt.
+        assert_eq!(f.agent_title, "ZGV-SAML-debug");
+        assert_eq!(f.agent_cwd, r"C:\Users\arjen\zgv");
+        assert_eq!(f.token, "testtoken123");
     }
 }
