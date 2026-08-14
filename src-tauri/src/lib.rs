@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // Taurus als SSH-host: inkomende sessies met toestemming in de GUI (#121).
 mod discovery;
@@ -1674,6 +1674,42 @@ struct Session {
     _job: Option<job::Job>,
 }
 
+// ---------- een lokale sessie ook naar buiten laten meelezen (#125) ----------
+//
+// De vraagmodus belooft dat het werk in de sessie blijft van degene die vastloopt:
+// je kijkt mee in ZIJN terminal, je krijgt er geen tweede naast. Daarvoor moet de
+// uitvoer van een lokale sessie naar een tweede lezer kunnen -- precies wat #121's
+// join al doet, maar dan de andere kant op.
+//
+// Een globale registry en geen veld op `Session`, omdat de lees-thread in start_pty
+// alleen een geleende `&Mutex<..>` heeft en die niet kan vasthouden. De sleutel is
+// het sessie-id; een sessie zonder abonnee kost hier niets.
+type OfferSink = std::sync::mpsc::Sender<Vec<u8>>;
+static OFFERS: std::sync::OnceLock<Mutex<HashMap<String, Vec<OfferSink>>>> =
+    std::sync::OnceLock::new();
+
+fn offers() -> &'static Mutex<HashMap<String, Vec<OfferSink>>> {
+    OFFERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// Dezelfde bytes als naar het venster gaan, ook naar wie meeleest. Weggevallen
+// abonnees ruimen we hier op: een dichte channel is het einde van dat meekijken en
+// geen reden om de sessie zelf iets te laten merken.
+fn fan_out(id: &str, data: &[u8]) {
+    let mut map = offers().lock().unwrap();
+    let Some(list) = map.get_mut(id) else { return };
+    list.retain(|tx| tx.send(data.to_vec()).is_ok());
+    if list.is_empty() {
+        map.remove(id);
+    }
+}
+
+fn offer_subscribe(id: &str) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    offers().lock().unwrap().entry(id.to_string()).or_default().push(tx);
+    rx
+}
+
 struct AppState {
     sessions: Mutex<HashMap<String, Session>>,
     // STT-opname: commando-kanaal naar de audio-thread + zichtbare status.
@@ -1682,6 +1718,10 @@ struct AppState {
     ssh: std::sync::Arc<sshhost::HostState>,
     // Aankondigen en zoeken op het vertrouwde netwerk (#125).
     discovery: std::sync::Arc<discovery::Discovery>,
+    // De openstaande hulpvraag, als die er is. Eén tegelijk: een hand die je
+    // opsteekt wijst naar één agent, en twee handen tegelijk is geen vraag maar
+    // ruis op het netwerk.
+    asking: Mutex<Option<HelpRequest>>,
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
@@ -1756,6 +1796,10 @@ fn start_pty(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    // Wie meeleest krijgt dezelfde bytes (#125). Eerst, zodat een
+                    // trage abonnee het venster niet ophoudt -- send() op een
+                    // channel blokkeert niet.
+                    fan_out(&id2, &buf[..n]);
                     // Base64 i.p.v. Vec<u8>: Tauri serialiseert events als JSON,
                     // en een byte-array wordt dan een array van getallen (3-4x
                     // zo groot + parse-kosten) op het heetste pad van de app (#73).
@@ -4352,10 +4396,10 @@ fn ssh_network_trust(
     // Meteen laten meebewegen in plaats van tot de volgende ronde wachten.
     if state.ssh.is_desired() {
         let port = *state.ssh.port.lock().unwrap();
-        sshhost::set_enabled(app, state.ssh.clone(), true, port)?;
+        sshhost::set_enabled(app.clone(), state.ssh.clone(), true, port)?;
     }
     // Een ander netwerk betekent een ander adres om op aan te kondigen -- of geen.
-    sync_announcement(&state);
+    sync_announcement(&app);
     Ok(ssh_status_of(&state))
 }
 
@@ -4369,27 +4413,135 @@ fn ssh_host_set(
     port: Option<u16>,
 ) -> Result<SshHostStatus, String> {
     let p = port.unwrap_or(sshhost::DEFAULT_PORT);
-    sshhost::set_enabled(app, state.ssh.clone(), enabled, p)?;
-    sync_announcement(&state);
+    sshhost::set_enabled(app.clone(), state.ssh.clone(), enabled, p)?;
+    sync_announcement(&app);
     Ok(ssh_status_of(&state))
 }
 
-// De aankondiging volgt de listener: wat dicht staat, valt niet aan te kondigen,
-// en wat open staat beschrijft precies het netwerk waarop het open staat (#125).
-// Lukt aankondigen niet, dan is dat geen reden om de listener te weigeren -- de
-// deur werkt ook als niemand hem kan vinden; het machinescherm meldt het verschil.
-fn sync_announcement(state: &State<AppState>) {
-    if state.ssh.is_running() {
-        let port = *state.ssh.port.lock().unwrap();
-        let user = std::env::var("USERNAME")
-            .or_else(|_| std::env::var("USER"))
-            .unwrap_or_default();
-        let _ = state
-            .discovery
-            .announce(port, &user, &sshhost::host_key_fingerprint());
-    } else {
+// De aankondiging volgt zowel de listener als de vraag: er valt niets aan te
+// kondigen als de deur dicht staat, en er valt niets aan te kondigen als niemand
+// iets vraagt. Zodra een van beide wegvalt, verdwijnt de vraag van het netwerk.
+fn sync_announcement(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let ask = state.asking.lock().unwrap().clone();
+    let Some(ask) = ask.filter(|_| state.ssh.is_running()) else {
         state.discovery.unannounce();
+        return;
+    };
+    let port = *state.ssh.port.lock().unwrap();
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
+    // Lukt aankondigen niet, dan is dat geen reden om de vraag in te trekken -- de
+    // deur werkt ook als niemand hem kan vinden; het scherm meldt het verschil.
+    let _ = state.discovery.announce(
+        port,
+        &user,
+        &sshhost::host_key_fingerprint(),
+        &ask.title,
+        &ask.cwd,
+        &ask.token,
+    );
+}
+
+// ---------- de hand opsteken (#125) ----------
+//
+// Een verzoek wijst altijd naar ÉÉN agent. Dat is niet netter maar noodzakelijk:
+// zonder agent kom je uit "op een computer", en dan kan het antwoord een kale
+// prompt zijn. Met een agent erbij kan dat per constructie niet.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HelpRequest {
+    // Het lokale sessie-id waar de helper aan gaat meelezen.
+    session: String,
+    title: String,
+    cwd: String,
+    // Eenmalig; de uitnodiging is de toestemming, dus dit is het hele bewijs.
+    token: String,
+}
+
+// Een token dat niet te raden hoeft te zijn om te tellen, maar het wel is: hij
+// reist alleen over het vertrouwde netwerk en leeft zolang de vraag open staat.
+fn new_token() -> String {
+    // rand 0.10: `Rng` is de trait met fill_bytes, `RngExt` die met random_range.
+    use rand::Rng;
+    const T: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut bytes = [0u8; 24];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| T[*b as usize % T.len()] as char).collect()
+}
+
+#[tauri::command]
+fn help_ask(
+    app: AppHandle,
+    state: State<AppState>,
+    session: String,
+    title: String,
+    cwd: String,
+) -> Result<HelpRequest, String> {
+    if !state.ssh.is_running() {
+        return Err(
+            "Zet eerst 'bereikbaar' aan op een vertrouwd netwerk -- anders kan niemand je vraag beantwoorden."
+                .to_string(),
+        );
     }
+    let req = HelpRequest { session, title, cwd, token: new_token() };
+    *state.asking.lock().unwrap() = Some(req.clone());
+    sync_announcement(&app);
+    Ok(req)
+}
+
+#[tauri::command]
+fn help_withdraw(app: AppHandle, state: State<AppState>) {
+    *state.asking.lock().unwrap() = None;
+    sync_announcement(&app);
+}
+
+// Klopt dit token bij de openstaande vraag? Alleen kijken, niet innemen: dit is de
+// auth-fase, en er is nog geen kanaal om aan te hangen.
+pub(crate) fn help_token_matches(app: &AppHandle, token: &str) -> bool {
+    let state = app.state::<AppState>();
+    let ask = state.asking.lock().unwrap();
+    ask.as_ref()
+        .map(|a| !a.token.trim().is_empty() && a.token == token)
+        .unwrap_or(false)
+}
+
+// Het token inwisselen, vanuit de SSH-host. De vraag gaat er meteen af: wie hem
+// beantwoordt, heeft hem beantwoord, en een hand die omhoog blijft nadat er iemand
+// gekomen is nodigt de rest van de gang voor niets uit.
+pub(crate) fn claim_help_offer(app: &AppHandle, token: &str) -> Option<String> {
+    let state = app.state::<AppState>();
+    let ask = state.asking.lock().unwrap().clone()?;
+    if ask.token.trim().is_empty() || ask.token != token {
+        return None;
+    }
+    *state.asking.lock().unwrap() = None;
+    sync_announcement(app);
+    let _ = app.emit("help-answered", ());
+    Some(ask.session)
+}
+
+// Meelezen met een lokale sessie: dezelfde bytes die naar het venster gaan.
+pub(crate) fn subscribe_local_session(id: &str) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    offer_subscribe(id)
+}
+
+// En de terugweg: wat de helper typt gaat de LOKALE pty in, dezelfde terminal waar
+// de vrager in zit. Twee toetsenborden op een agent, net als de join uit #121 maar
+// dan andersom.
+pub(crate) fn write_local_session(app: &AppHandle, id: &str, data: &[u8]) {
+    let state = app.state::<AppState>();
+    let mut map = state.sessions.lock().unwrap();
+    if let Some(s) = map.get_mut(id) {
+        let _ = s.writer.write_all(data);
+        let _ = s.writer.flush();
+    }
+}
+
+#[tauri::command]
+fn help_asking(state: State<AppState>) -> Option<HelpRequest> {
+    state.asking.lock().unwrap().clone()
 }
 
 // ---------- machines vinden op het vertrouwde netwerk (#125) ----------
@@ -4447,6 +4599,57 @@ fn discovered_machines(state: State<AppState>) -> DiscoveryView {
         problem: state.discovery.problem(),
         announcing: sshhost::read_pref().enabled && sshhost::netgate::on_trusted_network(),
     }
+}
+
+// Een hulpvraag beantwoorden (#125). Er wordt niets gestart en niets opgeslagen:
+// dit opent een tab op de sessie die de ander al draait.
+//
+// De machine hoeft niet in hosts.json te staan en er is geen sleutel nodig -- het
+// token in de gebruikersnaam is het bewijs, en het geldt alleen voor deze vraag.
+// Daarom ook geen `adopt`: iemand helpen maakt hem nog niet tot een van jouw
+// machines.
+#[tauri::command]
+fn answer_help_request(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+    gen: u64,
+    found: discovery::Found,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    if found.token.trim().is_empty() {
+        return Err("Dit verzoek heeft geen token meer; vraag de ander opnieuw.".to_string());
+    }
+    let host = Host {
+        id: "help".into(),
+        nickname: found.name.clone(),
+        hostname: found.address.clone(),
+        machine: found.address.clone(),
+        // Het token reist als gebruikersnaam: de andere kant herkent het in de
+        // auth-fase en laat precies dit ene pad toe.
+        user: format!("taurus-help-{}", found.token),
+        port: found.port,
+        key_path: String::new(),
+        default_project: String::new(),
+        via: String::new(),
+        os: found.os.clone(),
+        mux: "none".into(),
+        agent_version: String::new(),
+        mux_auto: false,
+    };
+    let (program, args) = ssh_interactive(&host, format!("TAURUS-JOIN {}", found.token))?;
+    start_pty(
+        &app,
+        &state.sessions,
+        id,
+        gen,
+        program,
+        &local_cwd_for_remote(),
+        args,
+        cols,
+        rows,
+    )
 }
 
 // Een id voor hosts.json uit een aangekondigde naam. Alleen [a-z0-9-], net als de
@@ -4652,6 +4855,7 @@ fn firewall_allow(port: Option<u16>) -> Result<(), String> {
     Ok(())
 }
 
+
 // Een gevonden machine wordt een gewone machine. Dat haalt het OPZOEKEN weg, niet
 // de TOESTEMMING: elke sessie vraagt het de ontvangende kant nog steeds, precies
 // zoals nu. "Bekend" betekent "ik hoef je niet meer op te zoeken".
@@ -4814,6 +5018,7 @@ pub fn run() {
             },
             ssh: std::sync::Arc::new(sshhost::HostState::default()),
             discovery: std::sync::Arc::new(discovery::Discovery::default()),
+            asking: Mutex::new(None),
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -4889,8 +5094,11 @@ pub fn run() {
             stop_remote_session,
             discovery_start,
             discovery_stop,
+            help_ask,
+            help_withdraw,
+            help_asking,
+            answer_help_request,
             discovered_machines,
-            adopt_found_machine,
             firewall_status,
             firewall_allow,
             save_hosts,

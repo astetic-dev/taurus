@@ -967,3 +967,24 @@ select:-webkit-autofill {
 /* Niet te hervatten: de rij blijft staan mét reden, en dat mag geen alarm zijn --
    verdwijnen was de fout, en rood zou suggereren dat er iets stuk is. */
 .restore-row input[disabled] ~ .host-main { opacity: .6; }
+
+/* Vraagmodus (#125). De vragende kant krijgt een rustige balk onder de tabbalk:
+   je hebt het zelf aangezet, dus het hoeft je niet te onderbreken -- het moet
+   alleen niet te vergeten zijn. */
+.asking-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 14px; font-size: 12.5px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
+  border-bottom: 1px solid var(--accent);
+}
+.asking-banner .grow { flex: 1; min-width: 0; }
+.asking-banner button { padding: 3px 10px; font-size: 11.5px; }
+/* De ontvangende kant: een verzoek is geen machine in een lijst, dus het krijgt
+   een eigen vorm die opvalt zonder alarm te slaan. */
+.askband {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--accent); border-radius: 6px; padding: 11px 13px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  margin-bottom: 8px;
+}
+.askband-hand { font-size: 17px; }

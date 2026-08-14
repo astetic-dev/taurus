@@ -416,6 +416,8 @@ impl russh::server::Server for TaurusHost {
             fingerprint: String::new(),
             auto_allow: false,
             ptys: Default::default(),
+            offered: Default::default(),
+            help_token: String::new(),
             chan_session: Default::default(),
             pty_req: Default::default(),
             channels: Default::default(),
@@ -499,6 +501,12 @@ struct HostSession {
     fingerprint: String,
     auto_allow: bool,
     ptys: Arc<StdMutex<HashMap<ChannelId, Arc<SessionIo>>>>,
+    // Het token waarmee deze verbinding binnenkwam, als dat zo is (#125). Zolang
+    // dit gezet is, is meelezen met de aangeboden sessie het enige wat mag.
+    help_token: String,
+    // Kanalen die een hulpvraag beantwoorden: kanaal -> LOKAAL sessie-id (#125).
+    // Daar wordt niets gestart; er wordt meegelezen en meegetypt.
+    offered: Arc<StdMutex<HashMap<ChannelId, String>>>,
     // Welk kanaal hoort bij welke sessie-id, zodat opruimen bij channel_close
     // ook de gedeelde kant (de JOIN-registratie) meeneemt.
     chan_session: Arc<StdMutex<HashMap<ChannelId, String>>>,
@@ -716,6 +724,48 @@ impl HostSession {
         d
     }
 
+    // Een openstaande hulpvraag beantwoorden: hang dit kanaal aan de LOKALE sessie
+    // waar de vrager in zit (#125).
+    //
+    // Er wordt hier niets gestart. Dat is het hele punt van de vraagmodus: het werk
+    // blijft in de sessie van degene met het probleem, en de helper zit ernaast.
+    // Klopt het token niet, dan is dit gewoon een onbekend commando -- geen hint
+    // dat er een vraag open staat of stond.
+    fn answer_help(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+        token: &str,
+    ) -> Result<(), russh::Error> {
+        let Some(local) = crate::claim_help_offer(&self.app, token) else {
+            audit(&self.app, "help-bad-token", &self.peer_name(), "");
+            session.channel_failure(channel)?;
+            return Ok(());
+        };
+        audit(&self.app, "help-answered", &self.peer_name(), &local);
+        self.offered.lock().unwrap().insert(channel, local.clone());
+        session.channel_success(channel)?;
+
+        // Meelezen: dezelfde bytes die naar het venster van de vrager gaan.
+        let rx = crate::subscribe_local_session(&local);
+        let handle = session.handle();
+        let rt = tokio::runtime::Handle::current();
+        std::thread::spawn(move || {
+            while let Ok(chunk) = rx.recv() {
+                if rt.block_on(handle.data(channel, chunk)).is_err() {
+                    break;
+                }
+            }
+            // Het kanaal netjes afsluiten als de sessie ophoudt; de sessie zelf
+            // blijft van de vrager en gaat hier niet dicht.
+            rt.block_on(async {
+                let _ = handle.eof(channel).await;
+                let _ = handle.close(channel).await;
+            });
+        });
+        Ok(())
+    }
+
     // Start een programma in een ConPTY, pompt beide kanten op, schrijft het
     // transcript en registreert de sessie zodat de GUI hem kan tonen en killen.
     fn start(
@@ -832,6 +882,26 @@ impl Handler for HostSession {
         let fp = key.fingerprint(Default::default()).to_string();
         self.user = user.to_string();
         self.fingerprint = fp.clone();
+
+        // Iemand die een HULPVRAAG beantwoordt komt binnen op het token, niet op
+        // een bekende sleutel (#125). Dat moet, want de collega die te hulp schiet
+        // is meestal een onbekende: hem eerst een pairing-popup laten beantwoorden
+        // op de machine van degene die vastzit, terwijl die daar zelf om vroeg, is
+        // precies de omweg die de vraagmodus weghaalt. De uitnodiging IS de
+        // toestemming, en hij geldt alleen voor deze ene vraag.
+        //
+        // Dit geeft geen bredere toegang: `help_token` is gezet, en het enige wat
+        // dan lukt is meelezen met de aangeboden sessie. Alles wat een gewone
+        // sessie wil, loopt nog steeds langs de popups.
+        if let Some(tok) = user.strip_prefix("taurus-help-") {
+            if crate::help_token_matches(&self.app, tok) {
+                self.help_token = tok.to_string();
+                audit(&self.app, "help-auth", &self.peer_name(), &fp);
+                return Ok(Auth::Accept);
+            }
+            // Geen kloppend token: behandel het verder als een gewone poging, zodat
+            // dit pad niet verklapt of er een vraag open staat.
+        }
 
         let known = read_peers().into_iter().find(|p| p.fingerprint == fp);
 
@@ -950,6 +1020,13 @@ impl Handler for HostSession {
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        // Beantwoordt dit kanaal een hulpvraag, dan gaan de toetsaanslagen naar de
+        // LOKALE sessie van de vrager -- twee toetsenborden op een agent (#125).
+        let local = self.offered.lock().unwrap().get(&channel).cloned();
+        if let Some(id) = local {
+            crate::write_local_session(&self.app, &id, data);
+            return Ok(());
+        }
         let io = self.ptys.lock().unwrap().get(&channel).cloned();
         if let Some(io) = io {
             io.write(data);
@@ -1054,6 +1131,24 @@ impl Handler for HostSession {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         let line = String::from_utf8_lossy(data).to_string();
+
+        // Een hulpvraag beantwoorden (#125). Dit is geen commando dat we uitvoeren
+        // maar een token dat we inwisselen: er start hier niets nieuws, de helper
+        // gaat meelezen in de sessie die de vrager al open heeft. Vandaar dat dit
+        // VOOR alle andere paden staat, en zonder toestemmingspopup -- de vraag
+        // zelf was de uitnodiging.
+        if let Some(tok) = line.trim().strip_prefix("TAURUS-JOIN ") {
+            return self.answer_help(channel, session, tok.trim());
+        }
+        // Binnengekomen op een hulptoken? Dan is meelezen het enige wat mag. Alles
+        // anders is een gewone sessie en hoort ook langs de gewone toestemming --
+        // die is met dit token nooit gegeven.
+        if !self.help_token.is_empty() {
+            audit(&self.app, "help-refused", &self.peer_name(), &describe_request(&line));
+            session.channel_failure(channel)?;
+            return Ok(());
+        }
+
         let want_pty = self.pty_req.lock().unwrap().get(&channel).cloned();
 
         match want_pty {

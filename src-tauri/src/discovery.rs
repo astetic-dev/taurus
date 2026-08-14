@@ -29,8 +29,14 @@ use crate::sshhost::netgate;
 
 pub const SERVICE: &str = "_taurus._tcp.local.";
 
-// Deserialize erbij omdat de frontend een gevonden machine TERUGSTUURT om hem te
-// laten adopteren: hij heeft dan al alles wat daarvoor nodig is.
+// Een openstaande hulpvraag zoals hij over de lijn gaat. Deserialize erbij omdat de
+// frontend hem TERUGSTUURT om hem te beantwoorden.
+//
+// Dit is geen machine maar een VERZOEK. Een eerdere versie kondigde aanwezigheid
+// aan -- elke Taurus die bereikbaar stond riep permanent dat hij bestond -- en dat
+// beantwoordt een vraag die niemand stelt: wie er toevallig aan staat. Nu geldt
+// hetzelfde als bij bluetooth: zichtbaar zolang je koppelt, de rest van de tijd
+// bestaat het niet.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Found {
@@ -48,6 +54,13 @@ pub struct Found {
     // aankondigt weet allebei van zichzelf, dus zegt hij het er meteen bij.
     pub os: String,
     pub home: String,
+    // WAAR het verzoek over gaat. Een vraag wijst altijd naar één agent: juist dat
+    // maakt het onmogelijk om per ongeluk "op een computer" uit te komen.
+    pub agent_title: String,
+    pub agent_cwd: String,
+    // Eenmalig, en genoeg bewijs voor deze ene sessie. De uitnodiging ís de
+    // toestemming, dus er hoort geen tweede popup bij de vrager.
+    pub token: String,
 }
 
 #[derive(Default)]
@@ -146,15 +159,37 @@ impl Discovery {
             fingerprint: prop(svc, "fp"),
             os: prop(svc, "os"),
             home: prop(svc, "home"),
+            agent_title: prop(svc, "task"),
+            agent_cwd: prop(svc, "cwd"),
+            token: prop(svc, "tok"),
         };
+        // Een aankondiging zonder token is geen VRAAG maar aanwezigheid, en daar
+        // doen we niets meer mee. Zo kan een oudere Taurus op het netwerk ook geen
+        // rijen opleveren waar niemand iets aan heeft.
+        if found.token.trim().is_empty() {
+            return;
+        }
         // Sleutelen op de VOLLEDIGE naam en bijwerken: zie meting 2 hierboven.
         self.seen.lock().unwrap().insert(full, found);
     }
 
-    // Aankondigen hangt aan het vinkje "bereikbaar": staat de deur dicht, dan valt
-    // er ook niets aan te kondigen. Andersom beschrijft de aankondiging precies het
-    // netwerk waarop de listener open staat -- dat houdt het verhaal kloppend.
-    pub fn announce(&self, port: u16, user: &str, fingerprint: &str) -> Result<(), String> {
+    // Een hulpvraag aankondigen. Zolang deze open staat is de machine zichtbaar;
+    // trek je hem in, dan bestaat hij niet meer -- zoals bluetooth in koppelmodus.
+    //
+    // Aankondigen kan alleen als de deur ook open staat: de listener moet aan zijn
+    // en het netwerk vertrouwd, want een vraag die niemand kan beantwoorden is geen
+    // vraag. De aankondiging beschrijft daarmee precies het netwerk waarop de
+    // listener luistert.
+    #[allow(clippy::too_many_arguments)]
+    pub fn announce(
+        &self,
+        port: u16,
+        user: &str,
+        fingerprint: &str,
+        agent_title: &str,
+        agent_cwd: &str,
+        token: &str,
+    ) -> Result<(), String> {
         self.unannounce();
         let Some(ip) = netgate::trusted_ipv4() else {
             return Err("Geen vertrouwd netwerk, dus geen adres om op aan te kondigen.".to_string());
@@ -166,6 +201,9 @@ impl Discovery {
             ("fp".to_string(), fingerprint.to_string()),
             ("os".to_string(), announced_os().to_string()),
             ("home".to_string(), home_dir()),
+            ("task".to_string(), agent_title.to_string()),
+            ("cwd".to_string(), agent_cwd.to_string()),
+            ("tok".to_string(), token.to_string()),
         ];
         let info = ServiceInfo::new(
             SERVICE,

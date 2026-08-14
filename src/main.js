@@ -64,8 +64,13 @@ const I18N = {
     resume_old: "{days} dagen oud",
     ago_now: "zojuist", ago_min: "{n} min geleden", ago_hour: "{n} uur geleden", ago_day: "{n} dagen geleden",
     hosts_known: "Bekende machines",
-    found_title: "Gevonden op dit netwerk",
-    found_not_announcing: "Je bent zelf niet vindbaar: zet \"bereikbaar\" aan in Instellingen en vertrouw dit netwerk.",
+    found_title: "Iemand vraagt hulp",
+    help_from: "{user} op {machine} vraagt hulp bij",
+    help_join: "Meedoen",
+    help_asked: "Je vraag om hulp bij {title} staat op het netwerk.",
+    help_asking: "Je vraagt hulp bij {title} — zichtbaar op het vertrouwde netwerk.",
+    help_withdraw: "Intrekken",
+    ctx_help: "✋ Vraag om hulp bij deze agent",
     found_firewall: "Taurus heeft nog geen eigen firewall-uitzondering. Zonder die regels ziet niemand je, en kan niemand aankloppen.",
     found_firewall_fix: "Firewall-regels aanmaken (vraagt om beheerdersrechten)",
     found_firewall_blocked: "Windows blokkeert taurus.exe met {n} eigen regel(s) - waarschijnlijk van een weggeklikte Defender-vraag. Zo'n blokkade wint van elke uitzondering, dus die moet eerst weg.",
@@ -289,8 +294,13 @@ const I18N = {
     resume_old: "{days} days old",
     ago_now: "just now", ago_min: "{n} min ago", ago_hour: "{n} h ago", ago_day: "{n} days ago",
     hosts_known: "Known machines",
-    found_title: "Found on this network",
-    found_not_announcing: "You are not findable yourself: switch on \"reachable\" in Settings and trust this network.",
+    found_title: "Someone is asking for help",
+    help_from: "{user} on {machine} needs help with",
+    help_join: "Join",
+    help_asked: "Your request for help with {title} is on the network.",
+    help_asking: "You are asking for help with {title} — visible on the trusted network.",
+    help_withdraw: "Withdraw",
+    ctx_help: "✋ Ask for help with this agent",
     found_firewall: "Taurus has no firewall exception of its own yet. Without those rules nobody sees you, and nobody can knock.",
     found_firewall_fix: "Create firewall rules (asks for administrator rights)",
     found_firewall_blocked: "Windows blocks taurus.exe with {n} rule(s) of its own - most likely from a dismissed Defender prompt. A block beats any exception, so that has to go first.",
@@ -1191,6 +1201,50 @@ function renderHostRows() {
   }
 }
 
+/* ---- de hand opsteken (#125) ---- */
+// Vragen wijst naar ÉÉN agent, en zolang de hand omhoog is ben je zichtbaar op het
+// vertrouwde netwerk -- zoals bluetooth in koppelmodus. Laat je hem zakken, dan is
+// er niets meer te zien.
+//
+// Het werk blijft van jou: wie komt helpen leest mee in DEZE terminal en typt erin
+// mee. Hij neemt niets over en niets verhuist.
+let asking = null;
+
+async function askForHelp(s) {
+  try {
+    asking = await invoke("help_ask", { session: s.id, title: s.title || "agent", cwd: s.path || "" });
+  } catch (e) {
+    toast(String(e), "err");
+    return;
+  }
+  toast(t("help_asked").replace("{title}", s.title || "agent"));
+  renderAskingBanner();
+}
+
+async function withdrawHelp() {
+  await invoke("help_withdraw").catch(() => {});
+  asking = null;
+  renderAskingBanner();
+}
+
+// Eén rustige balk onder de tabbalk. Geen popup: je hebt het zelf aangezet, dus het
+// hoeft je niet te onderbreken -- het moet alleen niet te vergeten zijn.
+function renderAskingBanner() {
+  let el = document.querySelector("#asking-banner");
+  if (!asking) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "asking-banner";
+    el.className = "asking-banner";
+    els.tabbar.parentElement.insertAdjacentElement("afterend", el);
+  }
+  el.innerHTML = `
+    <span>✋</span>
+    <span class="grow">${escapeHtml(t("help_asking").replace("{title}", asking.title))}</span>
+    <button class="btn-ghost">${escapeHtml(t("help_withdraw"))}</button>`;
+  el.querySelector("button").onclick = withdrawHelp;
+}
+
 /* ---- machines vinden op het vertrouwde netwerk (#125) ---- */
 // Zoeken loopt ALLEEN zolang dit scherm openstaat. Geen melding, geen badge, geen
 // popup: een aankondiging is omgevingsgeluid. Alleen een verzoek om toegang mag
@@ -1235,7 +1289,10 @@ async function pollDiscovery() {
   // zijn routes en zijn knoppen. Twee keer dezelfde naam is geen vondst.
   found = view.machines.filter((m) => !m.known);
   discoNote = view.problem || "";
-  if (!discoNote && !view.announcing) discoNote = t("found_not_announcing");
+  // Niet meer "je bent niet vindbaar": in de vraagmodus kondig je alleen aan als je
+  // zelf iets vraagt, dus zwijgen is de normale toestand. Wat wél de moeite waard
+  // is om te melden staat hieronder (firewall), en anders is een lege lijst een
+  // waar antwoord: niemand heeft hulp nodig.
   renderFound();
 }
 
@@ -1246,28 +1303,27 @@ function renderFound() {
   if (!wrap || !rows || !note) return;
   wrap.classList.toggle("hidden", !found.length);
   rows.innerHTML = "";
+  // Een verzoek, geen machine. Er staat wie het vraagt, waarbij, en waar dat werk
+  // staat -- zonder die agent zou je uitkomen "op een computer", en dan kan het
+  // antwoord een kale prompt zijn.
   for (const f of found) {
     const row = document.createElement("div");
-    row.className = "host-row";
+    row.className = "askband";
     row.innerHTML = `
-      <span class="host-dot up"></span>
+      <span class="askband-hand">✋</span>
       <div class="host-main">
-        <div class="host-name">${escapeHtml(f.name)}</div>
-        <div class="host-sub">${escapeHtml((f.user ? f.user + "@" : "") + f.address)} · ${escapeHtml(f.os || "?")}</div>
+        <div class="host-name">${escapeHtml(t("help_from").replace("{user}", f.user || "?").replace("{machine}", f.name))} <b>${escapeHtml(f.agentTitle || "?")}</b></div>
+        <div class="host-sub">${escapeHtml([f.agentCwd, f.fingerprint].filter(Boolean).join(" · "))}</div>
       </div>
-      <button class="machine-connect">${escapeHtml(t("machine_connect"))}</button>`;
-    row.querySelector(".machine-connect").addEventListener("click", () => connectToFound(f));
+      <button class="machine-connect">${escapeHtml(t("help_join"))}</button>`;
+    row.querySelector("button").addEventListener("click", () => joinHelpRequest(f));
     rows.appendChild(row);
   }
   // Eén eerlijke regel wanneer er niets te zien is, in plaats van een lege lijst
   // die als "er is niemand" leest. Een firewall die ons tegenhoudt is iets anders
-  // dan een netwerk waar niemand op zit.
+  // dan een netwerk waar niemand hulp nodig heeft.
   const lines = [];
   if (discoNote) lines.push(discoNote);
-  // Geblokkeerd en "geen regel" zijn twee verschillende problemen en verdienen twee
-  // verschillende zinnen. Een block-regel WINT van elke uitzondering, dus wie alleen
-  // "maak de regels aan" leest terwijl Defender de exe blokkeert, blijft klikken op
-  // iets dat niets oplost.
   const fwBlocked = !!(firewall && firewall.checked && firewall.blocked > 0);
   const fwMissing = !!(firewall && firewall.checked && !(firewall.tcp && firewall.udp));
   if (fwBlocked) lines.push(t("found_firewall_blocked").replace("{n}", firewall.blocked));
@@ -1286,8 +1342,6 @@ function renderFound() {
         els.hostStatusMsg.textContent = "✗ " + e;
         els.hostStatusMsg.className = "status-msg err";
       }
-      // Ook na een fout opnieuw meten: dan klopt wat er staat met de werkelijkheid,
-      // in plaats van met wat de knop dácht te doen.
       try { firewall = await invoke("firewall_status", { port: null }); } catch (_) {}
       b.disabled = false;
       renderFound();
@@ -1297,24 +1351,30 @@ function renderFound() {
   note.classList.toggle("hidden", !lines.length);
 }
 
-// Verbinden met een gevonden machine: hij wordt eerst een gewone bekende machine
-// (dat haalt het OPZOEKEN weg, niet de toestemming -- die vraagt de andere kant
-// nog steeds), en daarna is het dezelfde Connect als hierboven.
-async function connectToFound(f) {
-  let host;
+// Meedoen met een hulpvraag. Geen kaart, geen machine erbij in hosts.json: iemand
+// helpen maakt zijn computer nog niet tot een van jouw machines. Je landt in ZIJN
+// terminal en typt daarin mee.
+async function joinHelpRequest(f) {
+  const id = "s" + (++seq);
+  const session = spawnTerminal({
+    id, uuid: "", path: f.agentCwd || "", title: f.agentTitle || f.name, accent: "#7c9cff",
+    mode: "", command: "", agent: "", model: "", hostId: "", projectId: "",
+  });
+  // Taurus heeft dit commando niet gebouwd en kan het niet hervatten of verplaatsen.
+  session.attached = true;
   try {
-    host = await invoke("adopt_found_machine", { found: f });
+    await invoke("answer_help_request", {
+      id, gen: session.gen, found: f,
+      cols: session.term.cols, rows: session.term.rows,
+    });
+    closeHostModal();
+    showView(id);
   } catch (e) {
+    sessions.delete(id); session.term.dispose(); session.el.remove();
+    renderTabs();
     els.hostStatusMsg.textContent = "✗ " + e;
     els.hostStatusMsg.className = "status-msg err";
-    return;
   }
-  hosts = await invoke("get_hosts");
-  await refreshMachines();
-  fillHostSelect();
-  renderHostRows();
-  const m = machineOf(host.id);
-  if (m) await connectToMachine(m);
 }
 
 /* ---- welke AGENTS er op een machine draaien (#128) ---- */
@@ -3315,9 +3375,16 @@ function openTabMenu(x, y, id) {
     <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
     <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item${att}"${attWhy} data-act="move">${t("ctx_move")}</div>
+    <div class="ctx-item${off}"${why} data-act="help">${t("ctx_help")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
   m.querySelector('[data-act="restart"]').addEventListener("click", () => { if (!s.attached) restartSession(id); });
+  // Hulp vragen kan alleen voor een sessie die HIER draait: je nodigt iemand uit in
+  // je eigen terminal. Bij een remote sessie zit het werk al ergens anders (#125).
+  m.querySelector('[data-act="help"]').addEventListener("click", () => {
+    closeTabMenu();
+    if (!s.hostId) askForHelp(s);
+  });
   m.querySelector('[data-act="speak"]').addEventListener("click", () => {
     closeTabMenu();
     const sel = s.term.getSelection();
@@ -4517,6 +4584,9 @@ window.addEventListener("DOMContentLoaded", () => {
   loadProjects();
   // Hosts eerst: het herstellen moet een opgeslagen host_id kunnen opzoeken.
   loadHosts().then(startupRestore);
+  // Stond er nog een hand omhoog toen de app sloot? Dan hoort de balk er te
+  // staan -- een vraag die je niet meer ziet trek je ook niet in (#125).
+  invoke("help_asking").then((a) => { asking = a; renderAskingBanner(); }).catch(() => {});
 
   // Toon de app-versie discreet onderin de sidebar.
   invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});
