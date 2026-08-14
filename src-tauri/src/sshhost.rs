@@ -599,9 +599,16 @@ impl HostSession {
             }
             _ => {}
         }
+        // Join apart vastleggen: meekijken betekent dat er een tweede toetsenbord
+        // op dezelfde terminal zit, en dat hoort achteraf terug te vinden te zijn.
+        // "Iemand keek mee" is een ander feit dan "iemand mocht verbinden".
         audit(
             &self.app,
-            if d.permits() { "session-allow" } else { "session-deny" },
+            match d {
+                Decision::Join => "session-join",
+                d if d.permits() => "session-allow",
+                _ => "session-deny",
+            },
             &self.peer_name(),
             what,
         );
