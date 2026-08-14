@@ -12,6 +12,7 @@ use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use tauri::{AppHandle, Emitter, State};
 
 // Taurus als SSH-host: inkomende sessies met toestemming in de GUI (#121).
+mod discovery;
 mod sshhost;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -1548,6 +1549,8 @@ struct AppState {
     stt: SttState,
     // Inkomende SSH: listener, wachtende popups en draaiende sessies (#121).
     ssh: std::sync::Arc<sshhost::HostState>,
+    // Aankondigen en zoeken op het vertrouwde netwerk (#125).
+    discovery: std::sync::Arc<discovery::Discovery>,
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
@@ -4045,6 +4048,8 @@ fn ssh_network_trust(
         let port = *state.ssh.port.lock().unwrap();
         sshhost::set_enabled(app, state.ssh.clone(), true, port)?;
     }
+    // Een ander netwerk betekent een ander adres om op aan te kondigen -- of geen.
+    sync_announcement(&state);
     Ok(ssh_status_of(&state))
 }
 
@@ -4059,7 +4064,289 @@ fn ssh_host_set(
 ) -> Result<SshHostStatus, String> {
     let p = port.unwrap_or(sshhost::DEFAULT_PORT);
     sshhost::set_enabled(app, state.ssh.clone(), enabled, p)?;
+    sync_announcement(&state);
     Ok(ssh_status_of(&state))
+}
+
+// De aankondiging volgt de listener: wat dicht staat, valt niet aan te kondigen,
+// en wat open staat beschrijft precies het netwerk waarop het open staat (#125).
+// Lukt aankondigen niet, dan is dat geen reden om de listener te weigeren -- de
+// deur werkt ook als niemand hem kan vinden; het machinescherm meldt het verschil.
+fn sync_announcement(state: &State<AppState>) {
+    if state.ssh.is_running() {
+        let port = *state.ssh.port.lock().unwrap();
+        let user = std::env::var("USERNAME")
+            .or_else(|_| std::env::var("USER"))
+            .unwrap_or_default();
+        let _ = state
+            .discovery
+            .announce(port, &user, &sshhost::host_key_fingerprint());
+    } else {
+        state.discovery.unannounce();
+    }
+}
+
+// ---------- machines vinden op het vertrouwde netwerk (#125) ----------
+
+// Een gevonden machine, plus of hij al bekend is. Bekend = niet nog een keer in
+// de gevonden-lijst: hij staat dan al boven, met zijn routes en zijn knoppen.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FoundMachine {
+    #[serde(flatten)]
+    found: discovery::Found,
+    known: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryView {
+    machines: Vec<FoundMachine>,
+    // Waarom de lijst leeg is, als hij leeg is. Een lege lijst die "geblokkeerd"
+    // betekent leest als "er is niemand", en dat is de verkeerde conclusie.
+    problem: String,
+    // Kondigen we zelf aan? Zo niet, dan ziet niemand ONS -- ook goed om te weten
+    // op een scherm dat over vindbaarheid gaat.
+    announcing: bool,
+}
+
+// Zoeken loopt alleen terwijl het machinescherm open staat. Dat is de hele
+// invulling van "discovery is passief": geen melding, geen badge, geen popup.
+#[tauri::command]
+fn discovery_start(state: State<AppState>) -> Result<(), String> {
+    state.discovery.browse_start()
+}
+
+#[tauri::command]
+fn discovery_stop(state: State<AppState>) {
+    state.discovery.browse_stop();
+}
+
+#[tauri::command]
+fn discovered_machines(state: State<AppState>) -> DiscoveryView {
+    let hosts = get_hosts();
+    let machines = state
+        .discovery
+        .list()
+        .into_iter()
+        .map(|f| {
+            let known = hosts
+                .iter()
+                .any(|h| h.hostname.eq_ignore_ascii_case(&f.address));
+            FoundMachine { found: f, known }
+        })
+        .collect();
+    DiscoveryView {
+        machines,
+        problem: state.discovery.problem(),
+        announcing: sshhost::read_pref().enabled && sshhost::netgate::on_trusted_network(),
+    }
+}
+
+// Een id voor hosts.json uit een aangekondigde naam. Alleen [a-z0-9-], net als de
+// ids die het formulier maakt; een naam die daar niets van overhoudt (bijvoorbeeld
+// volledig niet-latijns) valt terug op het adres, want een leeg id is geen id.
+fn host_id_from(name: &str, address: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = true;
+    for c in name.chars() {
+        let c = c.to_ascii_lowercase();
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+        if out.len() >= 40 {
+            break;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        out = address.replace('.', "-");
+    }
+    out
+}
+
+// ---------- de twee firewall-uitzonderingen, in één handeling (#125) ----------
+//
+// GEMETEN: elke bestaande allow-regel voor mDNS op deze machine is PROGRAMMA-
+// gebonden (svchost voor Windows' eigen responder, msedgewebview2 voor Edge).
+// Taurus valt daar niet onder, dus `taurus.exe` op UDP 5353 heeft een eigen regel
+// nodig -- naast de poortregel voor TCP 8287 die #121 al vraagt.
+//
+// Ze samen aanbieden bij het aanzetten van "bereikbaar" is het verschil tussen één
+// bewuste handeling en twee verrassingen op twee momenten: de tweede zou pas komen
+// bovendrijven wanneer iemand zich afvraagt waarom niemand hem ziet staan.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FirewallStatus {
+    // Bestaat er een inbound-regel die deze poort toelaat?
+    tcp: bool,
+    udp: bool,
+    // Kon het überhaupt nagekeken worden? Op een niet-Windows-machine, of als de
+    // cmdlet ontbreekt, is "nee" iets anders dan "geen regel".
+    checked: bool,
+}
+
+const FW_TCP_RULE: &str = "Taurus";
+const FW_UDP_RULE: &str = "Taurus mDNS";
+
+#[tauri::command]
+fn firewall_status(port: Option<u16>) -> FirewallStatus {
+    let p = port.unwrap_or(sshhost::DEFAULT_PORT);
+    let exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // GEMETEN, en de reden dat dit niet alleen naar de poort kijkt: een eerste
+    // versie die alleen protocol+poort vergeleek antwoordde "UDP 5353 mag al",
+    // terwijl elke regel die daarop matcht PROGRAMMA-gebonden is aan svchost.exe
+    // (Windows' eigen mDNS-responder) of msedgewebview2.exe. Taurus valt daar niet
+    // onder en zou alsnog geblokkeerd zijn -- een groen vinkje dat niets waard is.
+    //
+    // Dus: een regel telt alleen mee als zijn programmafilter Any is of naar deze
+    // exe wijst. De drie collecties worden in één keer opgehaald en in het geheugen
+    // gekoppeld; per regel een cmdlet aanroepen duurt vele malen langer.
+    let script = format!(
+        "$ErrorActionPreference='SilentlyContinue'\n\
+         $rules = @{{}}\n\
+         foreach ($r in Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True) {{ $rules[$r.InstanceID] = $true }}\n\
+         $apps = @{{}}\n\
+         foreach ($a in Get-NetFirewallApplicationFilter) {{ $apps[$a.InstanceID] = $a.Program }}\n\
+         $exe = '{exe}'\n\
+         function Allows($proto,$port) {{\n\
+         \x20 foreach ($f in Get-NetFirewallPortFilter) {{\n\
+         \x20   if ($f.Protocol -ne $proto) {{ continue }}\n\
+         \x20   if ($f.LocalPort -ne $port -and $f.LocalPort -ne 'Any') {{ continue }}\n\
+         \x20   if (-not $rules.ContainsKey($f.InstanceID)) {{ continue }}\n\
+         \x20   $prog = $apps[$f.InstanceID]\n\
+         \x20   if (-not $prog -or $prog -eq 'Any' -or $prog -eq $exe) {{ return $true }}\n\
+         \x20 }}\n\
+         \x20 return $false\n\
+         }}\n\
+         'TCP=' + (Allows 'TCP' {p})\n\
+         'UDP=' + (Allows 'UDP' 5353)\n",
+        exe = exe.replace('\'', "''"),
+    );
+    let Ok(o) = ps_encoded(&script).output() else {
+        return FirewallStatus { tcp: false, udp: false, checked: false };
+    };
+    let out = String::from_utf8_lossy(&o.stdout);
+    let flag = |k: &str| {
+        out.lines()
+            .find_map(|l| l.trim().strip_prefix(k))
+            .map(|v| v.trim().eq_ignore_ascii_case("true"))
+    };
+    match (flag("TCP="), flag("UDP=")) {
+        (Some(t), Some(u)) => FirewallStatus { tcp: t, udp: u, checked: true },
+        _ => FirewallStatus { tcp: false, udp: false, checked: false },
+    }
+}
+
+// Beide regels in één UAC-prompt. Wat er al is wordt niet nog een keer gemaakt, en
+// een geweigerde prompt is een nette fout -- niet iets om stilletjes te negeren,
+// want dan blijft de gebruiker zich afvragen waarom er niemand te zien is.
+#[tauri::command]
+fn firewall_allow(port: Option<u16>) -> Result<(), String> {
+    let p = port.unwrap_or(sshhost::DEFAULT_PORT);
+    let st = firewall_status(Some(p));
+    if st.checked && st.tcp && st.udp {
+        return Ok(());
+    }
+    // Windows PowerShell 5.1, ASCII: dit draait op de machine van de gebruiker en
+    // niet per se op pwsh 7.
+    let mut inner = String::from("$ErrorActionPreference='Stop'\n");
+    if !st.tcp {
+        inner.push_str(&format!(
+            "if (-not (Get-NetFirewallRule -DisplayName '{n}' -EA 0)) {{ New-NetFirewallRule -DisplayName '{n}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort {p} | Out-Null }}\n",
+            n = FW_TCP_RULE
+        ));
+    }
+    if !st.udp {
+        inner.push_str(&format!(
+            "if (-not (Get-NetFirewallRule -DisplayName '{n}' -EA 0)) {{ New-NetFirewallRule -DisplayName '{n}' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 5353 | Out-Null }}\n",
+            n = FW_UDP_RULE
+        ));
+    }
+    let utf16: Vec<u8> = inner.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let launcher = format!(
+        "try {{ $p = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-EncodedCommand','{}'; 'CODE=' + $p.ExitCode }} catch {{ 'ERR=' + $_.Exception.Message }}",
+        b64(&utf16)
+    );
+    let o = ps_encoded(&launcher)
+        .output()
+        .map_err(|e| format!("PowerShell starten: {e}"))?;
+    let out = String::from_utf8_lossy(&o.stdout);
+    if let Some(err) = out.lines().find_map(|l| l.trim().strip_prefix("ERR=")) {
+        // De meest voorkomende: de UAC-prompt is weggeklikt.
+        return Err(format!("De firewall-regels zijn niet aangemaakt ({err})."));
+    }
+    let code = out
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("CODE="))
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .unwrap_or(-1);
+    if code != 0 {
+        return Err(format!("De firewall-regels zijn niet aangemaakt (afsluitcode {code})."));
+    }
+    Ok(())
+}
+
+// Een gevonden machine wordt een gewone machine. Dat haalt het OPZOEKEN weg, niet
+// de TOESTEMMING: elke sessie vraagt het de ontvangende kant nog steeds, precies
+// zoals nu. "Bekend" betekent "ik hoef je niet meer op te zoeken".
+//
+// Geen probe vooraf: die zou een tweede verbinding zijn en dus een tweede popup op
+// de andere machine. Alles wat nodig is om te kunnen starten (OS, werkmap) staat in
+// de aankondiging zelf, want de machine die zich aankondigt weet dat van zichzelf.
+#[tauri::command]
+fn adopt_found_machine(found: discovery::Found) -> Result<Host, String> {
+    if found.address.trim().is_empty() {
+        return Err("Deze aankondiging heeft geen adres.".to_string());
+    }
+    let mut hosts = get_hosts();
+    // Al bekend onder dit adres: die gebruiken we, in plaats van een tweede route
+    // naar dezelfde machine aan te maken.
+    if let Some(h) = hosts
+        .iter()
+        .find(|h| h.hostname.eq_ignore_ascii_case(&found.address) && h.port == found.port)
+    {
+        return Ok(h.clone());
+    }
+    let base = host_id_from(&found.name, &found.address);
+    let mut id = base.clone();
+    let mut n = 2;
+    while hosts.iter().any(|h| h.id == id) {
+        id = format!("{base}-{n}");
+        n += 1;
+    }
+    let host = Host {
+        id,
+        nickname: found.name.clone(),
+        hostname: found.address.clone(),
+        // Dezelfde machine kan later ook via sshd bekend worden; dan horen die
+        // twee routes bij elkaar. Het adres is daarvoor de sleutel (#124).
+        machine: found.address.clone(),
+        user: found.user.clone(),
+        port: found.port,
+        // Een Taurus-route heeft geen sleutelbestand nodig: de identiteit is de
+        // host-key van de andere kant plus de toestemmingspopup daar (#121).
+        key_path: String::new(),
+        default_project: found.home.clone(),
+        via: String::new(),
+        os: found.os.clone(),
+        // Nog niet gemeten. mux_auto laat de eerste hertest dit vanzelf invullen;
+        // een wegwerpsessie heeft geen persistentie nodig.
+        mux: String::new(),
+        agent_version: String::new(),
+        mux_auto: true,
+    };
+    hosts.push(host.clone());
+    save_hosts(hosts)?;
+    Ok(host)
 }
 
 // Antwoord op een popup: "deny" | "allow" | "join" | "block" | "always".
@@ -4169,6 +4456,7 @@ pub fn run() {
                 level: mic_level,
             },
             ssh: std::sync::Arc::new(sshhost::HostState::default()),
+            discovery: std::sync::Arc::new(discovery::Discovery::default()),
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -4237,6 +4525,12 @@ pub fn run() {
             get_hosts,
             machines,
             stop_remote_session,
+            discovery_start,
+            discovery_stop,
+            discovered_machines,
+            adopt_found_machine,
+            firewall_status,
+            firewall_allow,
             save_hosts,
             check_hosts,
             probe_host,

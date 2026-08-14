@@ -47,6 +47,11 @@ const I18N = {
     session_bare: "shell, geen agent",
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
     session_stop_sure: "zeker weten?",
+    hosts_known: "Bekende machines",
+    found_title: "Gevonden op dit netwerk",
+    found_not_announcing: "Je bent zelf niet vindbaar: zet \"bereikbaar\" aan in Instellingen en vertrouw dit netwerk.",
+    found_firewall: "Taurus heeft nog geen eigen firewall-uitzondering. Zonder die regels ziet niemand je, en kan niemand aankloppen.",
+    found_firewall_fix: "Firewall-regels aanmaken (vraagt om beheerdersrechten)",
     host_need_fields: "Naam, hostnaam en gebruikersnaam zijn verplicht.",
     host_none: "Nog geen machines. Voeg er een toe om een agent elders te draaien.",
     host_ok: "Verbinding gelukt", host_reachable: "bereikbaar", host_unreachable: "onbereikbaar",
@@ -244,6 +249,11 @@ const I18N = {
     session_bare: "shell, no agent",
     session_stop_hint: "End this session on the other machine",
     session_stop_sure: "are you sure?",
+    hosts_known: "Known machines",
+    found_title: "Found on this network",
+    found_not_announcing: "You are not findable yourself: switch on \"reachable\" in Settings and trust this network.",
+    found_firewall: "Taurus has no firewall exception of its own yet. Without those rules nobody sees you, and nobody can knock.",
+    found_firewall_fix: "Create firewall rules (asks for administrator rights)",
     host_need_fields: "Name, hostname and username are required.",
     host_none: "No machines yet. Add one to run an agent elsewhere.",
     host_ok: "Connection succeeded", host_reachable: "reachable", host_unreachable: "unreachable",
@@ -1044,6 +1054,14 @@ function openHostModal() {
   renderHostRows();
   els.hostModal.classList.remove("hidden");
   refreshHostReachability();
+  startDiscovery();
+}
+
+// Eén plek om te sluiten, want zoeken hoort te stoppen zodra het scherm dicht is:
+// discovery is passief en dat is precies wat dat betekent (#125).
+function closeHostModal() {
+  els.hostModal.classList.add("hidden");
+  stopDiscovery();
 }
 // De dots vullen zich ná de eerste render: check_hosts doet alle hosts naast
 // elkaar, dus de modal is meteen zichtbaar i.p.v. te wachten op de traagste.
@@ -1122,6 +1140,124 @@ function renderHostRows() {
     renderMachineSessions(box, m);
     els.hostRows.appendChild(box);
   }
+}
+
+/* ---- machines vinden op het vertrouwde netwerk (#125) ---- */
+// Zoeken loopt ALLEEN zolang dit scherm openstaat. Geen melding, geen badge, geen
+// popup: een aankondiging is omgevingsgeluid. Alleen een verzoek om toegang mag
+// onderbreken, anders verdrinkt de popup die wél een antwoord nodig heeft.
+let discoTimer = null;
+let found = [];
+let discoNote = "";
+let firewall = null;
+
+async function startDiscovery() {
+  if (discoTimer) return;
+  found = []; discoNote = "";
+  try {
+    await invoke("discovery_start");
+  } catch (e) {
+    discoNote = String(e);
+  }
+  await pollDiscovery();
+  discoTimer = setInterval(pollDiscovery, 1500);
+  // Eén keer per opening: kunnen we überhaupt gevonden worden? Dit duurt seconden
+  // (het loopt door alle firewallregels heen), dus het mag de lijst niet ophouden.
+  invoke("firewall_status", { port: null })
+    .then((s) => { firewall = s; renderFound(); })
+    .catch(() => {});
+}
+
+function stopDiscovery() {
+  if (discoTimer) { clearInterval(discoTimer); discoTimer = null; }
+  invoke("discovery_stop").catch(() => {});
+}
+
+async function pollDiscovery() {
+  let view;
+  try {
+    view = await invoke("discovered_machines");
+  } catch (e) {
+    discoNote = String(e);
+    renderFound();
+    return;
+  }
+  // Alleen wat we nog niet kennen: een bekende machine staat hierboven al, met
+  // zijn routes en zijn knoppen. Twee keer dezelfde naam is geen vondst.
+  found = view.machines.filter((m) => !m.known);
+  discoNote = view.problem || "";
+  if (!discoNote && !view.announcing) discoNote = t("found_not_announcing");
+  renderFound();
+}
+
+function renderFound() {
+  const wrap = document.querySelector("#found-wrap");
+  const rows = document.querySelector("#found-rows");
+  const note = document.querySelector("#found-note");
+  if (!wrap || !rows || !note) return;
+  wrap.classList.toggle("hidden", !found.length);
+  rows.innerHTML = "";
+  for (const f of found) {
+    const row = document.createElement("div");
+    row.className = "host-row";
+    row.innerHTML = `
+      <span class="host-dot up"></span>
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(f.name)}</div>
+        <div class="host-sub">${escapeHtml((f.user ? f.user + "@" : "") + f.address)} · ${escapeHtml(f.os || "?")}</div>
+      </div>
+      <button class="machine-connect">${escapeHtml(t("machine_connect"))}</button>`;
+    row.querySelector(".machine-connect").addEventListener("click", () => connectToFound(f));
+    rows.appendChild(row);
+  }
+  // Eén eerlijke regel wanneer er niets te zien is, in plaats van een lege lijst
+  // die als "er is niemand" leest. Een firewall die ons tegenhoudt is iets anders
+  // dan een netwerk waar niemand op zit.
+  const lines = [];
+  if (discoNote) lines.push(discoNote);
+  if (firewall && firewall.checked && !(firewall.tcp && firewall.udp)) {
+    lines.push(t("found_firewall"));
+  }
+  note.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("");
+  if (firewall && firewall.checked && !(firewall.tcp && firewall.udp)) {
+    const b = document.createElement("button");
+    b.className = "btn-ghost add";
+    b.textContent = t("found_firewall_fix");
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await invoke("firewall_allow", { port: null });
+        firewall = await invoke("firewall_status", { port: null });
+      } catch (e) {
+        els.hostStatusMsg.textContent = "✗ " + e;
+        els.hostStatusMsg.className = "status-msg err";
+      }
+      b.disabled = false;
+      renderFound();
+    });
+    note.appendChild(b);
+  }
+  note.classList.toggle("hidden", !lines.length);
+}
+
+// Verbinden met een gevonden machine: hij wordt eerst een gewone bekende machine
+// (dat haalt het OPZOEKEN weg, niet de toestemming -- die vraagt de andere kant
+// nog steeds), en daarna is het dezelfde Connect als hierboven.
+async function connectToFound(f) {
+  let host;
+  try {
+    host = await invoke("adopt_found_machine", { found: f });
+  } catch (e) {
+    els.hostStatusMsg.textContent = "✗ " + e;
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  hosts = await invoke("get_hosts");
+  await refreshMachines();
+  fillHostSelect();
+  renderHostRows();
+  const m = machineOf(host.id);
+  if (m) await connectToMachine(m);
 }
 
 /* ---- wat er op een machine draait, en het kunnen stoppen (#124) ---- */
@@ -1227,7 +1363,7 @@ async function attachFromMachine(m, s) {
       id, gen: session.gen, hostId: host.id, session: s.name,
       cols: session.term.cols, rows: session.term.rows,
     });
-    els.hostModal.classList.add("hidden");
+    closeHostModal();
     showView(id);
   } catch (e) {
     sessions.delete(id); session.term.dispose(); session.el.remove();
@@ -1265,7 +1401,7 @@ async function connectToMachine(m) {
       model: resolveModelArg("claude", ""), hostId: host.id,
       cols: session.term.cols, rows: session.term.rows,
     });
-    els.hostModal.classList.add("hidden");
+    closeHostModal();
     showView(id);
     persistSessionsToDisk();
   } catch (e) {
@@ -3506,7 +3642,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.hostModal.classList.add("hidden"); els.moveModal.classList.add("hidden"); } return; }
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
   // sluiten voordat de toets naar de terminal gaat (#90).
@@ -4011,7 +4147,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#host-add").addEventListener("click", openHostForm);
   document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
   document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
-  document.querySelector("#host-close").addEventListener("click", () => els.hostModal.classList.add("hidden"));
+  document.querySelector("#host-close").addEventListener("click", closeHostModal);
   els.attachBtn.addEventListener("click", openAttachModal);
   els.atHost.addEventListener("change", loadRemoteSessions);
   els.atRefresh.addEventListener("click", loadRemoteSessions);

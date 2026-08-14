@@ -882,6 +882,16 @@ select:-webkit-autofill {
 }
 /* Scherp gezet: de volgende klik breekt andermans sessie af. */
 .sess-stop.armed { color: var(--signal-bad); border-color: var(--signal-bad); }
+/* "Bekend" en "gevonden" zijn niet hetzelfde, en dat moet je kunnen zien (#125). */
+.group-head {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-dim); margin: 4px 2px 6px;
+}
+/* Waarom er niets staat. Rustig gezet: dit is uitleg, geen alarm. */
+.found-note {
+  font-size: 11.5px; color: var(--text-dim); margin-bottom: 12px;
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+}
 .host-form { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; display: flex; flex-direction: column; gap: 9px; }
 .host-form-row { display: flex; gap: 9px; }
 .host-form-row .grow { flex: 1; }

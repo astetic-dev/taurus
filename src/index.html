@@ -377,7 +377,15 @@
     <div id="host-modal" class="modal hidden">
       <div class="modal-box wide">
         <h2 data-i18n="hosts_title">Machines</h2>
+        <div class="group-head" data-i18n="hosts_known">Bekende machines</div>
         <div id="host-rows" class="host-rows"></div>
+        <!-- Gevonden op het vertrouwde netwerk (#125). Zichtbaar gescheiden van de
+             bekende lijst: "ik ken je" en "ik zie je" zijn niet hetzelfde. -->
+        <div id="found-wrap" class="hidden">
+          <div class="group-head" data-i18n="found_title">Gevonden op dit netwerk</div>
+          <div id="found-rows" class="host-rows"></div>
+        </div>
+        <div id="found-note" class="found-note hidden"></div>
         <button id="host-add" class="btn-ghost add" data-i18n="host_add">＋ Machine toevoegen…</button>
 
         <div id="host-form" class="host-form hidden">
