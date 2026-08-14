@@ -2546,6 +2546,70 @@ foreach ($l in ($lines | Select-Object -Skip 1)) {
     })
 }
 
+// Het commando dat een sessie op de andere machine beëindigt (#124). Apart van de
+// tauri-command, want dit is de kant die te toetsen valt zonder machine ernaast.
+//
+// `server stop` en niet iets zachters: herdr's eigen documentatie noemt dat de
+// manier om een sessie mét zijn panes te stoppen. Dat is hier ook precies de
+// bedoeling -- de knop staat er voor een sessie waarvan de agent al weg is.
+// `--session <naam>` staat vóór het subcommando, dezelfde vorm die Taurus al
+// gebruikt om een server te STARTEN; zonder die vlag zou dit de default-sessie
+// van die machine raken, en dat is iemand anders zijn werk.
+fn stop_session_command(host: &Host, session: &str) -> Result<String, String> {
+    let os = effective_os(host);
+    let via_wsl = host.via == "wsl";
+    let posix = |script: String| {
+        if via_wsl {
+            format!("wsl -e sh -c \"echo {} | base64 -d | sh\"", b64(script.as_bytes()))
+        } else {
+            format!("echo {} | base64 -d | sh", b64(script.as_bytes()))
+        }
+    };
+    match host.mux.as_str() {
+        "herdr" if os == "windows" && !via_wsl => {
+            let ps = format!(
+                "$h = (Get-Command herdr -EA 0).Source\n\
+                 if (-not $h) {{ $h = Join-Path $env:LOCALAPPDATA '{fb}' }}\n\
+                 if (-not (Test-Path $h)) {{ 'ERR=herdr staat niet op deze machine'; exit 0 }}\n\
+                 & $h --session {s} server stop 2>&1 | Out-Null",
+                fb = HERDR_WIN_FALLBACK,
+                s = ps_quote(session),
+            );
+            Ok(format!(
+                "powershell -NoProfile -EncodedCommand {}",
+                b64(&utf16le(&ps))
+            ))
+        }
+        "herdr" => Ok(posix(format!(
+            "H=herdr; command -v herdr >/dev/null 2>&1 || H=\"{fb}\"; \
+             \"$H\" --session {s} server stop >/dev/null 2>&1 || echo 'ERR=herdr kon de sessie niet stoppen'",
+            fb = HERDR_POSIX_FALLBACK,
+            s = shell_quote_posix(session),
+        ))),
+        "tmux" | "psmux" => Ok(posix(format!(
+            "{mux} kill-session -t {s} 2>&1 || echo 'ERR=tmux kon de sessie niet stoppen'",
+            mux = host.mux,
+            s = shell_quote_posix(session),
+        ))),
+        _ => Err("Deze machine bewaart geen sessies, dus er valt niets te stoppen.".to_string()),
+    }
+}
+
+// Een sessie op een andere machine beëindigen. Zonder dit is een verweesde sessie --
+// eentje waarvan de agent weg is -- alleen op te ruimen door naar die machine toe te
+// lopen, terwijl Taurus hem wel toont en er een oude `--resume` in laat mislukken.
+#[tauri::command]
+fn stop_remote_session(host_id: String, session: String) -> Result<(), String> {
+    let host = lookup_host(&host_id)?
+        .ok_or_else(|| "Een sessie stoppen kan alleen op een andere machine.".to_string())?;
+    let cmd = stop_session_command(&host, &session)?;
+    let (out, _) = ssh_run(&host, &cmd)?;
+    if let Some(err) = out.lines().find_map(|l| l.trim().strip_prefix("ERR=")) {
+        return Err(err.to_string());
+    }
+    Ok(())
+}
+
 // Open een tab op een sessie die al draait. Geen uuid, geen agent-vlaggen: Taurus
 // heeft dit commando niet gebouwd en kan het dus ook niet hervatten.
 #[tauri::command]
@@ -4172,6 +4236,7 @@ pub fn run() {
             save_projects,
             get_hosts,
             machines,
+            stop_remote_session,
             save_hosts,
             check_hosts,
             probe_host,
@@ -4693,6 +4758,53 @@ mod tests {
         assert_eq!(group_machines(vec![mk("a", "10.0.0.1", "ursu"), mk("b", "10.0.0.2", "ursu")]).len(), 1);
         // Hoofdlettergebruik mag geen tweede machine opleveren.
         assert_eq!(group_machines(vec![mk("a", "URSU", ""), mk("b", "ursu", "")]).len(), 1);
+    }
+
+    // De sessienaam gaat een shell in, dus hij hoort gequote te zijn -- en de
+    // vlag hoort erbij, want zonder `--session` stopt dit de DEFAULT-sessie van
+    // die machine, en dat is het werk van iemand anders.
+    #[test]
+    fn stopping_a_session_names_the_session_and_quotes_it() {
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.os = "linux".into();
+        let cmd = stop_session_command(&h, "werk 2").unwrap();
+        // De payload gaat als base64 door de shell; decodeer hem om te kijken.
+        let b64part = cmd.split_whitespace().nth(1).unwrap();
+        let raw = String::from_utf8(b64_decode_for_test(b64part)).unwrap();
+        assert!(raw.contains("--session 'werk 2' server stop"), "{raw}");
+    }
+
+    // Op een Windows-host gaat het door PowerShell, met dezelfde herdr-terugval
+    // als de rest: een pad in LOCALAPPDATA als `herdr` niet in PATH staat.
+    #[test]
+    fn stopping_a_session_on_windows_goes_through_powershell() {
+        let mut h = test_host();
+        h.mux = "herdr".into();
+        h.os = "windows".into();
+        let cmd = stop_session_command(&h, "werk").unwrap();
+        assert!(cmd.starts_with("powershell -NoProfile -EncodedCommand "), "{cmd}");
+    }
+
+    // tmux heeft zijn eigen werkwoord; psmux spreekt dezelfde taal.
+    #[test]
+    fn stopping_a_tmux_session_uses_kill_session() {
+        let mut h = test_host();
+        h.mux = "tmux".into();
+        h.os = "linux".into();
+        let cmd = stop_session_command(&h, "werk").unwrap();
+        let b64part = cmd.split_whitespace().nth(1).unwrap();
+        let raw = String::from_utf8(b64_decode_for_test(b64part)).unwrap();
+        assert!(raw.contains("tmux kill-session -t 'werk'"), "{raw}");
+    }
+
+    // Zonder persistentie is er geen sessie die blijft staan, dus ook niets om te
+    // stoppen. Een commando verzinnen zou hier een fout uit een shell opleveren.
+    #[test]
+    fn stopping_a_session_needs_a_mux() {
+        let mut h = test_host();
+        h.mux = "none".into();
+        assert!(stop_session_command(&h, "werk").is_err());
     }
 
     // Zonder herdr is er geen chrome om te verbergen, en dan hoort Taurus van

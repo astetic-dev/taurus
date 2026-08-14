@@ -836,6 +836,52 @@ select:-webkit-autofill {
   border-radius: 5px; cursor: pointer; padding: 3px 8px; font-size: 12px;
 }
 .host-test:hover, .host-del:hover { color: var(--text); border-color: var(--accent); }
+
+/* Eén blok per machine (#124). De routes staan eronder ingesprongen, want ze zijn
+   een eigenschap van die machine -- geen tweede lijst met eigen betekenis. */
+.machine {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 9px 11px; display: flex; flex-direction: column; gap: 6px;
+}
+.machine-head { display: flex; align-items: center; gap: 10px; }
+.machine-connect {
+  background: var(--accent); border: 1px solid var(--accent); color: #fff;
+  border-radius: 5px; cursor: pointer; padding: 4px 12px; font-size: 12px; flex: 0 0 auto;
+}
+.machine-connect:hover { filter: brightness(1.1); }
+/* Ingesprongen tot onder de naam, zodat de routes visueel bij de machine horen
+   en niet als losse regels in de lijst gelezen worden. */
+.machine-routes { display: flex; flex-direction: column; gap: 4px; padding-left: 19px; }
+.route-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+.route-name { min-width: 92px; }
+.route-mux { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* De voorkeursroute is geen waarschuwing en geen status: een rustig label, in de
+   accentkleur van het thema en niet in een signaalkleur. */
+.route-pref {
+  border: 1px solid var(--accent); color: var(--accent);
+  border-radius: 4px; padding: 0 5px; font-size: 10px; flex: 0 0 auto;
+}
+.route-row .host-test, .route-row .host-del { padding: 1px 6px; font-size: 11px; }
+.route-row.err { color: var(--signal-bad); }
+.machine-sess-toggle {
+  background: none; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 5px; cursor: pointer; padding: 4px 9px; font-size: 11.5px; flex: 0 0 auto;
+}
+.machine-sess-toggle:hover { color: var(--text); border-color: var(--accent); }
+/* Wat er draait staat onder de routes, met een scheiding: het is een andere soort
+   informatie -- routes zijn hoe je erbij komt, sessies zijn wat er al is. */
+.machine-sess {
+  display: flex; flex-direction: column; gap: 4px;
+  padding-left: 19px; padding-top: 6px; border-top: 1px dashed var(--border);
+}
+/* Een kale shell op andermans machine is geen fout, maar wel iets om te weten
+   voordat je klikt: waarschuwing, geen alarm. */
+.sess-bare {
+  border: 1px solid var(--signal-warn); color: var(--signal-warn);
+  border-radius: 4px; padding: 0 5px; font-size: 10px; flex: 0 0 auto;
+}
+/* Scherp gezet: de volgende klik breekt andermans sessie af. */
+.sess-stop.armed { color: var(--signal-bad); border-color: var(--signal-bad); }
 .host-form { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; display: flex; flex-direction: column; gap: 9px; }
 .host-form-row { display: flex; gap: 9px; }
 .host-form-row .grow { flex: 1; }

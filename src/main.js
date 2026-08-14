@@ -38,6 +38,15 @@ const I18N = {
     host_key: "SSH-key (leeg = ssh kiest zelf)", host_default_project: "Standaard werkmap op de host",
     host_add_test: "Toevoegen & testen", host_testing: "Verbinden…", host_retest: "Opnieuw testen",
     host_del: "Verwijderen", close: "Sluiten",
+    machine_connect: "Verbinden",
+    machine_connect_hint: "Start meteen een sessie in de standaardmap van deze machine. Geen kaart in de zijbalk; de andere kant krijgt de toestemmingsvraag.",
+    machine_no_default: "{machine} heeft geen standaard werkmap. Vul die in bij de machine — een sessie elders moet weten waar hij begint.",
+    route_preferred: "voorkeur",
+    machine_sessions: "⇱ sessies",
+    machine_sessions_hint: "Toon wat er op deze machine draait — aanhaken of beëindigen.",
+    session_bare: "shell, geen agent",
+    session_stop_hint: "Deze sessie beëindigen op de andere machine",
+    session_stop_sure: "zeker weten?",
     host_need_fields: "Naam, hostnaam en gebruikersnaam zijn verplicht.",
     host_none: "Nog geen machines. Voeg er een toe om een agent elders te draaien.",
     host_ok: "Verbinding gelukt", host_reachable: "bereikbaar", host_unreachable: "onbereikbaar",
@@ -226,6 +235,15 @@ const I18N = {
     host_key: "SSH key (empty = let ssh decide)", host_default_project: "Default working directory on the host",
     host_add_test: "Add & test", host_testing: "Connecting…", host_retest: "Test again",
     host_del: "Remove", close: "Close",
+    machine_connect: "Connect",
+    machine_connect_hint: "Starts a session in this machine's default folder right away. No card in the sidebar; the other side gets the approval prompt.",
+    machine_no_default: "{machine} has no default working directory. Set one on the machine — a session elsewhere has to know where it starts.",
+    route_preferred: "preferred",
+    machine_sessions: "⇱ sessions",
+    machine_sessions_hint: "Show what is running on this machine — attach to it or end it.",
+    session_bare: "shell, no agent",
+    session_stop_hint: "End this session on the other machine",
+    session_stop_sure: "are you sure?",
     host_need_fields: "Name, hostname and username are required.",
     host_none: "No machines yet. Add one to run an agent elsewhere.",
     host_ok: "Connection succeeded", host_reachable: "reachable", host_unreachable: "unreachable",
@@ -767,7 +785,8 @@ function locText(p) {
 // een machine net zo goed als in een map.
 function agentLocTag(p) {
   const h = p.host_id ? hostById(p.host_id) : null;
-  if (h) return { text: `(${h.nickname || h.hostname})`, cls: "remote", title: `${h.user}@${h.hostname}` };
+  // De MACHINE op de kaart, niet de route: hoe Taurus daar binnenkomt is plumbing.
+  if (h) return { text: `(${machineLabel(p.host_id)})`, cls: "remote", title: `${h.user}@${h.hostname}` };
   return { text: driveTag(p.path), cls: locClass(p.path), title: locText(p.path) };
 }
 function escapeHtml(s) {
@@ -964,11 +983,51 @@ async function loadProjects() { projects = await invoke("get_projects"); renderP
 // De machines waarop een tab een agent kan draaien. Leeg = alleen lokaal, en dan
 // gedraagt de app zich exact zoals voorheen.
 let hosts = [];
+// Eén regel per FYSIEKE machine, met de routes eronder (#124). De backend groepeert,
+// want daar hoort ook de regel welke route voorkeur heeft.
+let machines = [];
 async function loadHosts() {
   try { hosts = await invoke("get_hosts"); } catch (_) { hosts = []; }
+  await refreshMachines();
   fillHostSelect();
 }
+async function refreshMachines() {
+  try { machines = await invoke("machines"); } catch (_) { machines = []; }
+}
 function hostById(id) { return hosts.find((h) => h.id === id) || null; }
+
+// De poort waarop Taurus zelf luistert (#121). Een route daarheen vraagt geen
+// sleuteluitwisseling en geen sshd aan de andere kant.
+const TAURUS_PORT = 8287;
+
+// Bij welke machine hoort deze route? Een agentkaart bewaart een route-id, maar
+// overal waar een naam wordt GETOOND hoort de machinenaam te staan: welke route
+// het is, is plumbing, en "(Taurus-host)" lekte zo door naar tabs en kaarten.
+function machineOf(hostId) {
+  return machines.find((m) => m.routes.some((r) => r.id === hostId)) || null;
+}
+function machineLabel(hostId) {
+  const m = machineOf(hostId);
+  if (m) return m.label;
+  const h = hostById(hostId);
+  return h ? (h.nickname || h.hostname) : "";
+}
+// Hoe je de machine bereikt, kort genoeg voor op één regel. De poort maakt het
+// onderscheid; de bijnaam hoeft het niet meer te dragen.
+function routeLabel(h) {
+  const soort = h.port === TAURUS_PORT ? "Taurus" : h.via === "wsl" ? "WSL" : "sshd";
+  return `${soort} :${h.port || 22}`;
+}
+// Keuzelijsten tonen machines, geen routes: drie regels "ursu" is geen keuze maar
+// een raadsel. De waarde blijft een route-id, want dat is wat een kaart bewaart --
+// de voorkeursroute, tenzij de kaart al een andere route van diezelfde machine
+// gebruikt. Die dan omschrijven levert niets op en zou een werkende kaart raken.
+function machineOptions(currentHostId) {
+  return machines.map((m) => {
+    const eigen = m.routes.find((r) => r.id === currentHostId);
+    return { id: eigen ? eigen.id : m.preferred, label: m.label };
+  });
+}
 // De hostlijst is veranderd: de agentkaarten tonen hun machine, en een open
 // editor moet de nieuwe keuzes tonen.
 function fillHostSelect() {
@@ -1002,36 +1061,219 @@ async function refreshHostReachability() {
   }
   renderHostRows();
 }
+// Het bolletje van de machine vat zijn routes samen: bereikbaar zodra ÉÉN route
+// het doet, want dan is de machine bereikbaar -- dat is wat de regel beweert.
+function machineDotClass(m) {
+  const sts = m.routes.map((r) => hostStatus[r.id]);
+  if (sts.some((s) => s && !s.testing && s.reachable)) return "up";
+  if (sts.length && sts.every((s) => s && !s.testing)) return "down";
+  return "pending";
+}
+
 function renderHostRows() {
-  if (!hosts.length) {
+  if (!machines.length) {
     els.hostRows.innerHTML = `<div class="host-empty">${escapeHtml(t("host_none"))}</div>`;
     return;
   }
   els.hostRows.innerHTML = "";
-  hosts.forEach((h, i) => {
-    const st = hostStatus[h.id];
-    const cls = !st ? "pending" : st.testing ? "pending" : st.reachable ? "up" : "down";
-    const label = !st ? "…" : st.testing ? t("host_testing") : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
-    const row = document.createElement("div");
-    row.className = "host-row";
-    row.innerHTML = `
-      <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
-      <div class="host-main">
-        <div class="host-name">${escapeHtml(h.nickname || h.hostname)}</div>
-        <div class="host-sub">${escapeHtml((h.user ? h.user + "@" : "") + h.hostname + (h.port && h.port !== 22 ? ":" + h.port : ""))}
-          · ${escapeHtml(h.os || "?")} · ${escapeHtml(h.mux || "none")}</div>
+  for (const m of machines) {
+    const pref = hostById(m.preferred) || m.routes[0];
+    const box = document.createElement("div");
+    box.className = "machine";
+    box.innerHTML = `
+      <div class="machine-head">
+        <span class="host-dot ${machineDotClass(m)}"></span>
+        <div class="host-main">
+          <div class="host-name">${escapeHtml(m.label)}</div>
+          <div class="host-sub">${escapeHtml((pref.user ? pref.user + "@" : "") + pref.hostname)} · ${escapeHtml(pref.os || "?")}</div>
+        </div>
+        <button class="machine-sess-toggle" title="${escapeHtml(t("machine_sessions_hint"))}">${escapeHtml(t("machine_sessions"))}</button>
+        <button class="machine-connect" title="${escapeHtml(t("machine_connect_hint"))}">${escapeHtml(t("machine_connect"))}</button>
       </div>
-      <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
-      <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
-    row.querySelector(".host-test").addEventListener("click", () => testExistingHost(i));
-    row.querySelector(".host-del").addEventListener("click", async () => {
-      hosts.splice(i, 1);
-      await invoke("save_hosts", { hosts });
-      fillHostSelect();
-      renderHostRows();
+      <div class="machine-routes"></div>`;
+    const routes = box.querySelector(".machine-routes");
+    for (const r of m.routes) {
+      const st = hostStatus[r.id];
+      const cls = !st || st.testing ? "pending" : st.reachable ? "up" : "down";
+      const label = !st ? "…" : st.testing ? t("host_testing") : st.reachable ? `${t("host_reachable")} (${st.ms} ms)` : t("host_unreachable");
+      const row = document.createElement("div");
+      row.className = "route-row";
+      // De voorkeur alleen benoemen als er iets te kiezen viel: bij één route is
+      // "voorkeur" een woord zonder alternatief.
+      row.innerHTML = `
+        <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
+        <span class="route-name">${escapeHtml(routeLabel(r))}</span>
+        ${r.id === m.preferred && m.routes.length > 1 ? `<span class="route-pref">${escapeHtml(t("route_preferred"))}</span>` : ""}
+        <span class="route-mux">${escapeHtml(r.mux || "none")}</span>
+        <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
+        <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
+      row.querySelector(".host-test").addEventListener("click", () => testExistingHost(hosts.findIndex((h) => h.id === r.id)));
+      row.querySelector(".host-del").addEventListener("click", async () => {
+        hosts = hosts.filter((h) => h.id !== r.id);
+        await invoke("save_hosts", { hosts });
+        await refreshMachines();
+        fillHostSelect();
+        renderHostRows();
+      });
+      routes.appendChild(row);
+    }
+    box.querySelector(".machine-connect").addEventListener("click", () => connectToMachine(m));
+    box.querySelector(".machine-sess-toggle").addEventListener("click", () => toggleMachineSessions(m));
+    renderMachineSessions(box, m);
+    els.hostRows.appendChild(box);
+  }
+}
+
+/* ---- wat er op een machine draait, en het kunnen stoppen (#124) ---- */
+// Pas op verzoek ophalen: dit is een ssh-ronde per machine en die kost seconden.
+// Bij het openen alle machines bevragen zou het traagste antwoord de hele lijst
+// laten wachten, terwijl je meestal maar één machine nodig hebt.
+const machineSessions = {}; // machine-key -> { loading, list, error }
+
+async function toggleMachineSessions(m) {
+  if (machineSessions[m.key] && !machineSessions[m.key].loading) {
+    delete machineSessions[m.key];
+    renderHostRows();
+    return;
+  }
+  machineSessions[m.key] = { loading: true, list: [], error: "" };
+  renderHostRows();
+  const host = hostById(m.preferred) || m.routes[0];
+  try {
+    const list = await invoke("remote_sessions", { hostId: host.id });
+    machineSessions[m.key] = { loading: false, list, error: "" };
+  } catch (e) {
+    machineSessions[m.key] = { loading: false, list: [], error: String(e) };
+  }
+  renderHostRows();
+}
+
+// Herdr's eigen `default` heeft geen agent: daar land je in een kale shell op
+// andermans machine. Niet verbergen -- hij bestaat en het is verwarrender als hij
+// er niet staat -- maar wel zeggen wat het is, vóórdat je erop klikt.
+function isBareShell(s) {
+  return s.name === "default" && !s.agent;
+}
+
+function renderMachineSessions(box, m) {
+  const st = machineSessions[m.key];
+  if (!st) return;
+  const wrap = document.createElement("div");
+  wrap.className = "machine-sess";
+  if (st.loading || st.error || !st.list.length) {
+    const msg = st.loading ? t("attach_loading") : st.error ? "✗ " + st.error : t("attach_empty");
+    wrap.innerHTML = `<div class="route-row${st.error ? " err" : ""}">${escapeHtml(msg)}</div>`;
+    box.appendChild(wrap);
+    return;
+  }
+  for (const s of st.list) {
+    const row = document.createElement("div");
+    row.className = "route-row";
+    const meta = [s.agent || t("attach_noagent"), s.cwd].filter(Boolean).join(" · ");
+    row.innerHTML = `
+      <span class="host-dot ${s.status === "running" || s.status === "attached" ? "up" : "pending"}"></span>
+      <span class="route-name">${escapeHtml(s.name)}</span>
+      ${isBareShell(s) ? `<span class="sess-bare">${escapeHtml(t("session_bare"))}</span>` : ""}
+      <span class="route-mux">${escapeHtml(meta)}</span>
+      <button class="host-test sess-open">${escapeHtml(t("machine_connect"))}</button>
+      <button class="host-del sess-stop" title="${escapeHtml(t("session_stop_hint"))}">✕</button>`;
+    row.querySelector(".sess-open").addEventListener("click", () => attachFromMachine(m, s));
+    const stop = row.querySelector(".sess-stop");
+    // Twee klikken: een sessie stoppen is andermans werk afbreken, en dat mag geen
+    // uitschieter zijn. De knop zegt zelf wat de tweede klik doet.
+    stop.addEventListener("click", async () => {
+      if (stop.dataset.armed !== "1") {
+        stop.dataset.armed = "1";
+        stop.textContent = t("session_stop_sure");
+        stop.classList.add("armed");
+        setTimeout(() => {
+          if (!stop.isConnected) return;
+          stop.dataset.armed = "";
+          stop.textContent = "✕";
+          stop.classList.remove("armed");
+        }, 4000);
+        return;
+      }
+      const host = hostById(m.preferred) || m.routes[0];
+      stop.disabled = true;
+      try {
+        await invoke("stop_remote_session", { hostId: host.id, session: s.name });
+        machineSessions[m.key].list = machineSessions[m.key].list.filter((x) => x.name !== s.name);
+        renderHostRows();
+      } catch (e) {
+        stop.disabled = false;
+        els.hostStatusMsg.textContent = "✗ " + e;
+        els.hostStatusMsg.className = "status-msg err";
+      }
     });
-    els.hostRows.appendChild(row);
+    wrap.appendChild(row);
+  }
+  box.appendChild(wrap);
+}
+
+// Aanhaken vanaf het machinescherm: dezelfde tab als het aparte aanhaak-dialoog
+// oplevert, maar zonder eerst een machine te moeten kiezen in een tweede lijst.
+async function attachFromMachine(m, s) {
+  const host = hostById(m.preferred) || m.routes[0];
+  const leaf = (s.cwd || "").split(/[\\/]/).filter(Boolean).pop();
+  const id = "s" + (++seq);
+  const session = spawnTerminal({
+    id, uuid: "", path: s.cwd || "", title: leaf || s.name, accent: "#7c9cff",
+    mode: "", command: "", agent: "", model: "", hostId: host.id, projectId: "",
   });
+  session.attached = true;
+  try {
+    await invoke("attach_remote_session", {
+      id, gen: session.gen, hostId: host.id, session: s.name,
+      cols: session.term.cols, rows: session.term.rows,
+    });
+    els.hostModal.classList.add("hidden");
+    showView(id);
+  } catch (e) {
+    sessions.delete(id); session.term.dispose(); session.el.remove();
+    renderTabs();
+    els.hostStatusMsg.textContent = "✗ " + e;
+    els.hostStatusMsg.className = "status-msg err";
+  }
+}
+
+// Verbinden met een machine: meteen een sessie in de standaardmap daar, zonder een
+// kaart achter te laten. Dit is het "mijn limiet is op, neem jij het tien minuten
+// over"-geval waarvoor #121 gebouwd is. Een kaart maken is de vorm voor een werkplek
+// waar je terugkomt, en dat is hier precies wat je niet wilt.
+async function connectToMachine(m) {
+  const host = hostById(m.preferred) || m.routes[0];
+  if (!host) return;
+  const path = host.default_project || "";
+  // Geen map is hier geen detail: een sessie op een andere machine moet weten waar
+  // hij begint. Eerlijk zeggen wat ontbreekt is beter dan ergens landen.
+  if (!path) {
+    els.hostStatusMsg.textContent = t("machine_no_default").replace("{machine}", m.label);
+    els.hostStatusMsg.className = "status-msg err";
+    return;
+  }
+  const id = "s" + (++seq);
+  const uuid = crypto.randomUUID();
+  const session = spawnTerminal({
+    id, uuid, path, title: m.label, accent: "#7c9cff",
+    mode: "default", command: "", agent: "claude", model: "", hostId: host.id, projectId: "",
+  });
+  try {
+    await invoke("create_session", {
+      id, gen: session.gen, path, title: m.label, task: "", sessionId: uuid,
+      mode: "default", fullPaths: settings.fullPaths, command: "", agent: "claude",
+      model: resolveModelArg("claude", ""), hostId: host.id,
+      cols: session.term.cols, rows: session.term.rows,
+    });
+    els.hostModal.classList.add("hidden");
+    showView(id);
+    persistSessionsToDisk();
+  } catch (e) {
+    sessions.delete(id); session.term.dispose(); session.el.remove();
+    renderTabs();
+    els.hostStatusMsg.textContent = "✗ " + e;
+    els.hostStatusMsg.className = "status-msg err";
+  }
 }
 
 function openHostForm() {
@@ -1100,6 +1342,7 @@ async function addAndTestHost() {
            : (wantMux || p.mux || "none");
   hosts.push(host);
   await invoke("save_hosts", { hosts });
+  await refreshMachines();
   const tuned = await tuneHerdrChrome(host);
   fillHostSelect();
   renderHostRows();
@@ -1145,6 +1388,7 @@ async function testExistingHost(i) {
     const auto = h.mux_auto !== false;
     hosts[i] = { ...h, os: p.os, mux: auto ? (p.mux || "none") : h.mux };
     await invoke("save_hosts", { hosts });
+    await refreshMachines();
     await tuneHerdrChrome(hosts[i]);
     fillHostSelect();
     els.hostStatusMsg.textContent = `${h.nickname}: ✓ ${t("host_ok")}`;
@@ -1191,8 +1435,8 @@ function openAttachModal() {
   atSessions = []; atPicked = "";
   els.atRows.innerHTML = "";
   els.atStatus.textContent = ""; els.atStatus.className = "status-msg";
-  els.atHost.innerHTML = hosts
-    .map((h) => `<option value="${escapeHtml(h.id)}">${escapeHtml(h.nickname || h.hostname)}</option>`)
+  els.atHost.innerHTML = machineOptions("")
+    .map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`)
     .join("");
   els.attachModal.classList.remove("hidden");
   if (!hosts.length) {
@@ -1238,10 +1482,12 @@ function renderAttachRows() {
     const agent = s.agent ? s.agent + (s.agentStatus ? " · " + s.agentStatus : "") : t("attach_noagent");
     const row = document.createElement("div");
     row.className = "host-row" + (s.name === atPicked ? " picked" : "");
+    // Herdr's eigen `default` is de uitzondering: die heeft geen agent en zet je
+    // in een kale shell op andermans machine. Zeggen wat het is, vóór de klik.
     row.innerHTML = `
       <span class="host-dot ${s.status === "running" || s.status === "attached" ? "up" : "pending"}"></span>
       <div class="host-main">
-        <div class="host-name">${escapeHtml(s.name)}</div>
+        <div class="host-name">${escapeHtml(s.name)}${isBareShell(s) ? ` <span class="sess-bare">${escapeHtml(t("session_bare"))}</span>` : ""}</div>
         <div class="host-sub">${escapeHtml(agent)}${s.cwd ? " · " + escapeHtml(s.cwd) : ""}</div>
       </div>`;
     row.addEventListener("click", () => { atPicked = s.name; renderAttachRows(); });
@@ -1299,8 +1545,10 @@ async function openMoveModal(project) {
   movePlan = { project, skip: new Set(), survey: null, target: null };
   // Doelen: alles behalve waar hij nu al staat. "Deze computer" hoort erbij als
   // de agent elders draait -- terughalen is net zo goed een richting.
-  const opts = [{ id: "", label: t("host_local") }, ...hosts.map((h) => ({ id: h.id, label: h.nickname || h.hostname }))]
-    .filter((o) => o.id !== (project.host_id || ""));
+  // Doelen zijn machines, niet routes: "ursu" drie keer in de lijst is geen keuze.
+  const hier = machineOf(project.host_id || "");
+  const opts = [{ id: "", label: t("host_local") }, ...machineOptions(project.host_id || "")]
+    .filter((o) => o.id !== (project.host_id || "") && !(hier && machineOf(o.id) === hier));
   if (!opts.length) { toast(t("move_no_target"), "err"); return; }
   els.mvTarget.innerHTML = opts.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`).join("");
   els.mvPath.value = suggestTargetPath(project, opts[0].id);
@@ -1609,7 +1857,7 @@ function groupState(leden) {
 
 function hostBadge(s) {
   const host = s.hostId ? hostById(s.hostId) : null;
-  return host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "";
+  return host ? `<span class="tab-host">${escapeHtml(machineLabel(s.hostId))}</span>` : "";
 }
 
 function renderTabs() {
@@ -1634,7 +1882,7 @@ function renderTabs() {
       // een draait -- zonder dat een lokale tab er anders uit gaat zien.
       const host = s.hostId ? hostById(s.hostId) : null;
       tab.innerHTML = `<span class="tab-dot"></span>${hostBadge(s)}<span class="tab-title${live ? " live" : ""}">${escapeHtml(shown)}</span><span class="tab-close">✕</span>`;
-      tab.title = host ? `${s.title} — ${host.nickname || host.hostname}` : s.title;
+      tab.title = host ? `${s.title} — ${machineLabel(s.hostId)}` : s.title;
       tab.addEventListener("click", () => { if (suppressNextClick) return; showView(s.id); });
       tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(e.clientX, e.clientY, s.id); });
       tab.querySelector(".tab-close").addEventListener("click", (e) => { e.stopPropagation(); closeSession(s.id); });
@@ -1857,7 +2105,7 @@ function showRecap(anchor, s) {
   recapTip.innerHTML =
     `<div class="recap-head">` +
       `<span class="recap-name">${escapeHtml(s.title)}</span>` +
-      (host ? `<span class="tab-host">${escapeHtml(host.nickname || host.hostname)}</span>` : "") +
+      (host ? `<span class="tab-host">${escapeHtml(machineLabel(s.hostId))}</span>` : "") +
       (staat ? `<span class="recap-state">${escapeHtml(staat)}</span>` : "") +
     `</div>` +
     `<div class="recap-meta">${escapeHtml(meta.join(" · "))}</div>` +
@@ -3121,7 +3369,7 @@ function renderEditor() {
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_host"))}</span>
           <select class="e-host">
             <option value="">${escapeHtml(t("host_local"))}</option>
-            ${hosts.map((h) => `<option value="${escapeHtml(h.id)}"${r.host_id === h.id ? " selected" : ""}>${escapeHtml(h.nickname || h.hostname)}</option>`).join("")}
+            ${machineOptions(r.host_id || "").map((o) => `<option value="${escapeHtml(o.id)}"${r.host_id === o.id ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("")}
           </select></div>
         </div>
         <div class="e-field"><span class="e-cap">${escapeHtml(isRemoteRow ? t("cap_workdir_remote") : t("cap_workdir"))}</span>
