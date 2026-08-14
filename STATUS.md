@@ -6,17 +6,17 @@ Op **`feat/124-machine-screen`** staan **#124, #125, #126, #128 en #129** af.
 
 | onderdeel | stand |
 |---|---|
-| #121 SSH-host | gemerged, live bewezen — spiegel-tab nog niet bevestigd |
+| #121 SSH-host | gemerged en volledig bewezen — spiegel-tab nu ook, in beide richtingen |
 | #123 herdr-chrome POSIX | gemerged, issue gesloten |
 | #124 machinescherm | **code af** |
 | #125 vraagmodus | **code af** |
 | #126 macht volgt toezicht | **code af** |
 | #128 agents i.p.v. shells | **code af** |
 | #129 sessiegeschiedenis | **code af** |
-| tests | 91 groen, 10 ignored (waarvan 3 echte-machine-diagnoses) |
+| tests | 92 groen, 10 ignored |
 | release-build | 14 aug 23:27, ook op ursu klaargezet (`7533ABE8…`) |
 | versie | 0.5.2 — nog niet gebumpt |
-| **niet gedaan** | de GUI-lus met twee vensters (hand omhoog, meedoen, beide typen) |
+| lus twee instanties | **gelopen en geslaagd** — hand omhoog, gezien via mDNS, meegedaan, beide kanten getypt |
 
 ---
 
@@ -113,6 +113,30 @@ Het filter werkte dus; de test was achterhaald.
 
 ---
 
+## De lus is gelopen — tussen twee echte instanties
+
+Twee Taurus-processen naast elkaar op dit werkstation, elk met een eigen configmap en
+webview-profiel, aangestuurd via CDP (`--remote-debugging-port`). A vraagt, B helpt.
+
+| stap | uitkomst |
+|---|---|
+| A steekt de hand op | verzoek met token, `help_asking` bevestigt |
+| B zoekt over mDNS | **binnen 0,5 s** zichtbaar, met agentnaam, map, fingerprint en token, op 192.168.225.44 |
+| B antwoordt | `help-auth` en `help-answered` in A's audit |
+| A typt `echo GROET-VAN-A` | B ontvangt exact dezelfde bytes, inclusief de uitvoer |
+| B typt `echo TYPT-DE-HELPER` | verschijnt in A's terminal, mét uitvoer |
+| na het antwoorden | vraag dicht: `help_asking` is null, B's lijst leeg |
+| token nog eens gebruiken | geweigerd |
+| verzonnen token | geweigerd |
+| `whoami` op een geldig token | geweigerd, geaudit als `help-refused`, token blijft ongebruikt |
+
+En het laatste openstaande punt van **#121** meteen erbij: B start een gewone sessie op A,
+A krijgt de pairing- en daarna de sessie-popup, antwoord *join* → A ontvangt de echte
+`cmd.exe`-uitvoer in de spiegel, en typen ín de spiegel voert uit op de sessie. Twee
+toetsenborden, aantoonbaar.
+
+---
+
 ## Wat er onderweg fout bleek
 
 - **De firewallcheck zei altijd nee.** `Get-NetFirewallPortFilter` als losse lijst koppelt
@@ -125,6 +149,15 @@ Het filter werkte dus; de test was achterhaald.
   `herdr session delete <naam>`.
 - **Connect liet herdr-sessies achter** bij elke wegwerpsessie; `ephemeral` betekent nu aan
   beide kanten wegwerp.
+- **De vertrouwde adapter matchte nooit.** De Network List Manager schrijft een GUID
+  zonder accolades, `GetAdaptersAddresses` mét. Een kale vergelijking matchte dus nooit,
+  `trusted_ipv4()` gaf altijd `None`, en de aankondiging bleef **op elke machine**
+  stilzwijgend achterwege — zonder fout, want "geen vertrouwd netwerk" is een geldig
+  antwoord. Kwam alleen boven door de echte opstelling te bouwen.
+- **Hulp bieden vroeg een eigen SSH-sleutel.** De helper bood niets aan omdat deze machine
+  geen `~/.ssh/id_*` heeft, dus `auth_publickey` werd nooit aangeroepen en het token kreeg
+  geen kans. De host beantwoordt nu `auth_none` bij een geldig token — niet zwakker, want
+  op dat pad werd elke sleutel geaccepteerd zodra het token klopte.
 - **#126 stond op een verkeerde aanname**: join kwam nog op `cmd.exe` uit. Taurus vraagt
   uitgaand altijd om `ssh -t host "<agent>"` en nooit om een login; inkomend hoort dat net
   zo te zijn.
@@ -133,12 +166,10 @@ Het filter werkte dus; de test was achterhaald.
 
 ## Wat er nog moet
 
-1. **De GUI-lus met twee vensters.** Hand omhoog op de een, meedoen vanaf de ander, aan
-   beide kanten typen. Dat vraagt twee draaiende Taurus-vensters en blijft daarom een
-   handmatige stap — het testvenster start jij.
-2. **Spiegel-tab van #121 bevestigen** — het laatste openstaande punt van dat issue.
-3. **Versienummer.** Staat op 0.5.2; dit is een flinke functieronde, dus het nummer
+1. **Versienummer.** Staat op 0.5.2; dit is een flinke functieronde, dus het nummer
    bevestig jij.
+2. **Een ronde met jouw eigen ogen op ursu.** De lus is bewezen tussen twee instanties op
+   dit werkstation; over een echte LAN heen is het dezelfde code maar niet dezelfde dag.
 
 ---
 
