@@ -235,6 +235,10 @@ const I18N = {
     peer_block: "Blokkeer", peer_unblock: "Deblokkeer", peer_forget: "Vergeet",
     consent_pair_title: "Nieuwe computer wil verbinden",
     consent_session_title: "Verzoek om een sessie",
+    consent_share_title: "Wil meekijken met een agent",
+    consent_share_what: "Meekijken met: {what}",
+    consent_share_unknown: "een agent op deze computer",
+    consent_share_warn: "Toestaan betekent dat hij meeleest met deze ene terminal en erin mee kan typen. Er start niets, en de sessie blijft van jou — sluiten kan altijd.",
     consent_who: "{user} op {address}",
     consent_fp: "Vingerafdruk",
     consent_warn: "Toestaan betekent dat deze computer als jouw account mag werken, met jouw rechten en credentials.",
@@ -478,6 +482,10 @@ const I18N = {
     peer_block: "Block", peer_unblock: "Unblock", peer_forget: "Forget",
     consent_pair_title: "New computer wants to connect",
     consent_session_title: "Session request",
+    consent_share_title: "Wants to read along with an agent",
+    consent_share_what: "Reading along with: {what}",
+    consent_share_unknown: "an agent on this computer",
+    consent_share_warn: "Allowing means they read along with this one terminal and can type in it. Nothing starts, and the session stays yours — you can close it at any time.",
     consent_who: "{user} at {address}",
     consent_fp: "Fingerprint",
     consent_warn: "Allowing means this computer may work as your account, with your rights and credentials.",
@@ -3824,18 +3832,34 @@ function showNextConsent() {
   if (consentActive || !consentQueue.length) return;
   const req = (consentActive = consentQueue.shift());
   const pairing = req.kind === "pair";
-  els.consentTitle.textContent = t(pairing ? "consent_pair_title" : "consent_session_title");
+  // Meekijken met een sessie die HIER al draait is een andere vraag dan "mag er een
+  // sessie komen", en de knoppen van die tweede vraag slaan er niet op (#149).
+  const delen = req.kind === "share";
+  els.consentTitle.textContent = t(
+    pairing ? "consent_pair_title" : delen ? "consent_share_title" : "consent_session_title"
+  );
   els.consentWho.textContent = t("consent_who")
     .replace("{user}", req.user || "?")
     .replace("{address}", req.address || "?");
-  els.consentWhat.textContent = req.what || "";
+  els.consentWhat.textContent = delen
+    ? t("consent_share_what").replace("{what}", req.what || t("consent_share_unknown"))
+    : req.what || "";
   els.consentFp.textContent = req.fingerprint || "";
-  // Meekijken kan alleen bij een sessie: bij een pairing is er nog geen terminal.
-  els.consentJoin.classList.toggle("hidden", pairing);
+  // Toestaan betekent hier iets veel kleiners dan bij een sessieverzoek, en dan
+  // hoort er niet dezelfde waarschuwing onder te staan.
+  els.consentWarn.textContent = t(delen ? "consent_share_warn" : "consent_warn");
+  // "Meekijken" zet die sessie op JOUW scherm -- bij het delen staat hij daar al,
+  // want het is je eigen terminal. Bij een pairing is er nog geen terminal.
+  els.consentJoin.classList.toggle("hidden", pairing || delen);
   els.consentRemember.checked = false;
+  // En "niet meer vragen" hoort hier niet: dat zet deze computer op altijd-goed, en
+  // dan komen ook echte sessieverzoeken er ongevraagd door. Meekijken mag geen
+  // achterdeur zijn naar iets groters.
+  els.consentRememberRow.classList.toggle("hidden", delen);
   // Vol beheer gaat over wat een SESSIE krijgt; bij een pairing is er nog niets
-  // om macht aan te geven. Meekijken geeft het sowieso, dus daar is het geen keuze.
-  els.consentFullRow.classList.toggle("hidden", pairing);
+  // om macht aan te geven, en bij meekijken start er niets -- de sessie houdt de
+  // macht die hij al had.
+  els.consentFullRow.classList.toggle("hidden", pairing || delen);
   els.consentFull.checked = false;
   els.consentFullWarn.classList.add("hidden");
   els.consentModal.classList.remove("hidden");
@@ -4569,6 +4593,7 @@ window.addEventListener("DOMContentLoaded", () => {
     consentFull: document.querySelector("#consent-full"),
     consentFullRow: document.querySelector("#consent-full-row"),
     consentFullWarn: document.querySelector("#consent-full-warn"),
+    consentWarn: document.querySelector("#consent-warn"),
     consentRememberRow: document.querySelector("#consent-remember-row"),
     consentTimer: document.querySelector("#consent-timer"),
     consentAllow: document.querySelector("#consent-allow"),
