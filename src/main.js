@@ -1612,7 +1612,10 @@ async function attachFromMachine(m, a) {
   });
   session.attached = true;
   try {
-    await invoke("attach_remote_session", {
+    // Twee soorten agent, twee kanalen. Een herdr-sessie haak je aan zoals altijd;
+    // een agent die in de Taurus daar draait vraag je die Taurus om te delen -- daar
+    // start niets, hij spiegelt de terminal die hij al open heeft (#128).
+    await invoke(a.origin === "taurus" ? "join_remote_agent" : "attach_remote_session", {
       id, gen: session.gen, hostId: host.id, session: a.session,
       cols: session.term.cols, rows: session.term.rows,
     });
@@ -1890,9 +1893,11 @@ async function loadRemoteSessions() {
   for (const m of machines) {
     const box = document.createElement("div");
     box.className = "machine";
+    // Geen bolletje op de machineregel. Dit scherm meet geen bereikbaarheid -- dat
+    // doet het machinescherm -- dus hier stond altijd een hol rondje dat niets zei,
+    // pal boven het bolletje van de agent. Twee stippen, nul betekenis.
     box.innerHTML = `
       <div class="machine-head">
-        <span class="host-dot ${machineDotClass(m)}"></span>
         <div class="host-main"><div class="host-name">${escapeHtml(m.label)}</div></div>
         <span class="route-mux">${escapeHtml(t("attach_loading"))}</span>
       </div>`;
@@ -1908,8 +1913,12 @@ async function loadRemoteSessions() {
     for (const a of agents) {
       const row = document.createElement("div");
       row.className = "route-row";
+      // Eén bolletje, en alleen als het iets zegt: een agent waarvan we WETEN dat
+      // hij loopt. Voor een agent in de Taurus daar is dat zo -- hij staat in de
+      // sessies die die Taurus nu bijhoudt.
+      const draait = !!a.status || a.origin === "taurus";
       row.innerHTML = `
-        <span class="host-dot ${a.status ? "up" : "pending"}"></span>
+        <span class="host-dot ${draait ? "up" : "pending"}"></span>
         <span class="route-name">${escapeHtml(a.title || a.session)}</span>
         <span class="route-mux">${escapeHtml([a.agent, a.cwd].filter(Boolean).join(" · "))}</span>
         ${a.attachable
