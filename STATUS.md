@@ -1,20 +1,23 @@
 # Waar het staat — 15 augustus 2026
 
-**0.5.3 is uit.** `main` staat op `66e06ca`; PR #127 (vijf issues) en PR #131 (de
-release) zijn gemerged. Er staat geen werk meer open op een branch.
+**0.5.7 is uit.** `main` staat op `2c39ede`; alles is gemerged en er staat geen werk
+meer open op een branch. Lokaal geïnstalleerd (`C:\Tools\Taurus\taurus.exe`), op ursu
+klaargezet als `taurus-nieuw.exe`.
 
 | onderdeel | stand |
 |---|---|
 | #121 SSH-host | volledig bewezen, spiegel-tab in beide richtingen |
 | #124 machinescherm | uitgeleverd in 0.5.3 |
-| #125 vraagmodus | uitgeleverd in 0.5.3 |
+| #125 vraagmodus | 0.5.3, aanklikbaar in 0.5.5, **tweede vraag komt aan** in 0.5.6 |
 | #126 macht volgt toezicht | uitgeleverd in 0.5.3, onbeheerd = `dontAsk` |
-| #128 agents i.p.v. shells | uitgeleverd in 0.5.3 |
-| #129 sessiegeschiedenis | uitgeleverd in 0.5.3 |
+| #128 agents i.p.v. shells | 0.5.3; de agent van hiernaast **opent** sinds 0.5.6 (#136) |
+| #129 sessiegeschiedenis | 0.5.3, startlijst compleet sinds 0.5.4 |
 | #130 permissiemodi | uitgeleverd in 0.5.3, alle zes |
-| tests | 95 groen, 10 ignored |
-| release-build | 15 aug 01:08, ook op ursu klaargezet (`188D6029…`) |
-| versie | **0.5.3** |
+| #135 hulpvraag opnieuw stellen | uitgeleverd in 0.5.6 |
+| #136 agent van hiernaast openen | 0.5.6; route wordt afgeleid sinds 0.5.7 |
+| tests | 101 groen, 11 ignored |
+| release-build | 15 aug 20:55, lokaal geïnstalleerd en op ursu klaargezet |
+| versie | **0.5.7** |
 | nog te doen | ursu bijwerken (`update-taurus.ps1`), en een ronde over de echte LAN |
 
 ---
@@ -56,8 +59,26 @@ die je niet koos, en dat is precies hoe je in `C:\Users\arjen` belandde.
 `remote_agents()` voegt twee bronnen samen: herdr voor wat Taurus daar over ssh startte,
 en de `sessions.json` van de Taurus dáár voor wat er in zijn eigen tabs draait. Voor wie
 kijkt is dat hetzelfde ding. `collect_agents()` is puur, met de echte data van ursu als
-fixture. Lege sessies staan onder de keuzes als opruimwerk. Een agent die in die andere
-Taurus leeft wordt getoond maar niet aangeboden — er is geen kanaal, en de regel zegt dat.
+fixture. Lege sessies staan onder de keuzes als opruimwerk.
+
+### #136 — en die agent van hiernaast open je ook
+
+Eerst werd een agent die in de Taurus dáár leeft wél getoond maar niet aangeboden: geen
+kanaal. Dat klopte niet meer zodra de vraagmodus er was — díé fan-out is precies het
+kanaal. Klik je zo'n agent aan, dan deelt die Taurus de terminal die hij al open heeft;
+er start niets en er verhuist niets.
+
+Twee dingen blijven anders dan bij een hulpvraag. Dit is **niet uitgenodigd** — er kan
+iemand in die terminal zitten te werken — dus het loopt langs de gewone
+toestemmingsvraag, en geen antwoord binnen de tijd is nee. En een **hulptoken koopt hier
+niets**: wie daarop binnen is krijgt de aangeboden sessie en verder niets, anders zou dat
+eenmalige token elke andere terminal op die machine openen.
+
+De verbinding gaat over de Taurus-route van die machine (8287), nooit over sshd — daar
+zou de shell een commando met die naam proberen te draaien. Staat die route niet in
+`hosts.json`, dan wordt hij afgeleid uit de route die je aanklikte: zelfde adres, zelfde
+sleutel, vaste poort. Dat bleek nodig op de echte opstelling — ursu stond er alleen als
+sshd en WSL in terwijl zijn Taurus al die tijd op 8287 luisterde.
 
 ### #129 — een geschiedenis die een mislukte restore overleeft
 
@@ -130,6 +151,17 @@ webview-profiel, aangestuurd via CDP (`--remote-debugging-port`). A vraagt, B he
 | verzonnen token | geweigerd |
 | `whoami` op een geldig token | geweigerd, geaudit als `help-refused`, token blijft ongebruikt |
 
+**Twee keer vragen, en de agent van hiernaast** (0.5.6/0.5.7, dezelfde opstelling):
+
+| stap | uitkomst |
+|---|---|
+| A trekt in en vraagt opnieuw | B ziet de **tweede** vraag, met eigen token en eigen agentnaam |
+| B beantwoordt die tweede vraag | A krijgt `help-answered`, de balk gaat weg, `help_asking` is null |
+| B opent een agent uit A's Taurus | A logt `auth-known`, `session-allow` (*meekijken met sTest*) en `join-local` |
+| B typt `echo joinwerkt-123` | komt in A's pty en echoot terug in B |
+| A typt `echo vanafA-456` | staat in beide vensters |
+| host-regel op poort 22 i.p.v. 8287 | route wordt afgeleid, join komt gewoon aan |
+
 En het laatste openstaande punt van **#121** meteen erbij: B start een gewone sessie op A,
 A krijgt de pairing- en daarna de sessie-popup, antwoord *join* → A ontvangt de echte
 `cmd.exe`-uitvoer in de spiegel, en typen ín de spiegel voert uit op de sessie. Twee
@@ -161,15 +193,33 @@ toetsenborden, aantoonbaar.
 - **#126 stond op een verkeerde aanname**: join kwam nog op `cmd.exe` uit. Taurus vraagt
   uitgaand altijd om `ssh -t host "<agent>"` en nooit om een login; inkomend hoort dat net
   zo te zijn.
+- **Een verzoek was zichtbaar maar niet aanklikbaar** (0.5.4). Vier oorzaken tegelijk:
+  verzoeken van bekende machines werden weggefilterd, de zoekronde verving de knop onder
+  je cursor, alleen het kleine knopje was klikbaar, en foutmeldingen landden in een
+  ingeklapt formulier. Alle vier apart genoeg voor "klikken doet niets".
+- **Eén keer vragen werkte, twee keer niet** (0.5.5). De mDNS-instantienaam was de
+  machine, dus opnieuw vragen was voor de andere kant dezelfde dienst onder dezelfde naam:
+  geen nieuwe resolve, oud token, dode knop. De naam draagt nu de vraag.
+- **De opgestoken hand ging nooit omlaag.** De backend nam de vraag netjes in zodra iemand
+  meekwam, maar het venster luisterde niet naar `help-answered`. Je bleef "vragen" terwijl
+  er niets meer werd aangekondigd — en dan voelt een volgende vraag als kapot.
+- **De join zou huiswerk hebben teruggegeven** (gevonden ná de 0.5.6-release, door hem
+  tegen de echte opstelling te houden). `ursu` heeft geen route-regel op 8287, terwijl zijn
+  Taurus daar wél luistert. De route wordt nu afgeleid; hij valt niets aan te kiezen.
 
 ---
 
 ## Wat er nog moet
 
-1. **Versienummer.** Staat op 0.5.2; dit is een flinke functieronde, dus het nummer
-   bevestig jij.
+1. **ursu bijwerken.** 0.5.7 staat er als `taurus-nieuw.exe`; `update-taurus.ps1` doet de
+   wissel. Daar draait nu nog 0.5.4.
 2. **Een ronde met jouw eigen ogen op ursu.** De lus is bewezen tussen twee instanties op
    dit werkstation; over een echte LAN heen is het dezelfde code maar niet dezelfde dag.
+3. **Eén open ontwerpvraag: mag een hulpvraag jou onderbreken?** Zoeken loopt alleen
+   zolang het machinescherm openstaat — dat is de "geen omgevingsgeluid"-regel uit #125.
+   Gevolg: vraagt een collega hulp terwijl jij dat scherm dicht hebt, dan zie je het niet.
+   Wil je een stil teken (een bolletje op de knop), dan moet er op de achtergrond gezocht
+   worden, en dat is precies wat die regel uitsloot. Jouw keuze.
 
 ---
 
@@ -178,9 +228,10 @@ toetsenborden, aantoonbaar.
 | wat | waar |
 |---|---|
 | startscript testclient | `C:\Users\AST\claude\Taurus\start-taurus-test.ps1` (met `-Exe <pad>` voor een build elders) |
-| binary | `C:\Users\AST\claude\Taurus\src-tauri\target\release\taurus.exe` (14 aug 23:27) |
+| binary | `C:\Users\AST\claude\Taurus\src-tauri\target\release\taurus.exe` (0.5.7, 15 aug 20:55) |
+| geïnstalleerd | `C:\Tools\Taurus\taurus.exe` (0.5.7); vorige versies staan ernaast |
 | config testclient | `C:\Users\AST\AppData\Roaming\Taurus-TEST` |
-| ursu: klaargezet | `C:\Tools\Taurus\taurus-nieuw.exe` + `update-taurus.ps1` |
+| ursu: klaargezet | `C:\Tools\Taurus\taurus-nieuw.exe` (0.5.7) + `update-taurus.ps1` |
 | ursu: audit | `C:\Users\arjen\AppData\Roaming\Taurus\audit\events.log` |
 | testinstructie | `C:\Users\AST\claude\Taurus\TEST-127-machinescherm.md` |
 | ontwerpnotitie | `C:\Users\AST\claude\Taurus\DESIGN-vloot-en-vraagmodus.md` |
@@ -193,7 +244,7 @@ toetsenborden, aantoonbaar.
 |---|---|
 | #98 | remote tab support via SSH (epic; grotendeels geland) |
 | #91 | zijbalk: scrollen zonder scrollbar |
-| #82 | refactor: `lib.rs` en `main.js` opsplitsen — inmiddels 6.401 en 4.593 regels |
+| #82 | refactor: `lib.rs` en `main.js` opsplitsen — inmiddels 6.986 en 4.754 regels |
 | #62 | settings: white-label-sectie |
 | #51 | explorer-ergonomie |
 | #49 | bestandsboom naast de zijbalk |
