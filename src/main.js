@@ -69,9 +69,9 @@ const I18N = {
     restore_title: "Vorige sessies openen?",
     restore_lead: "Aangevinkt is wat openstond toen Taurus sloot. Daaronder staat wat er eerder is geweest — die blijft bewaard, ook als je hem nu niet opent.",
     restore_none: "Niets openen", restore_go: "Openen",
+    restore_more: "De {read} nieuwste van {total} gesprekken die Claude nog heeft.",
     resume_no_host: "machine bestaat niet meer",
     resume_no_transcript: "geen transcript gevonden",
-    resume_old: "{days} dagen oud",
     ago_now: "zojuist", ago_min: "{n} min geleden", ago_hour: "{n} uur geleden", ago_day: "{n} dagen geleden",
     hosts_known: "Bekende machines",
     found_title: "Iemand vraagt hulp",
@@ -307,9 +307,9 @@ const I18N = {
     restore_title: "Reopen previous sessions?",
     restore_lead: "Ticked is what was open when Taurus closed. Below that is what came before — it stays in the history whether you open it now or not.",
     restore_none: "Open nothing", restore_go: "Open",
+    restore_more: "The {read} most recent of {total} conversations Claude still has.",
     resume_no_host: "machine no longer exists",
     resume_no_transcript: "no transcript found",
-    resume_old: "{days} days old",
     ago_now: "just now", ago_min: "{n} min ago", ago_hour: "{n} h ago", ago_day: "{n} days ago",
     hosts_known: "Known machines",
     found_title: "Someone is asking for help",
@@ -1778,6 +1778,19 @@ async function loadLocalHistory() {
   try { hist = await invoke("session_history"); } catch (_) {}
   const open = new Set([...sessions.values()].map((s) => s.uuid).filter(Boolean));
   const rows = hist.filter((h) => h.uuid && !open.has(h.uuid) && !h.hostId);
+  // Plus wat Claude zelf nog weet en Taurus niet (#129): gesprekken die buiten
+  // Taurus zijn begonnen, of van voor deze geschiedenis bestond.
+  const gezien = new Set([...open, ...rows.map((h) => h.uuid)]);
+  for (const f of await scanClaudeSessions()) {
+    if (gezien.has(f.uuid)) continue;
+    gezien.add(f.uuid);
+    rows.push({
+      uuid: f.uuid, path: f.cwd, title: f.title || leafOf(f.cwd),
+      agent: "claude", model: "", mode: f.mode || "default",
+      hostId: "", projectId: "", lastSeen: f.lastSeen, accent: "#7c9cff",
+    });
+  }
+  rows.sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
   box.innerHTML = "";
   if (!rows.length) {
     box.innerHTML = `<div class="host-empty">${escapeHtml(t("attach_no_local"))}</div>`;
@@ -2887,7 +2900,10 @@ async function resumeBlocker(meta) {
   let st = { exists: false, ageSecs: 0 };
   try { st = await invoke("session_state", { path: meta.path, uuid: meta.uuid }); } catch (_) {}
   if (!st.exists) return t("resume_no_transcript");
-  if (st.ageSecs > 86400) return t("resume_old").replace("{days}", Math.floor(st.ageSecs / 86400));
+  // Ouderdom blokkeert NIET. Dat was de oude auto-hervat-heuristiek, en #129 zegt
+  // er zelf het juiste over: leeftijd is geen bewijs dat een sessie waardeloos is.
+  // `claude --resume` doet het prima op een gesprek van vorige week, en jij kiest
+  // hier zelf. Hoe oud hij is staat rechts in de rij; dat is informatie, geen slot.
   return "";
 }
 
@@ -2957,8 +2973,10 @@ async function startupRestore() {
     if (!m.uuid) continue;
     rows.push({ meta: m, open: true, reason: await resumeBlocker(m) });
   }
+  const gezien = new Set(openUuids);
   for (const h of hist) {
-    if (!h.uuid || openUuids.has(h.uuid)) continue;
+    if (!h.uuid || gezien.has(h.uuid)) continue;
+    gezien.add(h.uuid);
     const meta = {
       uuid: h.uuid, path: h.path, title: h.title, accent: h.accent,
       mode: h.mode, agent: h.agent, model: h.model,
@@ -2966,8 +2984,44 @@ async function startupRestore() {
     };
     rows.push({ meta, open: false, reason: await resumeBlocker(meta), lastSeen: h.lastSeen });
   }
+  // En alles wat Claude zelf nog weet (#129). Zonder dit kent de vraag alleen wat
+  // Taurus ooit zelf startte -- gemeten: één regel, terwijl er meerdere sessies
+  // liepen. Dan is stil opstarten beter dan een vraag die het antwoord niet heeft.
+  for (const f of await scanClaudeSessions()) {
+    if (gezien.has(f.uuid)) continue;
+    gezien.add(f.uuid);
+    const meta = {
+      uuid: f.uuid, path: f.cwd, title: f.title || leafOf(f.cwd), accent: "#7c9cff",
+      mode: f.mode || "default", agent: "claude", model: "",
+      host_id: "", project_id: "",
+    };
+    // Geen resumeBlocker: het transcript is zojuist gelezen, dus dat het bestaat
+    // weten we al. Scheelt een IPC-ronde per rij bij een volle geschiedenis.
+    rows.push({ meta, open: false, reason: "", lastSeen: f.lastSeen });
+  }
   if (!rows.length) return;
+  // Nieuwste bovenaan binnen elke groep; wat openstond blijft eerst.
+  rows.sort((a, b) => (b.open ? 1 : 0) - (a.open ? 1 : 0) || (b.lastSeen || 0) - (a.lastSeen || 0));
   openRestoreDialog(rows);
+}
+
+// Wat Claude zelf nog aan hervatbare sessies heeft liggen. Eén ssh-loze scan over
+// zijn projectmappen; de backend leest per transcript alleen tot hij genoeg weet.
+async function scanClaudeSessions() {
+  try {
+    const r = await invoke("scan_claude_sessions", { limit: null });
+    // Geen stille afkapping: als er meer transcripts zijn dan gelezen, hoort dat
+    // in beeld te komen in plaats van te lezen als "meer is er niet".
+    lastScan = r;
+    return r.sessions || [];
+  } catch (_) {
+    lastScan = null;
+    return [];
+  }
+}
+let lastScan = null;
+function leafOf(p) {
+  return String(p || "").replace(/[\/]+$/, "").split(/[\/]/).pop() || p || "";
 }
 
 // De vraag zelf. Een rij die niet te hervatten is blijft staan mét de reden en is
@@ -2978,6 +3032,16 @@ function openRestoreDialog(rows) {
   const modal = document.querySelector("#restore-modal");
   if (!box || !modal) return;
   box.innerHTML = "";
+  // Geen stille afkapping: als er meer transcripts liggen dan gelezen zijn, hoort
+  // dat er te staan -- anders leest de lijst als "meer is er niet".
+  const note = document.querySelector("#restore-note");
+  if (note) {
+    const meer = lastScan && lastScan.total > lastScan.read;
+    note.textContent = meer
+      ? t("restore_more").replace("{read}", lastScan.read).replace("{total}", lastScan.total)
+      : "";
+    note.classList.toggle("hidden", !meer);
+  }
   rows.forEach((r, i) => {
     const row = document.createElement("label");
     row.className = "host-row restore-row";
