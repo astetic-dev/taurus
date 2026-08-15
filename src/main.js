@@ -80,6 +80,7 @@ const I18N = {
     help_asked: "Je vraag om hulp bij {title} staat op het netwerk.",
     help_asking: "Je vraagt hulp bij {title} — zichtbaar op het vertrouwde netwerk.",
     help_withdraw: "Intrekken",
+    help_answered_toast: "Er is iemand meegekomen in je sessie.",
     ctx_help: "✋ Vraag om hulp bij deze agent",
     found_firewall: "Taurus heeft nog geen eigen firewall-uitzondering. Zonder die regels ziet niemand je, en kan niemand aankloppen.",
     found_firewall_fix: "Firewall-regels aanmaken (vraagt om beheerdersrechten)",
@@ -318,6 +319,7 @@ const I18N = {
     help_asked: "Your request for help with {title} is on the network.",
     help_asking: "You are asking for help with {title} — visible on the trusted network.",
     help_withdraw: "Withdraw",
+    help_answered_toast: "Someone has joined your session.",
     ctx_help: "✋ Ask for help with this agent",
     found_firewall: "Taurus has no firewall exception of its own yet. Without those rules nobody sees you, and nobody can knock.",
     found_firewall_fix: "Create firewall rules (asks for administrator rights)",
@@ -1271,6 +1273,23 @@ async function askForHelp(s) {
 async function withdrawHelp() {
   await invoke("help_withdraw").catch(() => {});
   asking = null;
+  renderAskingBanner();
+}
+
+// Er is iemand gekomen. De backend heeft de vraag dan al ingenomen -- het token is
+// eenmalig -- maar de balk wist dat niet en bleef staan. Dan lijkt het alsof je nog
+// steeds vraagt terwijl er niets meer wordt aangekondigd, en een volgende vraag
+// voelt als "hij doet het niet".
+listen("help-answered", () => {
+  asking = null;
+  renderAskingBanner();
+  toast(t("help_answered_toast"));
+});
+
+// En bij het opstarten: de balk hoort te kloppen met wat de backend werkelijk nog
+// open heeft staan, niet met wat er toevallig in het venster stond.
+async function syncAskingBanner() {
+  try { asking = await invoke("help_asking"); } catch (_) { asking = null; }
   renderAskingBanner();
 }
 
@@ -4719,7 +4738,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadHosts().then(startupRestore);
   // Stond er nog een hand omhoog toen de app sloot? Dan hoort de balk er te
   // staan -- een vraag die je niet meer ziet trek je ook niet in (#125).
-  invoke("help_asking").then((a) => { asking = a; renderAskingBanner(); }).catch(() => {});
+  syncAskingBanner();
 
   // Toon de app-versie discreet onderin de sidebar.
   invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});

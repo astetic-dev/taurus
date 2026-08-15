@@ -152,7 +152,12 @@ impl Discovery {
         }
         let Some(address) = pick_ipv4(svc) else { return };
         let found = Found {
-            name: label_from_fullname(&full),
+            // De machinenaam komt uit de property; de instantienaam draagt nu het
+            // token, en dat is geen naam om aan een mens te tonen.
+            name: {
+                let h = prop(svc, "host");
+                if h.is_empty() { label_from_fullname(&full) } else { h }
+            },
             address,
             port: svc.port,
             user: prop(svc, "user"),
@@ -195,7 +200,19 @@ impl Discovery {
             return Err("Geen vertrouwd netwerk, dus geen adres om op aan te kondigen.".to_string());
         };
         let d = self.daemon()?;
-        let name = instance_name();
+        // De instantienaam is de VRAAG, niet de machine.
+        //
+        // GEMETEN: met alleen de machinenaam bleef een tweede vraag onzichtbaar. Je
+        // trekt in, je vraagt opnieuw met een nieuw token, en de andere kant zag nog
+        // steeds het oude token en de oude agentnaam -- want voor mDNS was het
+        // dezelfde dienst onder dezelfde naam, dus er viel niets te melden. En de
+        // helper klikte dan op een verzoek waarvan het token al op was.
+        //
+        // Met het token in de naam is elke vraag een eigen dienst: de oude wordt
+        // afgemeld (de andere kant haalt hem weg) en de nieuwe komt binnen als een
+        // nieuwe. De machinenaam reist mee als property, want de naam is nu bezet.
+        let machine = instance_name();
+        let name = format!("{}-{}", machine, &token[..token.len().min(8)]);
         let props = [
             ("user".to_string(), user.to_string()),
             ("fp".to_string(), fingerprint.to_string()),
@@ -204,6 +221,7 @@ impl Discovery {
             ("task".to_string(), agent_title.to_string()),
             ("cwd".to_string(), agent_cwd.to_string()),
             ("tok".to_string(), token.to_string()),
+            ("host".to_string(), machine.clone()),
         ];
         let info = ServiceInfo::new(
             SERVICE,
