@@ -751,11 +751,20 @@ impl HostSession {
             return Ok(());
         };
         audit(&self.app, "help-answered", &self.peer_name(), &local);
-        self.offered.lock().unwrap().insert(channel, local.clone());
-        session.channel_success(channel)?;
+        self.attach_local(channel, session, &local);
+        Ok(())
+    }
 
-        // Meelezen: dezelfde bytes die naar het venster van de vrager gaan.
-        let rx = crate::subscribe_local_session(&local);
+    // Aanhaken bij een sessie die HIER draait: meelezen met dezelfde bytes die naar
+    // het eigen venster gaan, en wat de ander typt gaat dezelfde pty in.
+    //
+    // Gedeeld door de vraagmodus (#125) en door "open die agent bij mij" vanaf een
+    // eigen machine (#128). In beide gevallen wordt er niets gestart -- de sessie
+    // blijft van deze machine, en het kanaal sluiten stopt alleen het meekijken.
+    fn attach_local(&mut self, channel: ChannelId, session: &mut Session, local: &str) {
+        self.offered.lock().unwrap().insert(channel, local.to_string());
+        let _ = session.channel_success(channel);
+        let rx = crate::subscribe_local_session(local);
         let handle = session.handle();
         let rt = tokio::runtime::Handle::current();
         std::thread::spawn(move || {
@@ -764,13 +773,45 @@ impl HostSession {
                     break;
                 }
             }
-            // Het kanaal netjes afsluiten als de sessie ophoudt; de sessie zelf
-            // blijft van de vrager en gaat hier niet dicht.
             rt.block_on(async {
                 let _ = handle.eof(channel).await;
                 let _ = handle.close(channel).await;
             });
         });
+    }
+
+    // "Open die agent bij mij" vanaf een machine die je zelf hebt ingericht (#128).
+    //
+    // Anders dan bij een hulpvraag is hier NIET vooraf uitgenodigd, dus dit loopt
+    // wel langs de gewone toestemmingsvraag: er kan iemand aan die machine zitten
+    // te werken in precies die terminal. Geen antwoord binnen de tijd = nee, net
+    // als elke andere sessie.
+    async fn join_local(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+        id: &str,
+    ) -> Result<(), russh::Error> {
+        // Een hulptoken geeft alleen recht op de aangeboden sessie; hiermee zou je
+        // elke andere terminal op die machine kunnen openen.
+        if !self.help_token.is_empty() {
+            audit(&self.app, "help-refused", &self.peer_name(), "join-local");
+            session.channel_failure(channel)?;
+            return Ok(());
+        }
+        if !crate::local_session_exists(&self.app, id) {
+            audit(&self.app, "join-unknown", &self.peer_name(), id);
+            session.channel_failure(channel)?;
+            return Ok(());
+        }
+        let wat = crate::local_session_label(&self.app, id);
+        let d = self.ask_session(&format!("meekijken met {wat}")).await;
+        if !d.permits() {
+            session.channel_failure(channel)?;
+            return Ok(());
+        }
+        audit(&self.app, "join-local", &self.peer_name(), id);
+        self.attach_local(channel, session, id);
         Ok(())
     }
 
@@ -1175,6 +1216,11 @@ impl Handler for HostSession {
         // zelf was de uitnodiging.
         if let Some(tok) = line.trim().strip_prefix("TAURUS-JOIN ") {
             return self.answer_help(channel, session, tok.trim());
+        }
+        // Aanhaken bij een sessie die in DEZE Taurus draait, gevraagd door iemand
+        // die hier al gekoppeld is (#128). Loopt wel langs de toestemmingsvraag.
+        if let Some(id) = line.trim().strip_prefix("TAURUS-JOIN-LOCAL ") {
+            return self.join_local(channel, session, id.trim()).await;
         }
         // Binnengekomen op een hulptoken? Dan is meelezen het enige wat mag. Alles
         // anders is een gewone sessie en hoort ook langs de gewone toestemming --
