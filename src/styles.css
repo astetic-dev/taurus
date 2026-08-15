@@ -963,10 +963,29 @@ select:-webkit-autofill {
 /* Opstartvraag: welke sessies open je opnieuw (#129). Een rij is een label met een
    vinkje, zodat de hele regel klikbaar is. */
 .restore-row { cursor: pointer; }
+/* Het vinkje is een vinkje en geen kolom. Zonder deze regel rekt een
+   <input type=checkbox> in een flexrij mee tot hij het grootste deel van de breedte
+   pakt en de tekst ernaast van de rij af valt -- gemeten in 0.5.3. */
+.restore-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 15px; height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
 .restore-row input[disabled] { cursor: not-allowed; }
+/* De hoofdkolom moet kunnen krimpen, anders duwt een lang pad de rest eruit. */
+.restore-row .host-main { flex: 1 1 auto; min-width: 0; }
+.restore-row .host-name,
+.restore-row .host-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Reden en tijdstip staan rechts en krimpen niet weg. */
+.restore-row .sess-bare,
+.restore-row .route-mux { flex: 0 0 auto; max-width: 40%; }
 /* Niet te hervatten: de rij blijft staan mét reden, en dat mag geen alarm zijn --
    verdwijnen was de fout, en rood zou suggereren dat er iets stuk is. */
 .restore-row input[disabled] ~ .host-main { opacity: .6; }
+/* Veel regels bij een volle geschiedenis: laat de lijst scrollen in plaats van het
+   venster te laten groeien tot de knoppen buiten beeld vallen. */
+#restore-rows { max-height: 46vh; overflow-y: auto; }
 
 /* Vraagmodus (#125). De vragende kant krijgt een rustige balk onder de tabbalk:
    je hebt het zelf aangezet, dus het hoeft je niet te onderbreken -- het moet

@@ -1423,6 +1423,218 @@ fn history_forget(uuid: String) -> Result<Vec<HistoryEntry>, String> {
 // %USERPROFILE%\.claude\projects\<map-encoded>\<uuid>.jsonl
 // De map-encoding vervangt elk niet-alfanumeriek teken door '-'
 // (bv. C:\Users\AST -> C--Users-AST).
+// ---------- hervatbare sessies vinden in Claude's eigen projectmappen (#129) ----------
+//
+// De opstartvraag was alleen zo goed als wat Taurus zélf had opgeschreven, en dat is
+// één regel per sessie die Taurus ooit startte. GEMETEN: dat leverde één keuze op
+// terwijl er meerdere sessies liepen -- en dan is stil opstarten beter dan een vraag
+// die het antwoord niet kent.
+//
+// Claude bewaart per werkmap een map met een transcript per sessie. Daar staat alles
+// in wat je nodig hebt om er weer in te komen.
+#[derive(serde::Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct FoundSession {
+    uuid: String,
+    cwd: String,
+    title: String,
+    model: String,
+    mode: String,
+    // Seconden sinds epoch, uit de mtime van het transcript.
+    last_seen: u64,
+}
+
+#[derive(serde::Serialize, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+struct ScanResult {
+    sessions: Vec<FoundSession>,
+    // Hoeveel transcripts er zijn, en hoeveel er daadwerkelijk gelezen zijn. Een
+    // stille afkapping leest als "meer is er niet", en dat is het verschil tussen
+    // informeren en misleiden.
+    total: usize,
+    read: usize,
+}
+
+// Wat één transcript over zichzelf vertelt. Puur, zodat de regels toetsbaar zijn
+// zonder de map van iemand na te bouwen.
+//
+// LET OP: het pad NIET afleiden uit de mapnaam. Die encoding vervangt elk
+// niet-alfanumeriek teken door '-' (zie `claude_session_file`), dus
+// `C:\Users\AST\claude` en `C-Users-AST-claude` worden hetzelfde -- lossy, en niet
+// terug te rekenen. Elke berichtregel draagt het echte `cwd`; die gebruiken we.
+fn parse_transcript(uuid: &str, text: &str) -> Option<FoundSession> {
+    let mut s = FoundSession { uuid: uuid.to_string(), ..Default::default() };
+    let mut first_user = String::new();
+    let mut summary = String::new();
+    for line in text.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let t = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+        if s.cwd.is_empty() {
+            if let Some(c) = v.get("cwd").and_then(|x| x.as_str()).filter(|c| !c.is_empty()) {
+                s.cwd = c.to_string();
+            }
+        }
+        match t {
+            // Claude's eigen titel voor het gesprek -- verreweg het beste label.
+            "ai-title" => {
+                if let Some(x) = v.get("aiTitle").and_then(|x| x.as_str()) {
+                    s.title = x.to_string();
+                }
+            }
+            "summary" => {
+                if summary.is_empty() {
+                    if let Some(x) = v.get("summary").and_then(|x| x.as_str()) {
+                        summary = x.to_string();
+                    }
+                }
+            }
+            "permission-mode" => {
+                if let Some(x) = v.get("permissionMode").and_then(|x| x.as_str()) {
+                    s.mode = x.to_string();
+                }
+            }
+            // Niet elke user-regel is iets dat iemand getypt heeft. GEMETEN in de
+            // echte transcripts: een weggeklikte caveat, een slash-commando en de
+            // "This session is being continued from"-preambule staan er alle drie
+            // als user-regel in, en die leverden labels op als "A session-scoped
+            // Stop hook is now active with condition". Er zijn structurele
+            // kenmerken voor, dus daarop filteren en niet op de tekst zelf.
+            "user" if first_user.is_empty() => {
+                let meta = v.get("isMeta").and_then(|x| x.as_bool()).unwrap_or(false);
+                let compact = v
+                    .get("isCompactSummary")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false);
+                if !meta && !compact {
+                    first_user = first_user_text(&v);
+                }
+            }
+            _ => {}
+        }
+        if s.model.is_empty() {
+            if let Some(m) = v.pointer("/message/model").and_then(|x| x.as_str()) {
+                s.model = m.to_string();
+            }
+        }
+        // Genoeg gezien: verder lezen kost megabytes zonder iets toe te voegen.
+        if !s.cwd.is_empty() && !s.title.is_empty() && !s.model.is_empty() && !s.mode.is_empty() {
+            break;
+        }
+    }
+    if s.title.is_empty() {
+        s.title = if !summary.is_empty() { summary } else { first_user };
+    }
+    // Nog steeds niets? Dan de mapnaam. Die terugval hoort HIER en niet in de
+    // frontend: het pad is al binnen, en zo is er precies één plek waar bepaald
+    // wordt hoe een regel heet -- toetsbaar, zonder een tweede padsplitser in JS
+    // die je alleen ziet falen op een Windows-pad.
+    if s.title.is_empty() {
+        s.title = leaf_of(&s.cwd);
+    }
+    // Zonder werkmap valt er niets te hervatten: `--resume` moet ergens starten.
+    if s.cwd.is_empty() {
+        return None;
+    }
+    Some(s)
+}
+
+// Alleen de mapnaam, met beide scheidingstekens: een pad kan hier van Windows of
+// van POSIX komen.
+fn leaf_of(path: &str) -> String {
+    path.trim_end_matches(['\\', '/'])
+        .rsplit(['\\', '/'])
+        .find(|p| !p.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
+// De eerste tekst die de gebruiker typte, als terugval-label. Content is soms een
+// string en soms een lijst blokken.
+fn first_user_text(v: &serde_json::Value) -> String {
+    let c = v.pointer("/message/content");
+    let txt = match c {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(parts)) => parts
+            .iter()
+            .find_map(|p| {
+                (p.get("type").and_then(|t| t.as_str()) == Some("text"))
+                    .then(|| p.get("text").and_then(|t| t.as_str()))
+                    .flatten()
+            })
+            .unwrap_or("")
+            .to_string(),
+        _ => String::new(),
+    };
+    let txt = txt.trim();
+    // Commando's en systeemruis zijn geen titel.
+    if txt.is_empty() || txt.starts_with('<') || txt.starts_with('/') {
+        return String::new();
+    }
+    // Op één regel: een prompt van vijf alinea's is geen label, en een harde
+    // regelafbreking maakt de lijst onleesbaar.
+    let mut out = String::new();
+    let mut gap = false;
+    for c in txt.chars() {
+        if c.is_whitespace() {
+            gap = !out.is_empty();
+            continue;
+        }
+        if gap {
+            out.push(' ');
+            gap = false;
+        }
+        out.push(c);
+        if out.chars().count() >= 70 {
+            break;
+        }
+    }
+    out
+}
+
+#[tauri::command(async)]
+fn scan_claude_sessions(limit: Option<usize>) -> ScanResult {
+    let root = std::path::PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default())
+        .join(".claude")
+        .join("projects");
+    let mut files: Vec<(u64, std::path::PathBuf)> = Vec::new();
+    let Ok(dirs) = std::fs::read_dir(&root) else {
+        return ScanResult::default();
+    };
+    for d in dirs.flatten() {
+        let Ok(entries) = std::fs::read_dir(d.path()) else { continue };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let secs = e
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            files.push((secs, p));
+        }
+    }
+    let total = files.len();
+    // Nieuwste eerst: dat is de volgorde waarin je ernaar zoekt, en het maakt de
+    // begrenzing hieronder een keuze in plaats van willekeur.
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.truncate(limit.unwrap_or(60));
+    let read = files.len();
+    let mut sessions = Vec::new();
+    for (secs, p) in files {
+        let Some(uuid) = p.file_stem().and_then(|x| x.to_str()) else { continue };
+        let Ok(text) = std::fs::read_to_string(&p) else { continue };
+        if let Some(mut s) = parse_transcript(uuid, &text) {
+            s.last_seen = secs;
+            sessions.push(s);
+        }
+    }
+    ScanResult { sessions, total, read }
+}
+
 fn claude_session_file(path: &str, uuid: &str) -> std::path::PathBuf {
     let enc: String = path
         .chars()
@@ -5053,6 +5265,7 @@ pub fn run() {
             machines,
             remote_agents,
             session_history,
+            scan_claude_sessions,
             history_record,
             history_mark_open,
             history_forget,
@@ -5638,6 +5851,91 @@ mod tests {
                 }
             }
         }
+    }
+
+    // Tegen de ECHTE projectmappen van deze gebruiker. Genegeerd in de gewone run
+    // (de uitkomst hangt af van wie je bent), maar dit is de enige manier om te
+    // zien of de scan bruikbare regels oplevert:
+    //   cargo test --lib -- --ignored --nocapture toon_gevonden_sessies
+    #[test]
+    #[ignore]
+    fn toon_gevonden_sessies() {
+        let n: usize = std::env::var("TAURUS_SCAN_N").ok().and_then(|x| x.parse().ok()).unwrap_or(60);
+        let t0 = std::time::Instant::now();
+        let r = scan_claude_sessions(Some(n));
+        println!("duur: {:?}", t0.elapsed());
+        println!("transcripts: {} totaal, {} gelezen", r.total, r.read);
+        for s in &r.sessions {
+            println!(
+                "  {:<40} | {:<22} | {}",
+                if s.title.is_empty() { "(geen titel)" } else { &s.title },
+                if s.model.is_empty() { "?" } else { &s.model },
+                s.cwd
+            );
+        }
+    }
+
+    // GEMETEN aan een echt transcript: het pad staat op de BERICHTregels, en de
+    // titel in een `ai-title`-record. De eerste regels zijn metadata zonder cwd,
+    // dus stoppen bij de eerste regel zou niets opleveren.
+    #[test]
+    fn a_transcript_gives_up_its_folder_title_model_and_mode() {
+        let t = [
+            r#"{"type":"last-prompt","sessionId":"u1"}"#,
+            r#"{"type":"mode","mode":"normal","sessionId":"u1"}"#,
+            r#"{"type":"permission-mode","permissionMode":"acceptEdits","sessionId":"u1"}"#,
+            r#"{"type":"ai-title","aiTitle":"Verlorene sessie terugvinden","sessionId":"u1"}"#,
+            r#"{"type":"user","cwd":"C:\\Users\\AST\\claude","message":{"content":"hallo"}}"#,
+            r#"{"type":"assistant","cwd":"C:\\Users\\AST\\claude","message":{"model":"claude-opus-5"}}"#,
+        ]
+        .join("\n");
+        let s = parse_transcript("u1", &t).expect("hoort te lukken");
+        assert_eq!(s.cwd, r"C:\Users\AST\claude");
+        assert_eq!(s.title, "Verlorene sessie terugvinden");
+        assert_eq!(s.model, "claude-opus-5");
+        assert_eq!(s.mode, "acceptEdits");
+    }
+
+    // Zonder werkmap valt er niets te hervatten: `--resume` moet ergens starten.
+    // En het pad mag NOOIT uit de mapnaam komen -- die encoding is lossy.
+    #[test]
+    fn a_transcript_without_a_folder_is_not_offered() {
+        let t = [
+            r#"{"type":"last-prompt","sessionId":"u2"}"#,
+            r#"{"type":"ai-title","aiTitle":"Iets","sessionId":"u2"}"#,
+        ]
+        .join("\n");
+        assert!(parse_transcript("u2", &t).is_none());
+    }
+
+    // Geen ai-title? Dan de samenvatting, en anders de eerste echte gebruikersregel.
+    // Commando's en systeemruis zijn geen titel.
+    #[test]
+    fn the_label_falls_back_to_something_a_person_recognises() {
+        let with_summary = [
+            r#"{"type":"summary","summary":"Certificaat vervangen"}"#,
+            r#"{"type":"user","cwd":"C:\\x","message":{"content":"doe iets"}}"#,
+        ]
+        .join("\n");
+        assert_eq!(parse_transcript("u3", &with_summary).unwrap().title, "Certificaat vervangen");
+
+        let only_user =
+            r#"{"type":"user","cwd":"C:\\x","message":{"content":[{"type":"text","text":"leg de build uit"}]}}"#;
+        assert_eq!(parse_transcript("u4", only_user).unwrap().title, "leg de build uit");
+
+        // Niets bruikbaars? Dan de mapnaam, en nooit het volle pad. Die terugval
+        // stond eerst in de frontend en faalde daar stil op Windows-paden: de rij
+        // toonde `X:\AI\...\oracle-reports-migratie` als titel.
+        let noise = r#"{"type":"user","cwd":"X:\\AI\\projecten\\oracle-reports-migratie","message":{"content":"/clear"}}"#;
+        assert_eq!(parse_transcript("u5", noise).unwrap().title, "oracle-reports-migratie");
+    }
+
+    #[test]
+    fn the_folder_name_survives_both_separators() {
+        assert_eq!(leaf_of(r"X:\AI\projecten\oracle-reports-migratie"), "oracle-reports-migratie");
+        assert_eq!(leaf_of("/srv/icm/werkprocessen"), "werkprocessen");
+        assert_eq!(leaf_of(r"C:\Users\AST\claude\"), "claude");
+        assert_eq!(leaf_of(""), "");
     }
 
     // De hele reden dat dit bestand bestaat: een mislukte herstart mag een sessie
