@@ -1007,3 +1007,7 @@ select:-webkit-autofill {
   margin-bottom: 8px;
 }
 .askband-hand { font-size: 17px; }
+/* De hele balk is de knop. Hij leest als één ding, dus alleen dat kleine knopje
+   laten werken is een val -- je klikt ernaast en er gebeurt niets. */
+.askband { cursor: pointer; }
+.askband:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
