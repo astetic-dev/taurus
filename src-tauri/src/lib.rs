@@ -188,17 +188,29 @@ fn preferred_route(routes: &[Host]) -> String {
 // uit, maar "deel die terminal" kent alleen die laatste -- stuur je dat over sshd,
 // dan probeert de shell aan de andere kant een commando met die naam te draaien en
 // krijg je een onbegrijpelijke regel in je tab in plaats van een fout.
-fn taurus_route(host: &Host) -> Option<Host> {
+//
+// GEMETEN op de echte opstelling: ursu stond er alleen als sshd en WSL in, terwijl
+// zijn Taurus wel degelijk op 8287 luisterde. "Voeg eerst de Taurus-route toe" zou
+// dan het enige antwoord zijn geweest op een knop die er al staat -- en de route is
+// niets om te kiezen: de poort ligt vast en het adres en de sleutel zijn dezelfde.
+// Dus leiden we hem af. Draait daar geen Taurus, dan weigert de verbinding, en dat
+// is een eerlijker fout dan huiswerk.
+fn taurus_route(host: &Host) -> Host {
     taurus_route_in(host, get_hosts())
 }
 
-fn taurus_route_in(host: &Host, all: Vec<Host>) -> Option<Host> {
+fn taurus_route_in(host: &Host, all: Vec<Host>) -> Host {
     if host.port == TAURUS_PORT {
-        return Some(host.clone());
+        return host.clone();
     }
     let key = machine_key(host);
     all.into_iter()
         .find(|h| h.port == TAURUS_PORT && machine_key(h) == key)
+        .unwrap_or_else(|| {
+            let mut afgeleid = host.clone();
+            afgeleid.port = TAURUS_PORT;
+            afgeleid
+        })
 }
 
 fn group_machines(hosts: Vec<Host>) -> Vec<MachineView> {
@@ -4926,11 +4938,7 @@ fn join_remote_agent(
     if session.trim().is_empty() {
         return Err("Deze agent heeft geen sessie-id om aan te haken.".to_string());
     }
-    let host = taurus_route(&host).ok_or_else(|| {
-        "Deze agent draait in de Taurus op die machine, en daar praat je mee over de \
-         Taurus-route (poort 8287). Voeg die route toe bij de machine, dan kan dit."
-            .to_string()
-    })?;
+    let host = taurus_route(&host);
     let (program, args) = ssh_interactive(&host, format!("TAURUS-JOIN-LOCAL {}", session.trim()))?;
     start_pty(
         &app,
@@ -5877,20 +5885,26 @@ mod tests {
         let taurus = mk("ursu-taurus", 8287);
         let alle = vec![sshd.clone(), taurus.clone()];
 
-        let gekozen = taurus_route_in(&sshd, alle.clone()).expect("de Taurus-route van dezelfde machine");
+        let gekozen = taurus_route_in(&sshd, alle.clone());
         assert_eq!(gekozen.id, "ursu-taurus");
         // En wie er al op zit blijft waar hij is.
-        assert_eq!(taurus_route_in(&taurus, alle).unwrap().id, "ursu-taurus");
+        assert_eq!(taurus_route_in(&taurus, alle).id, "ursu-taurus");
 
-        // Een machine zonder Taurus-route heeft niets om mee te delen: dat moet een
-        // fout worden en geen verbinding naar de verkeerde poort.
-        assert!(taurus_route_in(&sshd, vec![mk("ursu", 22)]).is_none());
+        // GEMETEN op de echte opstelling: ursu stond er alleen als sshd in terwijl
+        // zijn Taurus wel op 8287 luisterde. Dan leiden we de route af -- zelfde
+        // adres, zelfde sleutel, vaste poort -- in plaats van huiswerk te geven.
+        let afgeleid = taurus_route_in(&sshd, vec![mk("ursu", 22)]);
+        assert_eq!(afgeleid.port, 8287);
+        assert_eq!(afgeleid.hostname, "192.168.2.9");
+        assert_eq!(afgeleid.key_path, sshd.key_path);
+
         // En de Taurus-route van een ANDERE machine telt niet mee.
         let mut elders = test_host();
         elders.id = "andere".into();
         elders.hostname = "10.0.0.5".into();
         elders.port = 8287;
-        assert!(taurus_route_in(&sshd, vec![mk("ursu", 22), elders]).is_none());
+        let niet_elders = taurus_route_in(&sshd, vec![mk("ursu", 22), elders]);
+        assert_eq!(niet_elders.hostname, "192.168.2.9", "nooit de Taurus van een andere machine");
     }
 
     // Zonder Taurus-route valt de voorkeur terug op wat er wel is.
