@@ -1168,8 +1168,7 @@ async function refreshHostReachability() {
     // mislukte check verdween ALLE status -- dan lijkt niets meer gemeten.
     for (const s of list) hostStatus[s.id] = s;
   } catch (e) {
-    els.hostStatusMsg.textContent = "✗ " + e;
-    els.hostStatusMsg.className = "status-msg err";
+    machineFout(e);
   }
   renderHostRows();
 }
@@ -1233,6 +1232,19 @@ function renderHostRows() {
     box.querySelector(".machine-sess-toggle").addEventListener("click", () => toggleMachineAgents(m));
     renderMachineAgents(box, m);
     els.hostRows.appendChild(box);
+  }
+}
+
+// Een fout uit het machinescherm hoort ZICHTBAAR te zijn. Hij ging naar
+// `#hf-status`, en dat element zit in het "machine toevoegen"-formulier dat
+// standaard dicht staat -- dus een mislukte join schreef netjes een melding in een
+// verborgen doosje en voelde als een knop die niets doet.
+function machineFout(e) {
+  const msg = String(e && e.message ? e.message : e);
+  toast("✗ " + msg, "err");
+  if (els.hostStatusMsg) {
+    els.hostStatusMsg.textContent = "✗ " + msg;
+    els.hostStatusMsg.className = "status-msg err";
   }
 }
 
@@ -1308,6 +1320,14 @@ async function startDiscovery() {
 
 function stopDiscovery() {
   if (discoTimer) { clearInterval(discoTimer); discoTimer = null; }
+  // Ook de lijst leegmaken. Doe je dat niet, dan staat een verzoek dat je zojuist
+  // beantwoord hebt er bij het volgende openen nog -- en dat token is op, dus die
+  // tweede klik levert alleen een foutmelding op.
+  found = [];
+  const rows = document.querySelector("#found-rows");
+  if (rows) { rows.innerHTML = ""; rows.dataset.sig = ""; }
+  const wrap = document.querySelector("#found-wrap");
+  if (wrap) wrap.classList.add("hidden");
   invoke("discovery_stop").catch(() => {});
 }
 
@@ -1320,9 +1340,12 @@ async function pollDiscovery() {
     renderFound();
     return;
   }
-  // Alleen wat we nog niet kennen: een bekende machine staat hierboven al, met
-  // zijn routes en zijn knoppen. Twee keer dezelfde naam is geen vondst.
-  found = view.machines.filter((m) => !m.known);
+  // ALLES wat vraagt, ook van een machine die je al kent. Dat filter ("toon geen
+  // machine die je al hebt") is een restant van de oude aanwezigheids-discovery en
+  // is bij een hulpvraag precies verkeerd: dat ursu in je hosts.json staat is geen
+  // reden om zijn opgestoken hand niet te tonen. GEMETEN: de backend gaf het
+  // verzoek netjes terug en het scherm bleef leeg.
+  found = view.machines;
   discoNote = view.problem || "";
   // Niet meer "je bent niet vindbaar": in de vraagmodus kondig je alleen aan als je
   // zelf iets vraagt, dus zwijgen is de normale toestand. Wat wél de moeite waard
@@ -1331,12 +1354,25 @@ async function pollDiscovery() {
   renderFound();
 }
 
+// Handtekening van wat er nu staat. Zolang die niet verandert, blijft de DOM staan.
+function foundSignature() {
+  return found.map((f) => `${f.name}|${f.token}|${f.agentTitle}`).join("~");
+}
+
 function renderFound() {
   const wrap = document.querySelector("#found-wrap");
   const rows = document.querySelector("#found-rows");
   const note = document.querySelector("#found-note");
   if (!wrap || !rows || !note) return;
   wrap.classList.toggle("hidden", !found.length);
+  renderFoundNote(note);
+  // NIET elke ronde opnieuw opbouwen. De poll loopt elke 1,5 s, en wie de knop
+  // precies dan indrukt klikt op een element dat tussen muis-neer en muis-op
+  // vervangen is -- er gebeurt dan helemaal niets, zonder enige melding. Alleen
+  // hertekenen als de verzameling verzoeken echt anders is.
+  const sig = foundSignature();
+  if (rows.dataset.sig === sig) return;
+  rows.dataset.sig = sig;
   rows.innerHTML = "";
   // Een verzoek, geen machine. Er staat wie het vraagt, waarbij, en waar dat werk
   // staat -- zonder die agent zou je uitkomen "op een computer", en dan kan het
@@ -1351,12 +1387,17 @@ function renderFound() {
         <div class="host-sub">${escapeHtml([f.agentCwd, f.fingerprint].filter(Boolean).join(" · "))}</div>
       </div>
       <button class="machine-connect">${escapeHtml(t("help_join"))}</button>`;
-    row.querySelector("button").addEventListener("click", () => joinHelpRequest(f));
+    // De hele balk doet mee. Hij ziet eruit als één ding, dus alleen dat kleine
+    // knopje laten werken is een val: je klikt ernaast en er gebeurt niets.
+    row.addEventListener("click", () => joinHelpRequest(f));
     rows.appendChild(row);
   }
-  // Eén eerlijke regel wanneer er niets te zien is, in plaats van een lege lijst
-  // die als "er is niemand" leest. Een firewall die ons tegenhoudt is iets anders
-  // dan een netwerk waar niemand hulp nodig heeft.
+}
+
+// Eén eerlijke regel wanneer er niets te zien is, in plaats van een lege lijst die
+// als "er is niemand" leest. Een firewall die ons tegenhoudt is iets anders dan een
+// netwerk waar niemand hulp nodig heeft.
+function renderFoundNote(note) {
   const lines = [];
   if (discoNote) lines.push(discoNote);
   const fwBlocked = !!(firewall && firewall.checked && firewall.blocked > 0);
@@ -1374,8 +1415,7 @@ function renderFound() {
       try {
         await invoke("firewall_allow", { port: null });
       } catch (e) {
-        els.hostStatusMsg.textContent = "✗ " + e;
-        els.hostStatusMsg.className = "status-msg err";
+        machineFout(e);
       }
       try { firewall = await invoke("firewall_status", { port: null }); } catch (_) {}
       b.disabled = false;
@@ -1407,8 +1447,7 @@ async function joinHelpRequest(f) {
   } catch (e) {
     sessions.delete(id); session.term.dispose(); session.el.remove();
     renderTabs();
-    els.hostStatusMsg.textContent = "✗ " + e;
-    els.hostStatusMsg.className = "status-msg err";
+    machineFout(e);
   }
 }
 
@@ -1517,8 +1556,7 @@ function armTwice(btn, label, run) {
       await run();
     } catch (e) {
       btn.disabled = false;
-      els.hostStatusMsg.textContent = "✗ " + e;
-      els.hostStatusMsg.className = "status-msg err";
+      machineFout(e);
       return;
     }
     renderHostRows();
@@ -1565,8 +1603,7 @@ async function attachFromMachine(m, a) {
   } catch (e) {
     sessions.delete(id); session.term.dispose(); session.el.remove();
     renderTabs();
-    els.hostStatusMsg.textContent = "✗ " + e;
-    els.hostStatusMsg.className = "status-msg err";
+    machineFout(e);
   }
 }
 
