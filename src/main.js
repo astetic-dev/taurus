@@ -1785,7 +1785,7 @@ async function loadLocalHistory() {
     if (gezien.has(f.uuid)) continue;
     gezien.add(f.uuid);
     rows.push({
-      uuid: f.uuid, path: f.cwd, title: f.title || leafOf(f.cwd),
+      uuid: f.uuid, path: f.cwd, title: f.title,
       agent: "claude", model: "", mode: f.mode || "default",
       hostId: "", projectId: "", lastSeen: f.lastSeen, accent: "#7c9cff",
     });
@@ -2991,7 +2991,7 @@ async function startupRestore() {
     if (gezien.has(f.uuid)) continue;
     gezien.add(f.uuid);
     const meta = {
-      uuid: f.uuid, path: f.cwd, title: f.title || leafOf(f.cwd), accent: "#7c9cff",
+      uuid: f.uuid, path: f.cwd, title: f.title, accent: "#7c9cff",
       mode: f.mode || "default", agent: "claude", model: "",
       host_id: "", project_id: "",
     };
@@ -3020,9 +3020,6 @@ async function scanClaudeSessions() {
   }
 }
 let lastScan = null;
-function leafOf(p) {
-  return String(p || "").replace(/[\/]+$/, "").split(/[\/]/).pop() || p || "";
-}
 
 // De vraag zelf. Een rij die niet te hervatten is blijft staan mét de reden en is
 // niet aan te vinken -- verdwijnen was de fout, en een vinkje dat niets doet zou de

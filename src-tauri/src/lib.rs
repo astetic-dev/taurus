@@ -1524,11 +1524,28 @@ fn parse_transcript(uuid: &str, text: &str) -> Option<FoundSession> {
     if s.title.is_empty() {
         s.title = if !summary.is_empty() { summary } else { first_user };
     }
+    // Nog steeds niets? Dan de mapnaam. Die terugval hoort HIER en niet in de
+    // frontend: het pad is al binnen, en zo is er precies één plek waar bepaald
+    // wordt hoe een regel heet -- toetsbaar, zonder een tweede padsplitser in JS
+    // die je alleen ziet falen op een Windows-pad.
+    if s.title.is_empty() {
+        s.title = leaf_of(&s.cwd);
+    }
     // Zonder werkmap valt er niets te hervatten: `--resume` moet ergens starten.
     if s.cwd.is_empty() {
         return None;
     }
     Some(s)
+}
+
+// Alleen de mapnaam, met beide scheidingstekens: een pad kan hier van Windows of
+// van POSIX komen.
+fn leaf_of(path: &str) -> String {
+    path.trim_end_matches(['\\', '/'])
+        .rsplit(['\\', '/'])
+        .find(|p| !p.is_empty())
+        .unwrap_or(path)
+        .to_string()
 }
 
 // De eerste tekst die de gebruiker typte, als terugval-label. Content is soms een
@@ -5906,8 +5923,19 @@ mod tests {
             r#"{"type":"user","cwd":"C:\\x","message":{"content":[{"type":"text","text":"leg de build uit"}]}}"#;
         assert_eq!(parse_transcript("u4", only_user).unwrap().title, "leg de build uit");
 
-        let noise = r#"{"type":"user","cwd":"C:\\x","message":{"content":"/clear"}}"#;
-        assert_eq!(parse_transcript("u5", noise).unwrap().title, "");
+        // Niets bruikbaars? Dan de mapnaam, en nooit het volle pad. Die terugval
+        // stond eerst in de frontend en faalde daar stil op Windows-paden: de rij
+        // toonde `X:\AI\...\oracle-reports-migratie` als titel.
+        let noise = r#"{"type":"user","cwd":"X:\\AI\\projecten\\oracle-reports-migratie","message":{"content":"/clear"}}"#;
+        assert_eq!(parse_transcript("u5", noise).unwrap().title, "oracle-reports-migratie");
+    }
+
+    #[test]
+    fn the_folder_name_survives_both_separators() {
+        assert_eq!(leaf_of(r"X:\AI\projecten\oracle-reports-migratie"), "oracle-reports-migratie");
+        assert_eq!(leaf_of("/srv/icm/werkprocessen"), "werkprocessen");
+        assert_eq!(leaf_of(r"C:\Users\AST\claude\"), "claude");
+        assert_eq!(leaf_of(""), "");
     }
 
     // De hele reden dat dit bestand bestaat: een mislukte herstart mag een sessie
