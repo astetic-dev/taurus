@@ -3032,6 +3032,59 @@ struct MachineAgents {
     // Kon de Taurus op die machine bevraagd worden? "Nee" is iets anders dan
     // "die draait daar niets".
     taurus_seen: bool,
+    // Welke Taurus draait daar, en is die oud genoeg om het join-verb niet te
+    // kennen (#142)? Leeg = niet te lezen, en dan houden we alles zoals het was.
+    peer_version: String,
+    peer_too_old: bool,
+}
+
+// Wat de Taurus daar terugstuurt: zijn sessies én zijn versie (#142). De sessies
+// blijven een string, want het is het bestand zoals het daar staat -- dat parsen we
+// hier, met dezelfde velden als altijd.
+#[derive(serde::Deserialize)]
+struct PeerEnvelope {
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    sessions: serde_json::Value,
+}
+
+impl PeerEnvelope {
+    // GEMETEN tegen ursu: `Get-Content -Raw` geeft geen kale string terug maar een
+    // PSObject met noteproperties, en `ConvertTo-Json` maakt daar `{"value": "..."}`
+    // van. Het commando cast nu naar [string], maar een andere Windows kan hier zo
+    // weer overheen struikelen -- en dan is de hele lijst leeg zonder dat iets zegt
+    // waarom. Dus lezen we allebei de vormen.
+    fn sessions_text(&self) -> String {
+        match &self.sessions {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Object(o) => o
+                .get("value")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            _ => String::new(),
+        }
+    }
+}
+
+// De eerste versie die TAURUS-JOIN-LOCAL kent. Alles ervoor probeert het als
+// commando te draaien.
+const JOIN_SINCE: (u32, u32, u32) = (0, 5, 6);
+
+// "0.5.4" of "0.5.4.0" tegen een drempel. Onbekend of onleesbaar = false: dan halen
+// we niets weg, want een knop weghalen op een vermoeden is erger dan een fout die je
+// kunt lezen.
+fn version_below(v: &str, drempel: (u32, u32, u32)) -> bool {
+    let mut d = v
+        .trim()
+        .split('.')
+        .map(|p| p.trim().parse::<u32>().ok())
+        .take(3);
+    let (Some(Some(a)), Some(Some(b)), Some(Some(c))) = (d.next(), d.next(), d.next()) else {
+        return false;
+    };
+    (a, b, c) < drempel
 }
 
 // Wat de laatste regel van de andere Taurus zegt over zijn eigen sessies. Alleen de
@@ -3082,23 +3135,42 @@ fn collect_agents(sessions: Vec<RemoteSession>, peer_json: Option<&str>) -> Mach
         });
     }
     let Some(txt) = peer_json else { return out };
-    let Ok(peers) = serde_json::from_str::<Vec<PeerSession>>(txt) else {
+    // Twee vormen: de envelop met versie erbij, en de kale lijst van vóór #142.
+    let (versie, lijst) = match serde_json::from_str::<PeerEnvelope>(txt) {
+        Ok(env) => (env.version.clone(), env.sessions_text()),
+        Err(_) => (String::new(), txt.to_string()),
+    };
+    let Ok(peers) = serde_json::from_str::<Vec<PeerSession>>(&lijst) else {
         return out;
     };
     out.taurus_seen = true;
+    out.peer_version = versie;
+    // Onbekend is geen reden om iets weg te halen; alleen een versie die het verb
+    // aantoonbaar niet kent, is dat wel.
+    out.peer_too_old = version_below(&out.peer_version, JOIN_SINCE);
     for p in peers {
         // Alleen wat op DIE machine zelf draait.
         if !p.host_id.trim().is_empty() {
             continue;
         }
         // Draait hij al als mux-sessie, dan is het dezelfde agent en niet een tweede.
-        if out.agents.iter().any(|a| paths_equal(&a.cwd, &p.path)) {
+        //
+        // Alleen tegen de HERDR-regels vergelijken. GEMETEN op ursu: daar draaiden
+        // twee agents in `C:\Users\arjen`, en de tweede verdween tegen de eerste --
+        // want die stond er toen al in. Twee tabs in dezelfde map zijn twee agents;
+        // dat een mux-sessie en een Taurus-tab op hetzelfde pad hetzelfde ding zijn,
+        // geldt niet tussen twee tabs onderling.
+        if out
+            .agents
+            .iter()
+            .any(|a| a.origin == "herdr" && paths_equal(&a.cwd, &p.path))
+        {
             continue;
         }
         // Wél aanhaakbaar: de Taurus daar kan zijn eigen terminal delen, met
         // dezelfde fan-out die de vraagmodus gebruikt. Zonder id lukt dat niet --
         // dan weet de andere kant niet welke sessie je bedoelt.
-        let attachable = !p.id.trim().is_empty();
+        let attachable = !p.id.trim().is_empty() && !out.peer_too_old;
         out.agents.push(RemoteAgent {
             title: p.title,
             agent: if p.agent.is_empty() { "claude".into() } else { p.agent },
@@ -3128,8 +3200,23 @@ fn peer_sessions_command(host: &Host) -> Option<String> {
         // niets betrouwbaars te lezen. Liever niets dan een gokpad.
         return None;
     }
+    // Naast de sessies ook de VERSIE van de Taurus die daar draait (#142).
+    //
+    // GEMETEN tegen ursu: die stond nog op 0.5.4, en die versie kent het join-verb
+    // niet. Hij behandelde het als een gewoon commando, vroeg dus keurig
+    // toestemming, en gaf het door aan cmd -- waarna er in de verse tab
+    // `'TAURUS-JOIN-LOCAL' is not recognized` stond. Dat leest als een kapotte knop
+    // terwijl er niets kapot is: de overkant is gewoon ouder.
+    //
+    // Dit gaat over de gewone route (sshd), niet over de Taurus-poort, dus het kost
+    // aan de overkant geen popup. Lukt het niet, dan blijft het veld leeg en doen we
+    // niets: onbekend is geen reden om een knop weg te halen.
     let ps = "$p = Join-Path $env:APPDATA 'Taurus\\sessions.json'\n\
-              if (Test-Path $p) { Get-Content $p -Raw } else { '[]' }";
+              $s = if (Test-Path $p) { Get-Content $p -Raw } else { '[]' }\n\
+              $v = ''\n\
+              $proc = Get-Process taurus -EA 0 | Select-Object -First 1\n\
+              if ($proc -and $proc.Path) { $v = (Get-Item $proc.Path).VersionInfo.FileVersion }\n\
+              [ordered]@{ version = $v; sessions = [string]$s } | ConvertTo-Json -Compress";
     Some(format!(
         "powershell -NoProfile -EncodedCommand {}",
         b64(&utf16le(ps))
@@ -6105,6 +6192,92 @@ mod tests {
     fn history_ignores_an_entry_without_a_uuid() {
         let list = merge_history(Vec::new(), HistoryEntry::default(), 1);
         assert!(list.is_empty());
+    }
+
+    // GEMETEN op ursu, en precies wat er in beeld kwam: daar draaide nog 0.5.4, die
+    // het join-verb niet kent. Hij vroeg keurig toestemming en gaf het daarna aan
+    // cmd, dus in de verse tab stond `'TAURUS-JOIN-LOCAL' is not recognized`. Dat
+    // leest als een kapotte knop. Een oudere overkant hoort die knop niet te krijgen.
+    #[test]
+    fn an_older_taurus_over_there_is_shown_but_not_offered() {
+        let envelop = |v: &str| {
+            format!(
+                r#"{{"version":"{v}","sessions":"[{{\"id\":\"s7\",\"title\":\"Ontwikkel\",\"path\":\"C:\\\\werk\",\"agent\":\"claude\",\"host_id\":\"\"}}]"}}"#
+            )
+        };
+
+        let oud = collect_agents(Vec::new(), Some(&envelop("0.5.4")));
+        assert_eq!(oud.agents.len(), 1, "tonen doen we hem wel");
+        assert_eq!(oud.peer_version, "0.5.4");
+        assert!(oud.peer_too_old);
+        assert!(!oud.agents[0].attachable, "geen knop die in cmd eindigt");
+
+        let nieuw = collect_agents(Vec::new(), Some(&envelop("0.5.7.0")));
+        assert!(!nieuw.peer_too_old, "vier delen is ook een versie");
+        assert!(nieuw.agents[0].attachable);
+
+        // Niet te lezen versie: niets weghalen. Een knop weghalen op een vermoeden
+        // is erger dan een fout die je kunt lezen.
+        let onbekend = collect_agents(Vec::new(), Some(&envelop("")));
+        assert!(!onbekend.peer_too_old);
+        assert!(onbekend.agents[0].attachable);
+
+        // GEMETEN: PowerShell verpakte de sessies als {"value": "..."} in plaats van
+        // als string, en toen was de lijst leeg zonder dat iets zei waarom.
+        let verpakt = r#"{"version":"0.5.7","sessions":{"value":"[{\"id\":\"s7\",\"title\":\"Ontwikkel\",\"path\":\"C:\\\\werk\",\"agent\":\"claude\",\"host_id\":\"\"}]","Length":42}}"#;
+        let uit = collect_agents(Vec::new(), Some(verpakt));
+        assert!(uit.taurus_seen, "de verpakte vorm hoort ook gelezen te worden");
+        assert_eq!(uit.agents.len(), 1);
+        assert!(uit.agents[0].attachable);
+
+        // En de kale lijst van vóór deze envelop blijft gewoon werken.
+        let kaal = collect_agents(
+            Vec::new(),
+            Some(r#"[{"id":"s7","title":"Ontwikkel","path":"C:\\werk","agent":"claude","host_id":""}]"#),
+        );
+        assert!(kaal.taurus_seen);
+        assert!(kaal.agents[0].attachable);
+    }
+
+    // GEMETEN op ursu: twee tabs in dezelfde map, en er kwam er één door. De
+    // ontdubbeling is er om een mux-sessie en de Taurus-tab op hetzelfde pad niet
+    // dubbel te tonen -- niet om twee agents die toevallig in dezelfde map werken
+    // tot één te maken.
+    #[test]
+    fn two_tabs_in_the_same_folder_are_two_agents() {
+        let peer = r#"[
+            {"id":"s1","title":"Fan speed","path":"C:\\Users\\arjen","agent":"claude","host_id":""},
+            {"id":"s2","title":"Remote verbinden","path":"C:\\Users\\arjen","agent":"claude","host_id":""}
+        ]"#;
+        let uit = collect_agents(Vec::new(), Some(peer));
+        assert_eq!(uit.agents.len(), 2, "twee tabs zijn twee agents");
+        assert_eq!(uit.agents[0].session, "s1");
+        assert_eq!(uit.agents[1].session, "s2");
+
+        // En de ontdubbeling waar hij wél voor is, blijft staan: draait die map al
+        // als mux-sessie, dan is de tab erbij dezelfde agent.
+        let mux = vec![RemoteSession {
+            name: "taurus-ursu-c-users-arjen".into(),
+            cwd: "C:\\Users\\arjen".into(),
+            agent: "claude".into(),
+            ..Default::default()
+        }];
+        let samen = collect_agents(mux, Some(peer));
+        assert_eq!(samen.agents.len(), 1, "mux-sessie en tab op hetzelfde pad zijn één");
+        assert_eq!(samen.agents[0].origin, "herdr");
+    }
+
+    #[test]
+    fn a_version_is_compared_by_its_parts_not_as_text() {
+        assert!(version_below("0.5.4", (0, 5, 6)));
+        assert!(version_below("0.4.9", (0, 5, 6)));
+        assert!(!version_below("0.5.6", (0, 5, 6)));
+        assert!(!version_below("0.5.10", (0, 5, 6)), "tekstvergelijking zou hier vallen");
+        assert!(!version_below("1.0.0", (0, 5, 6)));
+        // Onleesbaar = geen oordeel.
+        assert!(!version_below("", (0, 5, 6)));
+        assert!(!version_below("onbekend", (0, 5, 6)));
+        assert!(!version_below("0.5", (0, 5, 6)));
     }
 
     // Een agent die in de Taurus op die machine draait is nu WEL aanhaakbaar: die

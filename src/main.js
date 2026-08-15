@@ -59,7 +59,9 @@ const I18N = {
     agents_leftovers: "{n} lege sessie(s) die Taurus liet staan",
     agents_clean: "Opruimen",
     agent_local: "in Taurus daar",
-    agent_local_hint: "Deze agent draait in de Taurus op die machine. Zichtbaar, maar er is nog geen kanaal om hem hiervandaan over te nemen.",
+    agent_local_hint: "Deze agent draait in de Taurus op die machine. Zichtbaar, maar er is geen sessie-id om mee te kijken.",
+    agent_peer_old: "Taurus daar is te oud",
+    agent_peer_old_hint: "Op die machine draait Taurus {v}; meekijken met een agent kan vanaf 0.5.6. Werk hem daar bij, dan verschijnt de knop vanzelf.",
     session_attach: "Aanhaken",
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
     session_stop_sure: "zeker weten?",
@@ -298,7 +300,9 @@ const I18N = {
     agents_leftovers: "{n} empty session(s) Taurus left behind",
     agents_clean: "Clean up",
     agent_local: "in Taurus there",
-    agent_local_hint: "This agent runs in the Taurus on that machine. Visible, but there is no channel yet to take it over from here.",
+    agent_local_hint: "This agent runs in the Taurus on that machine. Visible, but there is no session id to read along with.",
+    agent_peer_old: "that Taurus is too old",
+    agent_peer_old_hint: "That machine runs Taurus {v}; reading along with an agent needs 0.5.6 or later. Update it there and the button appears by itself.",
     session_attach: "Attach",
     session_stop_hint: "End this session on the other machine",
     session_stop_sure: "are you sure?",
@@ -1499,6 +1503,20 @@ async function toggleMachineAgents(m) {
   renderHostRows();
 }
 
+// Waarom staat er geen knop bij deze agent? Er zijn twee redenen, en ze vragen om
+// verschillende dingen van je. Zonder sessie-id valt er niets aan te wijzen; is de
+// Taurus daar ouder dan #136, dan kent hij het verzoek niet -- die probeert het als
+// commando te draaien en dat eindigt in cmd, wat leest als een kapotte knop (#142).
+function bareReason(view, a) {
+  if (a.origin === "taurus" && view && view.peerTooOld) {
+    return {
+      label: t("agent_peer_old"),
+      hint: t("agent_peer_old_hint").replace("{v}", view.peerVersion || "?"),
+    };
+  }
+  return { label: t("agent_local"), hint: t("agent_local_hint") };
+}
+
 function renderMachineAgents(box, m) {
   const st = machineAgents[m.key];
   if (!st) return;
@@ -1523,6 +1541,7 @@ function renderMachineAgents(box, m) {
     const row = document.createElement("div");
     row.className = "route-row";
     const meta = [a.agent, a.cwd].filter(Boolean).join(" · ");
+    const waarom = bareReason(v, a);
     row.innerHTML = `
       <span class="host-dot ${a.status ? "up" : "pending"}"></span>
       <span class="route-name">${escapeHtml(a.title || a.session)}</span>
@@ -1531,7 +1550,7 @@ function renderMachineAgents(box, m) {
       ${a.attachable
         ? `<button class="host-test sess-open">${escapeHtml(t("session_attach"))}</button>
            <button class="host-del sess-stop" title="${escapeHtml(t("session_stop_hint"))}">✕</button>`
-        : `<span class="sess-bare" title="${escapeHtml(t("agent_local_hint"))}">${escapeHtml(t("agent_local"))}</span>`}`;
+        : `<span class="sess-bare" title="${escapeHtml(waarom.hint)}">${escapeHtml(waarom.label)}</span>`}`;
     if (a.attachable) {
       row.querySelector(".sess-open").addEventListener("click", () => attachFromMachine(m, a));
       wireStopButton(row.querySelector(".sess-stop"), m, a.session);
@@ -1923,7 +1942,8 @@ async function loadRemoteSessions() {
         <span class="route-mux">${escapeHtml([a.agent, a.cwd].filter(Boolean).join(" · "))}</span>
         ${a.attachable
           ? `<button class="host-test">${escapeHtml(t("session_attach"))}</button>`
-          : `<span class="sess-bare" title="${escapeHtml(t("agent_local_hint"))}">${escapeHtml(t("agent_local"))}</span>`}`;
+          : (() => { const w = bareReason(view, a);
+              return `<span class="sess-bare" title="${escapeHtml(w.hint)}">${escapeHtml(w.label)}</span>`; })()}`;
       if (a.attachable) {
         row.querySelector("button").addEventListener("click", () => {
           els.attachModal.classList.add("hidden");
