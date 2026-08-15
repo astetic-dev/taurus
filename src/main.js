@@ -60,6 +60,8 @@ const I18N = {
     agents_clean: "Opruimen",
     agent_local: "in Taurus daar",
     agent_local_hint: "Deze agent draait in de Taurus op die machine. Zichtbaar, maar er is geen sessie-id om mee te kijken.",
+    joined_help: "Je zit in de sessie van {who}. Wat je typt komt daar aan — zolang er niets gebeurt blijft het scherm zoals het is.",
+    joined_agent: "Je kijkt mee met een agent op {who}. Wat je typt komt daar aan — zolang er niets gebeurt blijft het scherm zoals het is.",
     agent_peer_old: "Taurus daar is te oud",
     agent_peer_old_hint: "Op die machine draait Taurus {v}; meekijken met een agent kan vanaf 0.5.6. Werk hem daar bij, dan verschijnt de knop vanzelf.",
     session_attach: "Aanhaken",
@@ -301,6 +303,8 @@ const I18N = {
     agents_clean: "Clean up",
     agent_local: "in Taurus there",
     agent_local_hint: "This agent runs in the Taurus on that machine. Visible, but there is no session id to read along with.",
+    joined_help: "You are in {who}'s session. What you type arrives there — while nothing happens, the screen stays as it is.",
+    joined_agent: "You are reading along with an agent on {who}. What you type arrives there — while nothing happens, the screen stays as it is.",
     agent_peer_old: "that Taurus is too old",
     agent_peer_old_hint: "That machine runs Taurus {v}; reading along with an agent needs 0.5.6 or later. Update it there and the button appears by itself.",
     session_attach: "Attach",
@@ -1452,6 +1456,15 @@ function renderFoundNote(note) {
 // Meedoen met een hulpvraag. Geen kaart, geen machine erbij in hosts.json: iemand
 // helpen maakt zijn computer nog niet tot een van jouw machines. Je landt in ZIJN
 // terminal en typt daarin mee.
+// Eén regel in je eigen tab: je bent binnen. Meekijken begint stil -- er komt pas
+// beeld als er iets gebeurt, en bij een agent die staat te wachten gebeurt er niets.
+// Dan lijkt een lege tab op een mislukte verbinding, en ga je typen om te kijken of
+// het werkt (#146). Deze regel gaat NIET naar de andere kant: hij staat hier, in
+// jouw scherm, en de sessie daar merkt er niets van.
+function joinedNote(session, tekst) {
+  session.term.write(`\x1b[2m— ${tekst}\x1b[0m\r\n`);
+}
+
 async function joinHelpRequest(f) {
   const id = "s" + (++seq);
   const session = spawnTerminal({
@@ -1465,6 +1478,7 @@ async function joinHelpRequest(f) {
       id, gen: session.gen, found: f,
       cols: session.term.cols, rows: session.term.rows,
     });
+    joinedNote(session, t("joined_help").replace("{who}", f.name || "?"));
     closeHostModal();
     showView(id);
   } catch (e) {
@@ -1638,6 +1652,9 @@ async function attachFromMachine(m, a) {
       id, gen: session.gen, hostId: host.id, session: a.session,
       cols: session.term.cols, rows: session.term.rows,
     });
+    if (a.origin === "taurus") {
+      joinedNote(session, t("joined_agent").replace("{who}", m.label || host.hostname));
+    }
     closeHostModal();
     recordSession(session);
     showView(id);

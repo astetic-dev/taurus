@@ -1940,6 +1940,7 @@ fn offers() -> &'static Mutex<HashMap<String, Vec<OfferSink>>> {
 // abonnees ruimen we hier op: een dichte channel is het einde van dat meekijken en
 // geen reden om de sessie zelf iets te laten merken.
 fn fan_out(id: &str, data: &[u8]) {
+    remember(id, data);
     let mut map = offers().lock().unwrap();
     let Some(list) = map.get_mut(id) else { return };
     list.retain(|tx| tx.send(data.to_vec()).is_ok());
@@ -1948,8 +1949,54 @@ fn fan_out(id: &str, data: &[u8]) {
     }
 }
 
+// Het laatste stuk beeld van elke lokale sessie (#146).
+//
+// GEMETEN, en het was precies de klacht: wie meekomt ziet niets tot er iets gebeurt.
+// De fan-out stuurt namelijk alleen NIEUWE bytes door, dus je landt in een leeg
+// scherm terwijl er aan de overkant een agent staat te wachten. Je moest daar eerst
+// iets typen om te weten dat je binnen was.
+//
+// Dus houden we per sessie het laatste stuk vast en spelen dat af zodra iemand
+// meekijkt. Geen toetsaanslag naar de andere kant -- een redraw afdwingen (Ctrl-L)
+// zou de terminal van de ander verstoren, en dat is niet aan de bezoeker.
+const SCROLLBACK: usize = 64 * 1024;
+static RECENT: std::sync::OnceLock<Mutex<HashMap<String, Vec<u8>>>> = std::sync::OnceLock::new();
+
+fn recent() -> &'static Mutex<HashMap<String, Vec<u8>>> {
+    RECENT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remember(id: &str, data: &[u8]) {
+    let mut map = recent().lock().unwrap();
+    let buf = map.entry(id.to_string()).or_default();
+    buf.extend_from_slice(data);
+    if buf.len() > SCROLLBACK {
+        // Vanaf het begin snoeien, maar niet middenin een escape-reeks: dan tekent
+        // de eerste regel als rommel. Vanaf de eerste ESC na het snijvlak is het
+        // weer een heel commando.
+        let vanaf = buf.len() - SCROLLBACK;
+        let start = buf[vanaf..]
+            .iter()
+            .position(|b| *b == 0x1b)
+            .map(|p| vanaf + p)
+            .unwrap_or(vanaf);
+        buf.drain(..start);
+    }
+}
+
+fn forget(id: &str) {
+    recent().lock().unwrap().remove(id);
+}
+
 fn offer_subscribe(id: &str) -> std::sync::mpsc::Receiver<Vec<u8>> {
     let (tx, rx) = std::sync::mpsc::channel();
+    // Eerst het beeld waar je binnenkomt, dan pas wat er nieuw bij komt. Andersom
+    // zou het laatste scherm over verse uitvoer heen tekenen.
+    if let Some(buf) = recent().lock().unwrap().get(id) {
+        if !buf.is_empty() {
+            let _ = tx.send(buf.clone());
+        }
+    }
     offers().lock().unwrap().entry(id.to_string()).or_default().push(tx);
     rx
 }
@@ -2054,6 +2101,8 @@ fn start_pty(
                 Err(_) => break,
             }
         }
+        // Sessie is voorbij: het laatste beeld hoeft niet bewaard te blijven.
+        forget(&id2);
         let _ = app2.emit("pty-exit", (id2.clone(), gen));
     });
 
@@ -6265,6 +6314,56 @@ mod tests {
         let samen = collect_agents(mux, Some(peer));
         assert_eq!(samen.agents.len(), 1, "mux-sessie en tab op hetzelfde pad zijn één");
         assert_eq!(samen.agents[0].origin, "herdr");
+    }
+
+    // GEMETEN als klacht: "ik moest eerst iets typen voordat er iets werd getoond".
+    // Dat klopte -- de fan-out stuurt alleen nieuwe bytes door, dus wie meekomt bij
+    // een agent die staat te wachten ziet niets (#146). Nu krijgt hij eerst het
+    // laatste beeld, en pas daarna wat er nieuw bij komt.
+    #[test]
+    fn joining_shows_the_screen_you_land_in() {
+        let id = "sBeeld";
+        forget(id);
+        fan_out(id, b"C:\\werk> claude\r\n");
+        fan_out(id, b"Wat wil je doen? ");
+
+        let rx = offer_subscribe(id);
+        let eerste = rx.try_recv().expect("het laatste beeld hoort er meteen te zijn");
+        assert_eq!(
+            String::from_utf8_lossy(&eerste),
+            "C:\\werk> claude\r\nWat wil je doen? "
+        );
+
+        // En daarna gewoon de nieuwe bytes, in volgorde.
+        fan_out(id, b"ja");
+        assert_eq!(rx.try_recv().unwrap(), b"ja".to_vec());
+
+        // Sessie voorbij = beeld weg; een volgende sessie met hetzelfde id begint
+        // niet met het scherm van zijn voorganger.
+        forget(id);
+        let leeg = offer_subscribe(id);
+        assert!(leeg.try_recv().is_err(), "niets te herhalen na afloop");
+    }
+
+    // Het geheugen is begrensd, en er wordt op een escape-grens gesneden: middenin
+    // een reeks afkappen tekent als rommel op de eerste regel.
+    #[test]
+    fn the_remembered_screen_stays_bounded_and_cuts_on_an_escape() {
+        let id = "sGroot";
+        forget(id);
+        // Ruim over de grens heen, in stukken die op een ESC beginnen.
+        let brok = {
+            let mut v = vec![0x1b];
+            v.extend(std::iter::repeat(b'x').take(4095));
+            v
+        };
+        for _ in 0..40 {
+            fan_out(id, &brok);
+        }
+        let bewaard = recent().lock().unwrap().get(id).cloned().unwrap_or_default();
+        assert!(bewaard.len() <= SCROLLBACK, "niet ongelimiteerd meegroeien");
+        assert_eq!(bewaard.first(), Some(&0x1b), "beginnen bij een heel commando");
+        forget(id);
     }
 
     #[test]
