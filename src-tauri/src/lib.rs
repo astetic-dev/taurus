@@ -181,6 +181,26 @@ fn preferred_route(routes: &[Host]) -> String {
         .unwrap_or_default()
 }
 
+// De route waarlangs de Taurus op die machine zelf te bereiken is (#136).
+//
+// Een machine heeft meestal meer dan een route: sshd op 22, misschien WSL, en de
+// Taurus daar op zijn eigen poort. Voor het STARTEN van een agent maakt dat niet
+// uit, maar "deel die terminal" kent alleen die laatste -- stuur je dat over sshd,
+// dan probeert de shell aan de andere kant een commando met die naam te draaien en
+// krijg je een onbegrijpelijke regel in je tab in plaats van een fout.
+fn taurus_route(host: &Host) -> Option<Host> {
+    taurus_route_in(host, get_hosts())
+}
+
+fn taurus_route_in(host: &Host, all: Vec<Host>) -> Option<Host> {
+    if host.port == TAURUS_PORT {
+        return Some(host.clone());
+    }
+    let key = machine_key(host);
+    all.into_iter()
+        .find(|h| h.port == TAURUS_PORT && machine_key(h) == key)
+}
+
 fn group_machines(hosts: Vec<Host>) -> Vec<MachineView> {
     let mut order: Vec<String> = Vec::new();
     let mut buckets: HashMap<String, Vec<Host>> = HashMap::new();
@@ -4906,6 +4926,11 @@ fn join_remote_agent(
     if session.trim().is_empty() {
         return Err("Deze agent heeft geen sessie-id om aan te haken.".to_string());
     }
+    let host = taurus_route(&host).ok_or_else(|| {
+        "Deze agent draait in de Taurus op die machine, en daar praat je mee over de \
+         Taurus-route (poort 8287). Voeg die route toe bij de machine, dan kan dit."
+            .to_string()
+    })?;
     let (program, args) = ssh_interactive(&host, format!("TAURUS-JOIN-LOCAL {}", session.trim()))?;
     start_pty(
         &app,
@@ -5833,6 +5858,39 @@ mod tests {
         assert_eq!(m[0].routes.len(), 3);
         // De Taurus-route heeft voorkeur: geen sleutelruil, geen sshd nodig.
         assert_eq!(m[0].preferred, "ursu-taurus");
+    }
+
+    // "Deel die terminal" kent alleen de Taurus aan de andere kant (#136). Kies je
+    // een agent terwijl de sshd-route bovenaan staat, dan hoort het verb tóch over
+    // de Taurus-route te gaan -- anders draait de shell daar een commando met die
+    // naam en krijg je onzin in je tab in plaats van een fout.
+    #[test]
+    fn joining_an_agent_always_goes_over_the_taurus_route() {
+        let mk = |id: &str, port: u16| {
+            let mut h = test_host();
+            h.id = id.into();
+            h.hostname = "192.168.2.9".into();
+            h.port = port;
+            h
+        };
+        let sshd = mk("ursu", 22);
+        let taurus = mk("ursu-taurus", 8287);
+        let alle = vec![sshd.clone(), taurus.clone()];
+
+        let gekozen = taurus_route_in(&sshd, alle.clone()).expect("de Taurus-route van dezelfde machine");
+        assert_eq!(gekozen.id, "ursu-taurus");
+        // En wie er al op zit blijft waar hij is.
+        assert_eq!(taurus_route_in(&taurus, alle).unwrap().id, "ursu-taurus");
+
+        // Een machine zonder Taurus-route heeft niets om mee te delen: dat moet een
+        // fout worden en geen verbinding naar de verkeerde poort.
+        assert!(taurus_route_in(&sshd, vec![mk("ursu", 22)]).is_none());
+        // En de Taurus-route van een ANDERE machine telt niet mee.
+        let mut elders = test_host();
+        elders.id = "andere".into();
+        elders.hostname = "10.0.0.5".into();
+        elders.port = 8287;
+        assert!(taurus_route_in(&sshd, vec![mk("ursu", 22), elders]).is_none());
     }
 
     // Zonder Taurus-route valt de voorkeur terug op wat er wel is.
