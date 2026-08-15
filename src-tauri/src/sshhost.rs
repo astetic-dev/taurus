@@ -669,6 +669,49 @@ impl HostSession {
     }
 
     // De sessie-popup. Bij "always" onthouden we het antwoord bij de peer.
+    // Toestemming om MEE TE KIJKEN met een sessie die hier al draait (#149).
+    //
+    // Dit is een andere vraag dan "mag er een sessie komen", en hij verdiende zijn
+    // eigen popup. GEMELD na gebruik: *allow* en *join* deden hetzelfde -- en
+    // terecht, want join betekent "zet die sessie ook op mijn scherm" en die staat
+    // hier al: het IS mijn terminal. Een knop die niets toevoegt hoort er niet te
+    // staan. Hetzelfde geldt voor "vol beheer" (er start niets, de sessie houdt de
+    // macht die hij had) en voor "niet meer vragen": dat zet auto_allow, en dan
+    // komen ook echte sessieverzoeken er ongevraagd door. Meekijken mag geen
+    // achterdeur zijn naar iets groters.
+    async fn ask_share(&mut self, what: &str) -> Decision {
+        if self.auto_allow {
+            return Decision::Allow;
+        }
+        let d = self
+            .state
+            .consents
+            .ask(
+                &self.app,
+                "share",
+                serde_json::json!({
+                    "user": self.user,
+                    "address": self.address,
+                    "fingerprint": self.fingerprint,
+                    "what": what,
+                }),
+            )
+            .await;
+        if d == Decision::Block {
+            let fp = self.fingerprint.clone();
+            upsert_peer(&fp, |p| {
+                p.blocked = true;
+                p.auto_allow = false;
+            });
+        }
+        // Alleen de weigering hier: de toestemming wordt geaudit door wie hem
+        // gebruikt, mét het sessie-id erbij.
+        if !d.permits() {
+            audit(&self.app, "share-deny", &self.peer_name(), what);
+        }
+        d
+    }
+
     async fn ask_session(&mut self, what: &str) -> Decision {
         if self.auto_allow {
             return Decision::Allow;
@@ -805,7 +848,7 @@ impl HostSession {
             return Ok(());
         }
         let wat = crate::local_session_label(&self.app, id);
-        let d = self.ask_session(&format!("meekijken met {wat}")).await;
+        let d = self.ask_share(&wat).await;
         if !d.permits() {
             session.channel_failure(channel)?;
             return Ok(());

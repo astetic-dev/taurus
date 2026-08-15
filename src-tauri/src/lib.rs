@@ -4967,11 +4967,14 @@ pub(crate) fn local_session_exists(app: &AppHandle, id: &str) -> bool {
 // sessions.json en niet in de draaiende map, dus die lezen we daar; lukt dat niet,
 // dan is het id zelf nog altijd eerlijker dan een lege regel.
 pub(crate) fn local_session_label(_app: &AppHandle, id: &str) -> String {
+    // Leeg als we hem niet kennen -- het venster maakt daar "een agent op deze
+    // computer" van. Het id zelf zeggen ("meekijken met s3") is geen naam maar
+    // administratie, en degene die de vraag beantwoordt heeft er niets aan.
     get_sessions()
         .into_iter()
         .find(|s| s.id == id)
         .map(|s| if s.title.trim().is_empty() { s.path } else { s.title })
-        .unwrap_or_else(|| id.to_string())
+        .unwrap_or_default()
 }
 
 // Meelezen met een lokale sessie: dezelfde bytes die naar het venster gaan.
