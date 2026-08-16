@@ -76,6 +76,7 @@ const I18N = {
     restore_more: "De {read} nieuwste van {total} gesprekken die Claude nog heeft.",
     resume_no_host: "machine bestaat niet meer",
     resume_no_transcript: "geen transcript gevonden",
+    resume_no_folder: "de map is niet bereikbaar ({path}) — netwerkschijf niet verbonden?",
     ago_now: "zojuist", ago_min: "{n} min geleden", ago_hour: "{n} uur geleden", ago_day: "{n} dagen geleden",
     hosts_known: "Bekende machines",
     found_title: "Iemand vraagt hulp",
@@ -323,6 +324,7 @@ const I18N = {
     restore_more: "The {read} most recent of {total} conversations Claude still has.",
     resume_no_host: "machine no longer exists",
     resume_no_transcript: "no transcript found",
+    resume_no_folder: "the folder is not reachable ({path}) — network drive disconnected?",
     ago_now: "just now", ago_min: "{n} min ago", ago_hour: "{n} h ago", ago_day: "{n} days ago",
     hosts_known: "Known machines",
     found_title: "Someone is asking for help",
@@ -3007,6 +3009,17 @@ async function resumeBlocker(meta) {
   // zou hem altijd overslaan. Draait er een multiplexer, dan haakt de herstart
   // bovendien gewoon aan de nog levende sessie aan; zo niet, dan vindt
   // claude --resume het transcript daar zelf.
+  // Eerst de werkmap, en pas daarna het transcript.
+  //
+  // GEMETEN toen X: was losgeraakt: het transcript staat LOKAAL in ~/.claude, dus
+  // die check zei vrolijk "ja hoor" terwijl de map waarin de agent moet starten
+  // onbereikbaar was. De rij bood zich dus aan, en klikken gaf alleen "hervatten
+  // mislukt" -- terwijl de echte reden een niet-verbonden netwerkschijf was.
+  if (meta.path) {
+    let er = true;
+    try { er = await invoke("path_exists", { path: meta.path }); } catch (_) {}
+    if (!er) return t("resume_no_folder").replace("{path}", meta.path);
+  }
   let st = { exists: false, ageSecs: 0 };
   try { st = await invoke("session_state", { path: meta.path, uuid: meta.uuid }); } catch (_) {}
   if (!st.exists) return t("resume_no_transcript");
@@ -3045,14 +3058,23 @@ async function restoreSessions(metas) {
         hostId: session.hostId || "",
         cols: session.term.cols, rows: session.term.rows,
       });
-    } catch (_) {
+      // Hervat = door Taurus gestart, dus hij hoort in de geschiedenis. Zonder dit
+      // blijft die lijst leeg voor wie zijn sessies alleen maar hervat: hij werd
+      // alleen gevuld bij een VERSE start, en dat is precies de gebruiker die er
+      // het meest aan heeft (#152).
+      recordSession(session);
+    } catch (e) {
       sessions.delete(id); session.term.dispose(); session.el.remove();
-      failures.push(`${meta.title || meta.path} (${uuid.slice(0, 8)})`);
+      // De reden meenemen. De backend zegt precies wat er mis is ("Map bestaat niet
+      // of is niet bereikbaar: X:\..."), en dat werd hier vervangen door een lijstje
+      // titels -- waarmee een losgeraakte netwerkschijf eruitziet als een kapotte
+      // sessie.
+      failures.push(`${meta.title || meta.path} (${uuid.slice(0, 8)}): ${e}`);
     }
   }
   showView("new");            // herstelde tabs in de balk, maar blijf op het startscherm
   persistSessionsToDisk();
-  if (failures.length) toast(`${t("restore_failed")} ${failures.join(", ")}`, "err");
+  if (failures.length) toast(`${t("restore_failed")} ${failures.join(" · ")}`, "err");
 }
 
 // Bij het opstarten. Drie standen: vragen (default), stil hervatten zoals het was,
