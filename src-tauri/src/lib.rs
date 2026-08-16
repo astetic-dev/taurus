@@ -1599,7 +1599,17 @@ fn first_user_text(v: &serde_json::Value) -> String {
     };
     let txt = txt.trim();
     // Commando's en systeemruis zijn geen titel.
-    if txt.is_empty() || txt.starts_with('<') || txt.starts_with('/') {
+    //
+    // GEMELD: een sessie die je onderbrak heette daarna "[Request interrupted by
+    // user]". Dat is geen naam maar de laatste gebeurtenis -- de agent schrijft dat
+    // zelf in het transcript als een gebruikersregel. Zo'n regel tussen blokhaken is
+    // altijd van de harnas en nooit van jou, dus we lopen door naar de regel die je
+    // wél getypt hebt.
+    if txt.is_empty()
+        || txt.starts_with('<')
+        || txt.starts_with('/')
+        || (txt.starts_with('[') && txt.ends_with(']'))
+    {
         return String::new();
     }
     // Op één regel: een prompt van vijf alinea's is geen label, en een harde
@@ -6202,6 +6212,32 @@ mod tests {
         assert_eq!(parse_transcript("u5", noise).unwrap().title, "oracle-reports-migratie");
     }
 
+    // GEMELD: een sessie die je onderbrak heette daarna "[Request interrupted by
+    // user]" -- de agent schrijft die regel zelf in het transcript, als een
+    // gebruikersregel. Dat is de laatste gebeurtenis en geen naam, en juist bij de
+    // sessie die je wilt hervatten zie je hem staan.
+    #[test]
+    fn an_interruption_is_not_a_name() {
+        let onderbroken = [
+            r#"{"type":"user","cwd":"X:\\AI\\projecten\\oracle-reports-migratie","message":{"content":"[Request interrupted by user]"}}"#,
+            r#"{"type":"user","cwd":"X:\\AI\\projecten\\oracle-reports-migratie","message":{"content":"draai de conversie opnieuw"}}"#,
+        ]
+        .join("\n");
+        assert_eq!(
+            parse_transcript("u6", &onderbroken).unwrap().title,
+            "draai de conversie opnieuw",
+            "doorlopen naar de regel die iemand wél typte"
+        );
+
+        // Staat er verder niets van jou in -- een sessie die alleen op een /goal
+        // liep, zoals die conversie -- dan is de mapnaam het eerlijke label.
+        let alleen_onderbreking = r#"{"type":"user","cwd":"X:\\AI\\projecten\\oracle-reports-migratie","message":{"content":"[Request interrupted by user]"}}"#;
+        assert_eq!(
+            parse_transcript("u7", alleen_onderbreking).unwrap().title,
+            "oracle-reports-migratie"
+        );
+    }
+
     #[test]
     fn the_folder_name_survives_both_separators() {
         assert_eq!(leaf_of(r"X:\AI\projecten\oracle-reports-migratie"), "oracle-reports-migratie");
@@ -7104,6 +7140,9 @@ mod tests {
         assert!(b.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]), "{b:?}");
     }
 
+    // Deze stond hier zonder #[test] en liep dus nooit mee -- gevonden bij het
+    // uitzoeken waarom hervatten faalde, precies het pad dat hij dekt.
+    #[test]
     fn build_command_claude_create_and_resume() {
         let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true, None);
         assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
