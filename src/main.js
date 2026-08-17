@@ -2224,6 +2224,7 @@ function openAttachModal() {
 async function loadLocalHistory() {
   const box = document.querySelector("#at-local");
   if (!box) return;
+  box.innerHTML = `<div class="host-empty">${escapeHtml(t("attach_loading"))}</div>`;
   let hist = [];
   try { hist = await invoke("session_history"); } catch (_) {}
   const open = new Set([...sessions.values()].map((s) => s.uuid).filter(Boolean));
@@ -5840,6 +5841,12 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   // De ＋ maakt een agent; beheren zit onder de voettekst (#157).
   document.querySelector("#add-project-btn").addEventListener("click", openNewAgent);
+  // Zelfde scherm, maar meteen op "een map die je al hebt": vanuit de
+  // processenkop wil je een proces, niet eerst nog een soort kiezen.
+  document.querySelector("#add-process-btn").addEventListener("click", () => {
+    openNewAgent();
+    selectNaKind("plain");
+  });
   els.naHost.addEventListener("change", () => { naDraft.host_id = els.naHost.value; renderNewAgentHost(); naCheckPath(); });
   els.naBrowse.addEventListener("click", async () => {
     let dir = null;

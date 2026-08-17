@@ -1,6 +1,6 @@
 # Special agents — installeren en doorlopen
 
-Versie 0.6.5, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
+Versie 0.6.6, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
 zit staat onderaan.
 
 ## 1. Draaien zonder je productie aan te raken
@@ -198,6 +198,12 @@ formaat als `AGENTS` en `DROPZONE` -- geen streepje in de lijst meer.
   hij niet langer optioneel.
 - **De machines-knop (🖥) staat rechtsboven** bij ⚙ en ⟳ -- die hoort bij de app,
   niet bij je agentlijst, en het geeft de sectiekop links de ruimte terug.
+- **⇱ Verder werken staat bij de processen**, niet bij de agents. Het pakt een
+  eerder gesprek of een draaiende sessie op, en dat is werk. De agents hebben hun
+  **≡** voor hun eigen geschiedenis. Daar staat ook een eigen **＋**, die het
+  Nieuwe-agent-scherm meteen op *een map die je al hebt* opent.
+- **⇱ toont nu "laden…"** terwijl het de transcripts leest. Het vak bleef anders
+  leeg tot de data binnen was, en dan lijkt de knop niets te doen.
 - **De knoppen zijn kleiner en staan dichter op elkaar.**
 - **Geen kleuren.** Die blijven op de tabs, waar ze wel sessies onderscheiden.
 - **De versie staat rechtsboven**, niet meer onderin de balk.
