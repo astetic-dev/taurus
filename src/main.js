@@ -67,6 +67,17 @@ const I18N = {
     session_attach: "Aanhaken",
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
     session_stop_sure: "zeker weten?",
+    set_confirm_exit: "Vragen voor afsluiten",
+    exit_title: "Taurus afsluiten?",
+    exit_keeps: "Blijft doorlopen op zijn machine — later weer op te pikken met ⇱",
+    exit_stops_resume: "Stopt — de conversatie is bij de volgende start te hervatten",
+    exit_stops_gone: "Stopt — en begint bij de volgende start schoon",
+    exit_also_stop: "Ook de sessies op andere machines stoppen",
+    exit_dont_ask: "Niet meer vragen",
+    exit_go: "Afsluiten",
+    exit_here: "deze computer",
+    exit_stopping: "Sessies op andere machines stoppen…",
+    exit_stop_failed: "✗ {title} stoppen mislukte: {err}",
     persist_ask: "Vragen welke sessies je opent",
     persist_silent: "Stil hervatten wat openstond",
     persist_clean: "Schoon beginnen",
@@ -172,6 +183,7 @@ const I18N = {
     help_scrollback: "Aantal regels terminaluitvoer dat bewaard blijft om terug te scrollen.\nVoorbeeld: 8000. Hoger = meer terug te lezen, maar meer geheugen per sessie.",
     help_cursor: "Laat de tekstcursor in de terminal knipperen in plaats van stil te staan.",
     help_persist: "Onthoudt open sessies en hervat ze bij het opstarten (--resume), zodat je verdergaat waar je gebleven was. Uit = elke start begint schoon.",
+    help_confirm_exit: "Vraagt bij afsluiten om bevestiging zolang er agents draaien, en zegt per sessie of hij doorloopt of stopt. Uit = afsluiten doet het meteen.",
     help_skin: "Visueel thema (skin) voor de hele app.\nVoorbeeld: 'Terminal (CRT)' = retro groen; 'Nord'/'Dracula' = donkere kleurschema's; 'Solarized Light' = licht.",
     help_html_split: "Toont de HTML-preview naast de terminal (gesplitst), zodat je code en resultaat tegelijk ziet.",
     help_html_full: "Toont de HTML-preview op het volledige venster en verbergt de terminal zolang de preview open is.",
@@ -315,6 +327,17 @@ const I18N = {
     session_attach: "Attach",
     session_stop_hint: "End this session on the other machine",
     session_stop_sure: "are you sure?",
+    set_confirm_exit: "Ask before closing",
+    exit_title: "Close Taurus?",
+    exit_keeps: "Keeps running on its machine — pick it up later with ⇱",
+    exit_stops_resume: "Stops — the conversation can be resumed on the next launch",
+    exit_stops_gone: "Stops — and the next launch starts clean",
+    exit_also_stop: "Also stop the sessions on other machines",
+    exit_dont_ask: "Do not ask again",
+    exit_go: "Close",
+    exit_here: "this computer",
+    exit_stopping: "Stopping sessions on other machines…",
+    exit_stop_failed: "✗ Could not stop {title}: {err}",
     persist_ask: "Ask which sessions to open",
     persist_silent: "Silently resume what was open",
     persist_clean: "Start clean",
@@ -420,6 +443,7 @@ const I18N = {
     help_scrollback: "Number of terminal output lines kept for scrolling back.\nExample: 8000. Higher = more history, but more memory per session.",
     help_cursor: "Make the terminal text cursor blink instead of staying solid.",
     help_persist: "Remembers open sessions and resumes them on startup (--resume) so you continue where you left off. Off = every launch starts clean.",
+    help_confirm_exit: "Asks for confirmation when closing while agents are running, and says per session whether it keeps running or stops. Off = closing happens at once.",
     help_skin: "Visual theme (skin) for the whole app.\nExample: 'Terminal (CRT)' = retro green; 'Nord'/'Dracula' = dark colour schemes; 'Solarized Light' = light.",
     help_html_split: "Shows the HTML preview beside the terminal (split), so you see code and result at once.",
     help_html_full: "Shows the HTML preview full-window, hiding the terminal while the preview is open.",
@@ -853,6 +877,8 @@ const DEFAULT_SETTINGS = {
   // persistSessions-vinkje wordt nog gelezen zodat een bestaande config klopt.
   persistMode: "ask",
   persistSessions: true,
+  // Afsluiten vraagt om bevestiging zolang er iets draait (#168).
+  confirmExit: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
   ttsEnabled: false, ttsVoice: "", ttsRate: 0, // Windows-native TTS
@@ -1654,6 +1680,9 @@ async function attachFromMachine(m, a) {
     mode: "", command: "", agent: "", model: "", hostId: host.id, projectId: "",
   });
   session.attached = true;
+  // De muxnaam komt van die machine en is niet uit (host, werkmap) te herleiden;
+  // bewaren zodat "ook stoppen" bij afsluiten hem kan aanspreken (#168).
+  session.muxName = a.session || "";
   try {
     // Twee soorten agent, twee kanalen. Een herdr-sessie haak je aan zoals altijd;
     // een agent die in de Taurus daar draait vraag je die Taurus om te delen -- daar
@@ -3531,6 +3560,23 @@ listen("ssh-mirror-exit", (event) => {
 });
 listen("ssh-sessions-changed", () => refreshSshSessions());
 
+// Het venster wil dicht (#168). De backend houdt het tegen totdat wij `exit_now`
+// aanroepen -- maar alleen als dit event ook aankomt, dus een kapotte frontend
+// kan het venster niet gijzelen.
+listen("exit-requested", () => {
+  // Meteen melden dat we leven: dat zet de wachthond in de backend af, zodat een
+  // openstaande vraag niet na tien seconden alsnog afsluit.
+  invoke("exit_ack").catch(() => {});
+  // Niets te verliezen, of de vraag staat uit: meteen door. Een vraag die niets
+  // te melden heeft leert je hem weg te klikken.
+  if (!els.exitModal || settings.confirmExit === false || liveSessions().length === 0) {
+    persistSessionsToDisk();
+    invoke("exit_now").catch(() => {});
+    return;
+  }
+  openExitConfirm();
+});
+
 listen("pty-exit", (event) => {
   const [sid, gen] = event.payload;
   const s = sessions.get(sid);
@@ -3703,6 +3749,7 @@ function openSettings() {
   els.setTabRecap.checked = settings.tabRecap;
   els.setTabGroupAt.value = settings.tabGroups ? settings.tabGroupAt : 0;
   els.setFullPaths.checked = settings.fullPaths;
+  els.setConfirmExit.checked = settings.confirmExit !== false;
   els.setPersistMode.value = persistMode();
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
@@ -3950,6 +3997,7 @@ function saveSettingsFromForm() {
   settings.tabGroupAt = Number.isFinite(drempel) && drempel > 0 ? drempel : DEFAULT_SETTINGS.tabGroupAt;
   settings.tabGroups = Number.isFinite(drempel) && drempel > 0;
   settings.fullPaths = els.setFullPaths.checked;
+  settings.confirmExit = els.setConfirmExit.checked;
   settings.persistMode = els.setPersistMode.value;
   settings.skin = els.setSkin.value;
   settings.ttsEnabled = els.ttsOn.checked;
@@ -4163,6 +4211,87 @@ async function saveEditor() {
   catch (e) { els.editorStatus.textContent = "✗ " + e; els.editorStatus.className = "status-msg err"; }
 }
 
+/* ============ afsluiten bevestigen (#168) ============ */
+// Afsluiten kilde elke agent zonder iets te vragen: `on_window_event` riep
+// meteen `kill_all_sessions`. Deze vraag zegt per sessie wat er gebeurt, want
+// dat verschilt echt. Een sessie op een mux blijft op zijn machine doorlopen en
+// is met ⇱ weer op te pikken; een lokale stopt, want die zit in een Job Object
+// met kill-on-close (#77) zodat ook de MCP-servers eronder opgeruimd worden.
+// Dat laatste is met opzet zo en verandert hier niet.
+function liveSessions() {
+  // Een spiegel-tab (JOIN) telt niet mee: daar valt niets van te verliezen, en
+  // de sessie is niet de onze om te stoppen.
+  return [...sessions.values()].filter((s) => !s.exited && !s.mirror);
+}
+function keepsRunning(s) {
+  if (!s.hostId) return false;
+  const h = hostById(s.hostId);
+  return !!h && (h.mux === "tmux" || h.mux === "herdr");
+}
+function exitWhere(s) {
+  if (!s.hostId) return t("exit_here");
+  const h = hostById(s.hostId);
+  const mux = h && h.mux && h.mux !== "none" ? ", " + h.mux : "";
+  return machineLabel(s.hostId) + mux;
+}
+
+function openExitConfirm() {
+  const live = liveSessions();
+  const keeps = live.filter(keepsRunning);
+  const stops = live.filter((s) => !keepsRunning(s));
+  const row = (s) =>
+    `<div class="exit-row"><span class="exit-name">${escapeHtml(s.title || s.id)}</span>` +
+    `<span class="exit-where">${escapeHtml(exitWhere(s))}</span></div>`;
+  els.exitKeepsList.innerHTML = keeps.map(row).join("");
+  els.exitKeeps.classList.toggle("hidden", keeps.length === 0);
+  els.exitStopsList.innerHTML = stops.map(row).join("");
+  els.exitStops.classList.toggle("hidden", stops.length === 0);
+  // "De conversatie is te hervatten" mag hier alleen staan als de opstartkeuze
+  // dat ook echt doet -- bij "schoon beginnen" is het een lege belofte.
+  els.exitStopsHead.textContent = t(persistMode() === "clean" ? "exit_stops_gone" : "exit_stops_resume");
+  // Zonder sessies die doorlopen valt er niets extra te stoppen.
+  els.exitAlsoStopRow.classList.toggle("hidden", keeps.length === 0);
+  els.exitAlsoStop.checked = false;
+  els.exitDontAsk.checked = false;
+  els.exitStatus.textContent = "";
+  els.exitStatus.className = "status-msg";
+  els.exitModal.classList.remove("hidden");
+  els.exitGo.focus();
+}
+
+async function doExit() {
+  if (els.exitDontAsk.checked) {
+    settings.confirmExit = false;
+    saveSettings();
+    if (els.setConfirmExit) els.setConfirmExit.checked = false;
+  }
+  if (els.exitAlsoStop.checked) {
+    els.exitStatus.textContent = t("exit_stopping");
+    els.exitStatus.className = "status-msg";
+    const failed = [];
+    for (const s of liveSessions().filter(keepsRunning)) {
+      try {
+        // Aangehaakt: de naam komt van die machine. Zelf gestart: de naam is uit
+        // (host, werkmap) te herleiden, en die regel houden we in de backend.
+        if (s.muxName) await invoke("stop_remote_session", { hostId: s.hostId, session: s.muxName });
+        else await invoke("stop_remote_session_at", { hostId: s.hostId, path: s.path || "" });
+      } catch (e) {
+        failed.push(t("exit_stop_failed").replace("{title}", s.title || s.id).replace("{err}", e));
+      }
+    }
+    // Niet stil doorsluiten: je vroeg juist om ze te stoppen, dus als dat niet
+    // lukt hoor je dat te zien voordat het venster weg is.
+    if (failed.length) {
+      els.exitStatus.textContent = failed.join("; ");
+      els.exitStatus.className = "status-msg err";
+      return;
+    }
+  }
+  persistSessionsToDisk();
+  try { await invoke("exit_now"); }
+  catch (e) { els.exitStatus.textContent = "✗ " + e; els.exitStatus.className = "status-msg err"; }
+}
+
 /* ============ sneltoetsen ============ */
 function tabIds() { return [...sessions.keys()]; }
 function cycleTab(dir) {
@@ -4184,7 +4313,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.exitModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
     document.querySelector("#restore-modal").classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
@@ -4586,6 +4715,18 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabRecap: document.querySelector("#set-tabrecap"),
     setTabGroupAt: document.querySelector("#set-tabgroupat"),
     setFullPaths: document.querySelector("#set-fullpaths"),
+    setConfirmExit: document.querySelector("#set-confirm-exit"),
+    exitModal: document.querySelector("#exit-modal"),
+    exitKeeps: document.querySelector("#exit-keeps"),
+    exitKeepsList: document.querySelector("#exit-keeps-list"),
+    exitStops: document.querySelector("#exit-stops"),
+    exitStopsHead: document.querySelector("#exit-stops-head"),
+    exitStopsList: document.querySelector("#exit-stops-list"),
+    exitAlsoStop: document.querySelector("#exit-alsostop"),
+    exitAlsoStopRow: document.querySelector("#exit-alsostop-row"),
+    exitDontAsk: document.querySelector("#exit-dontask"),
+    exitGo: document.querySelector("#exit-go"),
+    exitStatus: document.querySelector("#exit-status"),
     setPersistMode: document.querySelector("#set-persist-mode"),
     setSkin: document.querySelector("#set-skin"),
     recordWidget: document.querySelector("#record-widget"),
@@ -4796,6 +4937,9 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
   document.querySelector("#editor-save").addEventListener("click", saveEditor);
   document.querySelector("#editor-add").addEventListener("click", () => { editRows.push(blankRow()); renderEditor(); });
+  // Annuleren is niets doen: de backend heeft het sluiten al tegengehouden.
+  document.querySelector("#exit-cancel").addEventListener("click", () => els.exitModal.classList.add("hidden"));
+  els.exitGo.addEventListener("click", doExit);
   document.querySelector("#search-next").addEventListener("click", () => doSearch(1));
   document.querySelector("#search-prev").addEventListener("click", () => doSearch(-1));
   document.querySelector("#search-close").addEventListener("click", closeSearch);

@@ -227,6 +227,7 @@
                   <option value="silent" data-i18n="persist_silent">Stil hervatten wat openstond</option>
                   <option value="clean" data-i18n="persist_clean">Schoon beginnen</option>
                 </select></label>
+              <label class="srow check" data-help-key="help_confirm_exit"><input id="set-confirm-exit" type="checkbox" /> <span data-i18n="set_confirm_exit">Vragen voor afsluiten</span></label>
             </div>
           </div>
 
@@ -483,6 +484,31 @@
           <button id="mv-go" class="btn-primary" data-i18n="move_start">Synchroniseren</button>
         </div>
         <div id="mv-status" class="status-msg"></div>
+      </div>
+    </div>
+
+    <!-- ===== Afsluiten bevestigen (#168) =====
+         Afsluiten kilde elke agent zonder iets te vragen. Deze vraag zegt per
+         sessie wat er met hem gebeurt, want dat verschilt echt: een sessie op
+         een mux blijft op zijn machine doorlopen, een lokale stopt. -->
+    <div id="exit-modal" class="modal hidden">
+      <div class="modal-box">
+        <h2 data-i18n="exit_title">Taurus afsluiten?</h2>
+        <div id="exit-keeps" class="hidden">
+          <div class="group-head" data-i18n="exit_keeps">Blijft doorlopen op zijn machine — later weer op te pikken met ⇱</div>
+          <div id="exit-keeps-list" class="exit-list"></div>
+        </div>
+        <div id="exit-stops" class="hidden">
+          <div class="group-head" id="exit-stops-head"></div>
+          <div id="exit-stops-list" class="exit-list"></div>
+        </div>
+        <label class="srow check" id="exit-alsostop-row"><input id="exit-alsostop" type="checkbox" /> <span data-i18n="exit_also_stop">Ook de sessies op andere machines stoppen</span></label>
+        <label class="srow check"><input id="exit-dontask" type="checkbox" /> <span data-i18n="exit_dont_ask">Niet meer vragen</span></label>
+        <div class="modal-actions">
+          <button id="exit-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+          <button id="exit-go" class="btn-primary" data-i18n="exit_go">Afsluiten</button>
+        </div>
+        <div id="exit-status" class="status-msg"></div>
       </div>
     </div>
 
