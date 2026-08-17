@@ -93,6 +93,10 @@
           <div id="dropper-list" class="dropper-list"></div>
         </div>
 
+        <!-- Beheren is niet aanmaken (#157). De ＋ bovenaan maakt er één; deze
+             opent de lijst met alles wat je al hebt. Die lijst had hiervoor geen
+             eigen ingang -- de ＋ was de enige, en dat is precies het probleem. -->
+        <button id="manage-agents" class="foot-link" type="button" data-i18n="foot_projects">✎ Agents</button>
         <div id="app-version" class="app-version"></div>
       </aside>
 
@@ -165,7 +169,7 @@
               </div>
               <div class="launch-actions">
                 <button id="launch-btn" class="launch-btn" data-i18n="start_agent">▶ Start agent</button>
-                <button id="add-agent-btn" class="add-agent-btn" data-i18n="add_agent">＋ Agent toevoegen</button>
+                <button id="add-agent-btn" class="add-agent-btn" data-i18n="add_agent" data-i18n-title="add_agent_hint">＋ Agent toevoegen</button>
               </div>
               <div id="status-msg" class="status-msg"></div>
             </div>
@@ -364,6 +368,55 @@
           <button id="consent-join" class="btn-ghost" data-i18n="consent_join">Meekijken</button>
           <button id="consent-allow" class="btn-primary" data-i18n="consent_allow">Toestaan</button>
         </div>
+      </div>
+    </div>
+
+    <!-- ===== Nieuwe agent (#157) =====
+         Aanmaken is een eigen scherm. De `＋` opende hiervoor de beheerlijst,
+         en die toont je bij je eerste agent een lijst van dingen die je nog
+         niet gemaakt hebt. Hier staat precies één agent, en niets anders. -->
+    <div id="newagent-modal" class="modal hidden">
+      <div class="modal-box wide">
+        <h2 data-i18n="new_agent_title">Nieuwe agent</h2>
+        <div class="e-fields">
+          <div class="e-grid">
+            <div class="e-field"><span class="e-cap" data-i18n="cap_button">Knop</span>
+              <input id="na-label" type="text" autocomplete="off" /></div>
+            <div class="e-field"><span class="e-cap" data-i18n="cap_host">Machine</span>
+              <select id="na-host"></select></div>
+          </div>
+          <div class="e-field">
+            <span class="e-cap" id="na-pathcap" data-i18n="cap_workdir">Werkmap</span>
+            <div class="e-pathrow">
+              <input id="na-path" type="text" autocomplete="off" />
+              <button id="na-browse" class="e-browse">📁</button>
+            </div>
+            <!-- De CLAUDE.md-melding hoort hier, VOOR het opslaan. Tot nu toe
+                 verscheen die pas nadat je de agent had bewaard en gekozen. -->
+            <div id="na-note" class="status-msg"></div>
+          </div>
+          <div class="e-field"><span class="e-cap" data-i18n="cap_tabtitle">Titel van het tabblad</span>
+            <input id="na-title" type="text" autocomplete="off" /></div>
+          <div class="e-field e-taskfield"><span class="e-cap" data-i18n="cap_task">Taak</span>
+            <textarea id="na-task" rows="3"></textarea></div>
+          <div class="e-grid e-grid3">
+            <div class="e-field"><span class="e-cap" data-i18n="cap_agent">Agent</span>
+              <select id="na-agent"></select></div>
+            <div class="e-field"><span class="e-cap" data-i18n="cap_model">Model</span>
+              <input id="na-model" type="text" list="dl-na-model" autocomplete="off" />
+              <datalist id="dl-na-model"></datalist></div>
+            <div class="e-field"><span class="e-cap" data-i18n="launch_mode">Modus</span>
+              <select id="na-mode"></select></div>
+          </div>
+          <div id="na-cmdfield" class="e-field hidden"><span class="e-cap" data-i18n="cap_command">Commando</span>
+            <input id="na-command" type="text" autocomplete="off" />
+            <span class="e-cmdwarn" data-i18n="command_warn"></span></div>
+        </div>
+        <div class="modal-actions">
+          <button id="na-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+          <button id="na-save" class="btn-primary" data-i18n="new_agent_create">Maak agent</button>
+        </div>
+        <div id="na-status" class="status-msg"></div>
       </div>
     </div>
 

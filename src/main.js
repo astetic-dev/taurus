@@ -155,6 +155,17 @@ const I18N = {
     c_mouse: "Agent mag de muis gebruiken (anders selecteert/scrolt de muis lokaal)",
     cancel: "Annuleer", save: "Opslaan",
     manage_projects: "Agents beheren", add_agent: "＋ Agent toevoegen",
+    // Nieuwe agent (#157) en bewerken/verwijderen (#158)
+    new_agent_title: "Nieuwe agent", new_agent_create: "Maak agent",
+    add_agent_hint: "Bewaart deze map als agent én start hem meteen. De ＋ links maakt er een zonder te starten.",
+    del_kept_folder: "Kaart weg. De map blijft staan: {path}",
+    edit_agent_title: "Agent bewerken",
+    na_claude_ok: "✓ CLAUDE.md gevonden — de agent start met projectinstructies.",
+    na_no_path: "⚠ Deze map bestaat niet.",
+    na_need_label: "✗ Geef de agent een naam.",
+    na_need_path: "✗ Kies een werkmap.",
+    na_dup_path: "✗ Er staat al een agent op dit pad: {label}",
+    del_with_children: "Ook {n} ingebedde agents",
     cap_button: "▸ Knop in het linkermenu", cap_workdir: "Werkmap (lokaal C: of netwerk X:)",
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
@@ -403,6 +414,17 @@ const I18N = {
     c_mouse: "Let the agent use the mouse (otherwise the mouse selects/scrolls locally)",
     cancel: "Cancel", save: "Save",
     manage_projects: "Manage agents", add_agent: "＋ Add agent",
+    // New agent (#157) and edit/delete (#158)
+    new_agent_title: "New agent", new_agent_create: "Create agent",
+    add_agent_hint: "Saves this folder as an agent and starts it right away. The ＋ on the left creates one without starting it.",
+    del_kept_folder: "Card removed. The folder stays: {path}",
+    edit_agent_title: "Edit agent",
+    na_claude_ok: "✓ CLAUDE.md found — the agent starts with project instructions.",
+    na_no_path: "⚠ This folder does not exist.",
+    na_need_label: "✗ Give the agent a name.",
+    na_need_path: "✗ Pick a working folder.",
+    na_dup_path: "✗ There is already an agent at this path: {label}",
+    del_with_children: "Also {n} embedded agents",
     cap_button: "▸ Button in the left menu", cap_workdir: "Working folder (local C: or network X:)",
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
@@ -1049,7 +1071,7 @@ function renderProjects() {
         `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
       `</div>` +
       `<div class="pc-confirm">` +
-        `<span>${escapeHtml(t("confirm_delete"))}</span>` +
+        `<span>${escapeHtml(deleteQuestion(p))}</span>` +
         `<button class="pc-yes">${escapeHtml(t("yes"))}</button>` +
         `<button class="pc-no">${escapeHtml(t("no"))}</button>` +
       `</div>`;
@@ -1058,7 +1080,7 @@ function renderProjects() {
     // alleen op een draaiende tab.
     card.addEventListener("contextmenu", (e) => { e.preventDefault(); openMoveModal(p); });
     // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
-    card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(); });
+    card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(p); });
     card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
     card.querySelector(".pc-confirm").addEventListener("click", (e) => e.stopPropagation());
     card.querySelector(".pc-no").addEventListener("click", (e) => { e.stopPropagation(); card.classList.remove("confirming"); });
@@ -1068,15 +1090,35 @@ function renderProjects() {
   });
 }
 
-// Verwijder een project (na bevestiging in de kaart). Persist, herteken; als het
+// Wat vraagt de bevestiging precies? Een werkproces met ingebedde rollen erin
+// neemt die kaarten mee, en dan hoort de vraag dat te zeggen (#155/#158).
+function childrenOf(p) { return projects.filter((x) => x.parent && x.parent === p.id); }
+function deleteQuestion(p) {
+  const n = childrenOf(p).length;
+  return n ? `${t("confirm_delete")} — ${t("del_with_children").replace("{n}", n)}` : t("confirm_delete");
+}
+
+// Verwijder een project (na bevestiging). Persist, herteken; als het
 // geselecteerde project verdwijnt, terug naar het lege startformulier.
+//
+// Alleen de REGISTRATIE gaat weg. De map op schijf blijft staan -- dat was al zo
+// en dat blijft zo, want een kaart weghalen is niet hetzelfde als je werk
+// weggooien.
 async function deleteProject(p) {
-  const next = projects.filter((x) => x !== p);
+  const kids = childrenOf(p);
+  const gone = new Set([p, ...kids]);
+  const next = projects.filter((x) => !gone.has(x));
+  const keep = gone.has(selected) ? null : selected && selected.id;
   try {
     await invoke("save_projects", { projects: next });
-    projects = next;
-    if (selected === p) { selected = null; resetLaunchForm(); }
+    projects = await invoke("get_projects");
+    // Na het herladen zijn het nieuwe objecten; `selected` wees nog naar het oude.
+    selected = keep ? projects.find((x) => x.id === keep) || null : null;
+    if (!selected) resetLaunchForm();
     renderProjects();
+    // Alleen de kaart is weg. Zeggen welke map blijft staan, want anders lijkt
+    // "verwijderen" op iets wat het niet is.
+    toast(t("del_kept_folder").replace("{path}", p.path), "ok");
   } catch (e) { toast("✗ " + e, "err"); }
 }
 async function selectProject(p, card) {
@@ -3985,22 +4027,165 @@ function saveSettingsFromForm() {
   els.settingsModal.classList.add("hidden");
 }
 
+/* ============ nieuwe agent (#157) ============ */
+// Aanmaken en beheren zijn twee verschillende dingen. De `＋` hing aan
+// `openEditorAdd`, dus aan de hele beheerlijst met onderaan een lege regel: wie
+// zijn eerste agent maakte kreeg een overzicht van niets. Dit scherm maakt er
+// één, en toont verder niets.
+let naDraft = null;
+
+// Padvergelijking voor "staat hier al een agent". Windows is
+// hoofdletterongevoelig en mengt / en \, dus normaliseren voor we vergelijken.
+function samePath(a, b) {
+  const n = (s) => (s || "").trim().replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
+  return n(a) !== "" && n(a) === n(b);
+}
+// De backend dedupliceert ook (#155), maar dan pas bij het opslaan. Hier al, want
+// anders wijst de kaart die we net gemaakt hebben naar een id dat inmiddels iets
+// anders heet.
+function uniqueId(label) {
+  const base = slugify(label);
+  const taken = new Set(projects.map((p) => p.id));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+function openNewAgent() {
+  naDraft = blankRow();
+  els.naLabel.value = "";
+  els.naPath.value = "";
+  els.naTitle.value = "";
+  els.naTask.value = "";
+  els.naModel.value = "";
+  els.naCommand.value = "";
+  naSay(els.naStatus, "", "");
+  naSay(els.naNote, "", "");
+  renderNewAgentHost();
+  renderNewAgentAgent();
+  els.newagentModal.classList.remove("hidden");
+  els.naLabel.focus();
+}
+
+function naSay(el, text, cls) {
+  el.textContent = text;
+  el.className = "status-msg" + (cls ? " " + cls : "");
+}
+
+function renderNewAgentHost() {
+  const cur = naDraft.host_id || "";
+  els.naHost.innerHTML =
+    `<option value="">${escapeHtml(t("host_local"))}</option>` +
+    machineOptions(cur).map((o) => `<option value="${escapeHtml(o.id)}"${cur === o.id ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("");
+  // Remote: `path` is een pad op DIE machine. Dan geen lokale bladerknop en geen
+  // lokale CLAUDE.md-controle -- die zou over de verkeerde schijf gaan.
+  const remote = !!cur;
+  els.naBrowse.classList.toggle("hidden", remote);
+  els.naPathCap.textContent = t(remote ? "cap_workdir_remote" : "cap_workdir");
+  els.naPath.placeholder = t(remote ? "ph_path_remote" : "ph_path");
+  if (remote) naSay(els.naNote, "", "");
+}
+
+function renderNewAgentAgent() {
+  const hasOverride = !!(naDraft.command || "").trim();
+  els.naAgent.innerHTML =
+    `<option value="claude"${!hasOverride && (naDraft.agent || "claude") === "claude" ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>` +
+    `<option value="agy"${!hasOverride && naDraft.agent === "agy" ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>` +
+    `<option value="${AGENT_COMMAND}"${hasOverride ? " selected" : ""}>${escapeHtml(t("agent_command"))}</option>`;
+  updateModelDatalist(els.naModelList, naDraft.agent);
+  fillModeSelect(els.naMode, naDraft.agent, naDraft.mode || "default");
+  els.naCmdField.classList.toggle("hidden", !hasOverride);
+  applyOverrideState(naDraft.command || "", [els.naModel, els.naMode, els.naTask], null);
+}
+
+// De CLAUDE.md-melding hoort VOOR het opslaan (#157). `has_claude_md` had tot nu
+// toe precies één aanroeppunt, en dat werd pas bereikt nadat je de agent had
+// bewaard en aangeklikt -- dus je hoorde het altijd te laat.
+async function naCheckPath() {
+  const path = els.naPath.value.trim();
+  if (naDraft.host_id || !path) { naSay(els.naNote, "", ""); return; }
+  let exists = false;
+  try { exists = await invoke("path_exists", { path }); } catch (_) {}
+  if (!exists) { naSay(els.naNote, t("na_no_path"), "err"); return; }
+  let hasMd = false;
+  try { hasMd = await invoke("has_claude_md", { path }); } catch (_) {}
+  naSay(els.naNote, hasMd ? t("na_claude_ok") : t("no_claude_md"), hasMd ? "ok" : "");
+}
+
+async function saveNewAgent() {
+  const label = els.naLabel.value.trim();
+  const path = els.naPath.value.trim();
+  if (!label) { naSay(els.naStatus, t("na_need_label"), "err"); els.naLabel.focus(); return; }
+  if (!path) { naSay(els.naStatus, t("na_need_path"), "err"); els.naPath.focus(); return; }
+  const host = els.naHost.value || "";
+  // Twee kaarten naar dezelfde map op dezelfde machine is geen agent erbij maar
+  // een dubbel: het startformulier en de tabgroepering kunnen ze niet uit elkaar
+  // houden.
+  const clash = projects.find((p) => (p.host_id || "") === host && samePath(p.path, path));
+  if (clash) { naSay(els.naStatus, t("na_dup_path").replace("{label}", clash.label), "err"); return; }
+
+  const chosen = els.naAgent.value;
+  const override = chosen === AGENT_COMMAND;
+  const made = {
+    ...blankRow(),
+    id: uniqueId(label),
+    label,
+    path,
+    host_id: host,
+    title: els.naTitle.value.trim(),
+    task: els.naTask.value.trim(),
+    agent: override ? (naDraft.agent || "claude") : chosen,
+    model: override ? "" : els.naModel.value.trim(),
+    mode: override ? "default" : els.naMode.value,
+    command: override ? els.naCommand.value.trim() : "",
+  };
+  const next = projects.concat([made]);
+  try {
+    await invoke("save_projects", { projects: next });
+    // Terugleren uit de backend: die dedupliceert id's en repareert `parent`,
+    // dus wat daar staat is de waarheid en niet wat wij net verstuurden.
+    projects = await invoke("get_projects");
+    renderProjects();
+    els.newagentModal.classList.add("hidden");
+    const fresh = projects.find((p) => samePath(p.path, path) && (p.host_id || "") === host);
+    if (fresh) {
+      const idx = projects.indexOf(fresh);
+      selectProject(fresh, els.list.querySelector(`.project-card[data-idx="${idx}"]`));
+      showView("new");
+    }
+  } catch (e) {
+    naSay(els.naStatus, "✗ " + e, "err");
+  }
+}
+
 /* ============ project-editor ============ */
 let editRows = [];
+// Welke agent bewerken we? Leeg = de hele lijst (beheren, via de voettekst).
+// Gevuld = één agent, en dan is dit scherm de ✎ van díe kaart (#158).
+let editorOne = "";
 function slugify(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project"; }
-function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "", host_id: "" }; }
-function openEditor() {
-  editRows = projects.map((p) => ({ ...p }));
+function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "", host_id: "", role: "", parent: "" }; }
+// Zonder argument: de hele lijst (beheren, via de voettekst). Met een project:
+// alleen díe agent (#158). De ✎ op een kaart riep dit aan ZONDER argument, dus
+// die opende de hele lijst met alles ingeklapt en negeerde waar je op klikte.
+function openEditor(target) {
+  editorOne = target ? target.id || "" : "";
+  editRows = (target ? [target] : projects).map((p) => ({ ...p }));
   editorOpen = new Set();
   // Eén enkele (lege) agent hoeft niet ingeklapt: dan is er niets te overzien.
   if (editRows.length === 0) { editRows.push(blankRow()); editorOpen.add(0); }
+  if (target) editorOpen.add(0);
+  els.editorTitle.textContent = t(target ? "edit_agent_title" : "manage_projects");
+  // Bij één agent hoort er geen knop te staan die er een tweede bij zet.
+  els.editorAdd.classList.toggle("hidden", !!target);
   renderEditor();
   els.editorStatus.textContent = "";
   els.editorModal.classList.remove("hidden");
 }
 // Zelfde editor, maar meteen met een verse lege regel (de + bij PROJECTS).
 function openEditorAdd() {
-  openEditor();
+  openEditor(null);
   editRows.push(blankRow());
   editorOpen.add(editRows.length - 1); // verse rij open: die ga je meteen invullen
   renderEditor();
@@ -4039,6 +4224,11 @@ function renderEditor() {
           <div class="ehead-path">${escapeHtml(r.path || "—")}</div>
         </div>
         <button class="e-del" title="${escapeHtml(t("host_del"))}">🗑</button>
+        <div class="pc-confirm">
+          <span>${escapeHtml(deleteQuestion(r))}</span>
+          <button class="e-yes">${escapeHtml(t("yes"))}</button>
+          <button class="e-no">${escapeHtml(t("no"))}</button>
+        </div>
       </div>
       <div class="e-fields">
         <div class="e-grid">
@@ -4126,7 +4316,14 @@ function renderEditor() {
     });
     const browse = row.querySelector(".e-browse");
     if (browse) browse.addEventListener("click", async () => { const dir = await invoke("pick_folder"); if (dir) { editRows[i].path = dir; renderEditor(); } });
-    row.querySelector(".e-del").addEventListener("click", () => {
+    // Verwijderen deed hier iets anders dan op de kaart: meteen splicen, geen
+    // bevestiging, pas bij Opslaan echt weg en met Annuleer terug te draaien.
+    // Nu dezelfde strip en hetzelfde moment als op de kaart (#158).
+    row.querySelector(".e-del").addEventListener("click", () => row.classList.add("confirming"));
+    row.querySelector(".e-no").addEventListener("click", () => row.classList.remove("confirming"));
+    row.querySelector(".e-yes").addEventListener("click", async () => {
+      const live = projects.find((p) => p.id === editRows[i].id);
+      if (live) { await deleteProject(live); if (editorOne) { els.editorModal.classList.add("hidden"); return; } }
       editRows.splice(i, 1);
       // editorOpen bevat INDEXEN, en die schuiven op bij een splice: zonder dit
       // klapt na het verwijderen een andere rij open dan je open had staan.
@@ -4157,10 +4354,21 @@ function renderEditor() {
 async function saveEditor() {
   const cleaned = editRows
     .filter((r) => r.label.trim() && r.path.trim())
-    .map((r) => ({ id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: (r.command || "").trim(), host_id: r.host_id || "" }));
+    // ...r eerst: `origin`, `role` en `parent` staan wel op de rij maar hebben
+    // geen veld in dit scherm, en zonder dit zou opslaan ze weggooien (#155).
+    .map((r) => ({ ...r, id: r.id || slugify(r.label), label: r.label.trim(), path: r.path.trim(), title: (r.title || "").trim(), task: (r.task || "").trim(), accent: r.accent || "#7c9cff", mode: r.mode || "default", agent: AGENTS.includes(r.agent) ? r.agent : "claude", model: (r.model || "").trim(), command: (r.command || "").trim(), host_id: r.host_id || "" }));
   if (cleaned.length === 0) { els.editorStatus.textContent = t("err_need_project"); els.editorStatus.className = "status-msg err"; return; }
-  try { await invoke("save_projects", { projects: cleaned }); projects = cleaned; renderProjects(); els.editorModal.classList.add("hidden"); }
-  catch (e) { els.editorStatus.textContent = "✗ " + e; els.editorStatus.className = "status-msg err"; }
+  // Eén agent bewerken raakt de rest van de lijst niet aan.
+  const next = editorOne ? projects.map((p) => (p.id === editorOne ? cleaned[0] : p)) : cleaned;
+  const keep = selected && selected.id;
+  try {
+    await invoke("save_projects", { projects: next });
+    projects = await invoke("get_projects");
+    selected = keep ? projects.find((x) => x.id === keep) || null : null;
+    if (!selected) resetLaunchForm();
+    renderProjects();
+    els.editorModal.classList.add("hidden");
+  } catch (e) { els.editorStatus.textContent = "✗ " + e; els.editorStatus.className = "status-msg err"; }
 }
 
 /* ============ sneltoetsen ============ */
@@ -4184,7 +4392,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.newagentModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
     document.querySelector("#restore-modal").classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
@@ -4660,6 +4868,25 @@ window.addEventListener("DOMContentLoaded", () => {
     editorModal: document.querySelector("#editor-modal"),
     editorRows: document.querySelector("#editor-rows"),
     editorStatus: document.querySelector("#editor-status"),
+    editorTitle: document.querySelector("#editor-modal h2"),
+    editorAdd: document.querySelector("#editor-add"),
+    // Nieuwe agent (#157)
+    newagentModal: document.querySelector("#newagent-modal"),
+    naLabel: document.querySelector("#na-label"),
+    naHost: document.querySelector("#na-host"),
+    naPath: document.querySelector("#na-path"),
+    naPathCap: document.querySelector("#na-pathcap"),
+    naBrowse: document.querySelector("#na-browse"),
+    naNote: document.querySelector("#na-note"),
+    naTitle: document.querySelector("#na-title"),
+    naTask: document.querySelector("#na-task"),
+    naAgent: document.querySelector("#na-agent"),
+    naModel: document.querySelector("#na-model"),
+    naModelList: document.querySelector("#dl-na-model"),
+    naMode: document.querySelector("#na-mode"),
+    naCmdField: document.querySelector("#na-cmdfield"),
+    naCommand: document.querySelector("#na-command"),
+    naStatus: document.querySelector("#na-status"),
     appVersion: document.querySelector("#app-version"),
     fileDropper: document.querySelector("#file-dropper"),
     dropperList: document.querySelector("#dropper-list"),
@@ -4717,7 +4944,39 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
-  document.querySelector("#add-project-btn").addEventListener("click", openEditorAdd);
+  // De ＋ maakt een agent; beheren zit onder de voettekst (#157).
+  document.querySelector("#add-project-btn").addEventListener("click", openNewAgent);
+  els.naHost.addEventListener("change", () => { naDraft.host_id = els.naHost.value; renderNewAgentHost(); naCheckPath(); });
+  els.naBrowse.addEventListener("click", async () => {
+    let dir = null;
+    try { dir = await invoke("pick_folder"); } catch (_) { return; }
+    if (!dir) return;
+    els.naPath.value = dir;
+    // Naam voorstellen zodra we er een weten -- maar nooit overschrijven wat de
+    // gebruiker zelf al getypt heeft.
+    if (!els.naLabel.value.trim()) els.naLabel.value = dir.replace(/[\/]+$/, "").split(/[\/]/).pop() || dir;
+    naCheckPath();
+  });
+  els.naPath.addEventListener("change", naCheckPath);
+  els.naAgent.addEventListener("change", () => {
+    if (els.naAgent.value === AGENT_COMMAND) {
+      naDraft.command = els.naCommand.value.trim() || "cmd.exe";
+      els.naCommand.value = naDraft.command;
+    } else {
+      naDraft.agent = els.naAgent.value;
+      naDraft.command = "";
+      els.naCommand.value = "";
+      els.naModel.value = "";
+    }
+    renderNewAgentAgent();
+  });
+  els.naCommand.addEventListener("input", () => {
+    naDraft.command = els.naCommand.value;
+    applyOverrideState(naDraft.command, [els.naModel, els.naMode, els.naTask], null);
+  });
+  els.naCancel = document.querySelector("#na-cancel");
+  els.naCancel.addEventListener("click", () => els.newagentModal.classList.add("hidden"));
+  document.querySelector("#na-save").addEventListener("click", saveNewAgent);
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
   document.querySelector("#settings-cancel").addEventListener("click", () => { hideHelpTip(); els.settingsModal.classList.add("hidden"); });
   // Spraak: mic-knop + F9-event uit de backend + instellingen-acties.
@@ -4796,6 +5055,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#editor-cancel").addEventListener("click", () => els.editorModal.classList.add("hidden"));
   document.querySelector("#editor-save").addEventListener("click", saveEditor);
   document.querySelector("#editor-add").addEventListener("click", () => { editRows.push(blankRow()); renderEditor(); });
+  document.querySelector("#manage-agents").addEventListener("click", () => openEditor(null));
   document.querySelector("#search-next").addEventListener("click", () => doSearch(1));
   document.querySelector("#search-prev").addEventListener("click", () => doSearch(-1));
   document.querySelector("#search-close").addEventListener("click", closeSearch);

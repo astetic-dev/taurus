@@ -559,6 +559,12 @@ select:-webkit-autofill {
   text-align: left;
 }
 .foot-btn:hover { color: var(--text); border-color: var(--accent); }
+.foot-link {
+  display: block; width: 100%; margin-top: 10px; padding: 5px 0;
+  background: transparent; border: 0; cursor: pointer;
+  font-size: 11px; color: var(--text-dim); opacity: .7;
+}
+.foot-link:hover { color: var(--accent); opacity: 1; }
 .app-version { margin-top: 8px; text-align: center; font-size: 10px; letter-spacing: .5px; color: var(--text-dim); opacity: .55; user-select: text; }
 
 /* ---- Tab-activiteit ---- */
@@ -768,7 +774,14 @@ select:-webkit-autofill {
   border-radius: 8px; padding: 8px 10px;
 }
 .erow.open { border-color: var(--accent); }
-.ehead { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ehead { display: flex; align-items: center; gap: 9px; min-width: 0; position: relative; }
+/* Dezelfde bevestigingsstrip als op een kaart (#158), maar over de KOP van de
+   rij: over de hele uitgeklapte rij zou hij het formulier verbergen. */
+.erow.confirming .ehead .pc-confirm { display: flex; }
+.erow.confirming .ehead > *:not(.pc-confirm) { visibility: hidden; }
+.erow .pc-confirm .e-yes { background: var(--red); color: #fff; border-color: var(--red); }
+.erow .pc-confirm .e-no { background: transparent; color: var(--text-dim); }
+.erow .pc-confirm button { border-radius: 5px; padding: 3px 12px; cursor: pointer; border: 1px solid var(--border); font-size: 12px; }
 .ehead-main { flex: 1; min-width: 0; cursor: pointer; }
 .ehead-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ehead-path { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
