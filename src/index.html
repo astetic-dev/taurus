@@ -23,14 +23,25 @@
           <div class="brand-sub" data-i18n="brand_sub">Agent Launcher</div>
         </div>
 
+        <!-- Twee secties met elk hun eigen lijst en eigen scrollbalk: agents en
+             processen groeien onafhankelijk, en dan hoort de een niet uit beeld te
+             schuiven omdat de ander lang is. Beide in te klappen. -->
         <div class="section-head">
           <div class="sidebar-label dropzone-label" data-i18n="projects">Agents</div>
-          <button id="hosts-btn" class="icon-btn sec-add" data-i18n-title="host_manage">🖥</button>
+          <button id="agents-fold" class="icon-btn sec-add" data-i18n-title="fold_hide">−</button>
           <button id="attach-btn" class="icon-btn sec-add" data-i18n-title="attach_menu">⇱</button>
           <button id="assign-btn" class="icon-btn sec-add" data-i18n-title="assign_title">≡</button>
           <button id="add-project-btn" class="icon-btn sec-add" data-i18n-title="new_project">＋</button>
         </div>
-        <div id="project-list" class="project-list"></div>
+        <div id="agent-list" class="project-list agent-list"></div>
+
+        <div class="section-head">
+          <div class="sidebar-label dropzone-label" data-i18n="group_processes">Processen</div>
+          <button id="proc-find" class="icon-btn sec-add" data-i18n-title="proc_find">⌕</button>
+          <button id="proc-fold" class="icon-btn sec-add" data-i18n-title="fold_hide">−</button>
+        </div>
+        <input id="proc-filter" class="proc-filter hidden" type="text" autocomplete="off" data-i18n-ph="proc_filter_ph" />
+        <div id="process-list" class="project-list"></div>
 
         <div id="record-widget" class="record-widget hidden">
           <button id="record-btn" class="record-btn" type="button" data-i18n-title="rec_idle">
@@ -103,6 +114,9 @@
             <!-- De versie stond onderin de balk en nam daar ruimte af van de
                  agents en processen; hier hoort hij bij de andere app-dingen. -->
             <div id="app-version" class="app-version"></div>
+            <!-- Machines hoort bij de app en niet bij je agentlijst; hier geeft het
+                 de sectiekop links de ruimte terug. -->
+            <button id="hosts-btn" class="icon-btn" data-i18n-title="host_manage">🖥</button>
             <button id="settings-btn" class="icon-btn" data-i18n-title="settings">⚙</button>
             <button id="reload-btn" class="icon-btn" data-i18n-title="reload">⟳</button>
           </div>
@@ -401,7 +415,7 @@
              die naam en de titel niet. -->
         <div class="na-kindcap" data-i18n="na_kind">Wat voor agent?</div>
         <div id="na-kinds" class="na-kinds"></div>
-        <div class="na-kindcap na-second" data-i18n="na_process">Nieuw proces</div>
+        <h2 class="na-second" data-i18n="na_process">Nieuw proces</h2>
         <div id="na-kinds2" class="na-kinds"></div>
 
         <!-- Rol of vrij adres: eerst waar hij werkt en waarover, dan de bron. Je

@@ -23,9 +23,12 @@ $cfg  = Join-Path $env:APPDATA 'Taurus-TEST'
 # gaat een volgende build naar target\fixbuild - en dan startte dit script daarna
 # stil de OUDE build weer. Dat kostte een ronde uitzoeken waarom een wijziging er
 # niet in zat.
+# Elke buildmap onder target\ meenemen, niet een vaste lijst: zodra een
+# testexemplaar draait is zijn exe vergrendeld en gaat de volgende build naar
+# weer een andere map. Met een glob hoeft dit script daar niets van te weten.
 $candidates = @(
     (Join-Path $root 'src-tauri\target\release\taurus.exe'),
-    (Join-Path $root 'src-tauri\target\fixbuild\release\taurus.exe')
+    (Join-Path $root 'src-tauri\target\*\release\taurus.exe')
 )
 if ($Exe) {
     $exe = $Exe

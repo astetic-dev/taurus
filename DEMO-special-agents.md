@@ -1,6 +1,6 @@
 # Special agents — installeren en doorlopen
 
-Versie 0.6.3, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
+Versie 0.6.4, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
 zit staat onderaan.
 
 ## 1. Draaien zonder je productie aan te raken
@@ -33,9 +33,11 @@ na een ronde uitzoeken. Een specifieke build forceren kan met `-Exe <volledig pa
 De titelbalk zegt **TEST**. Er staat nog geen enkele agent in, en dat is precies
 wat je wilt om dit uit te proberen.
 
-**Waarom er twee buildmappen zijn:** zodra een testexemplaar draait houdt het
-`...\target\release\taurus.exe` vergrendeld, dus gaat een volgende build naar
-`...\target\fixbuild\release\`. Het script kijkt naar beide en pakt de nieuwste.
+**Waarom er meerdere buildmappen zijn:** zodra een testexemplaar draait houdt het
+zijn eigen exe vergrendeld, dus gaat de volgende build naar een andere map onder
+`src-tauri\target\`. Het script zoekt ze allemaal (`target\*\release\taurus.exe`
+plus `target\release\taurus.exe`) en pakt de nieuwste, dus je hoeft die mappen niet
+te onthouden.
 
 Eén ding is wel gedeeld: **de instellingen.** Die staan in localStorage van de
 webview en niet in de configmap, dus taal, thema, "vragen voor afsluiten" en de
@@ -179,17 +181,28 @@ Instellingen → Sessies.
 
 ## 9. De linkerbalk
 
-- **Geen kleuren meer.** Een lijst van twintig regels wordt er niet mooier van. De
-  kleur blijft wel op de **tabs**, want daar onderscheidt hij wel echt sessies.
-- **Agents boven, dan een streepje met `PROCESSEN` erin, dan je processen** met de
-  ingebedde rollen ingesprongen eronder.
-- **De versie staat rechtsboven** bij ⚙ en ⟳, niet meer onderin de balk.
-- **De twee voetlinks zijn weg.** Het opdrachtoverzicht zit nu als **≡** in de kop
-  van de agentlijst; *Processen beheren* staat in Instellingen → Agents.
-- **De dicteerknop is er alleen als dicteren kan.** Is de spraakengine of het model
-  niet geïnstalleerd, dan staat hij er niet — in plaats van er te staan en niets te
-  doen.
-- **De scrollbalk** is dezelfde onopvallende als die van de bestandslijst in de
+Twee secties met **elk hun eigen lijst en eigen scrollbalk**: agents en processen
+groeien onafhankelijk, dus een lange processenlijst schuift je agents niet uit
+beeld. `PROCESSEN` is nu een echte sectiekop met dezelfde vorm en hetzelfde
+formaat als `AGENTS` en `DROPZONE` -- geen streepje in de lijst meer.
+
+- **Beide secties zijn in te klappen** met de `−` in hun kop; dat wordt een `+` en
+  het blijft onthouden tussen starts.
+- **Filter op de processen** achter de `⌕` in de processenkop, op naam of pad. Het
+  veld blijft staan zolang er iets in staat, zodat je je filter niet kwijt bent
+  door de knop per ongeluk aan te tikken. Dit is issue #42, en met elf processen is
+  hij niet langer optioneel.
+- **De machines-knop (🖥) staat rechtsboven** bij ⚙ en ⟳ -- die hoort bij de app,
+  niet bij je agentlijst, en het geeft de sectiekop links de ruimte terug.
+- **De knoppen zijn kleiner en staan dichter op elkaar.**
+- **Geen kleuren.** Die blijven op de tabs, waar ze wel sessies onderscheiden.
+- **De versie staat rechtsboven**, niet meer onderin de balk.
+- **De twee voetlinks zijn weg.** Het opdrachtoverzicht is de **≡** in de agentkop;
+  *Processen beheren* staat in Instellingen → Agents.
+- **De dicteerknop is er alleen als dicteren kan** -- is de spraakengine of het
+  model niet geïnstalleerd, dan staat hij er niet in plaats van er te staan en
+  niets te doen.
+- **De scrollbalken** zijn dezelfde onopvallende als die van de bestandslijst in de
   dropzone.
 
 ## 9b. Wat er ook nog is rechtgezet

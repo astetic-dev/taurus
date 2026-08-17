@@ -75,6 +75,19 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .brand-sub { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
 .sidebar-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); padding: 6px; }
 .project-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1; }
+/* De agentlijst mag niet de hele balk opeisen: hij groeit mee tot een derde en
+   krijgt dan zijn eigen scrollbalk, zodat de processen nooit uit beeld schuiven. */
+.agent-list { flex: 0 1 auto; max-height: 34vh; }
+.project-list:empty { display: none; }
+.project-list.folded { display: none; }
+/* Filter op de processen (#42). Verschijnt op de ⌕ en blijft staan zolang er iets
+   in staat -- anders verlies je je filter door hem per ongeluk dicht te klikken. */
+.proc-filter {
+  width: 100%; margin: 2px 0 4px; padding: 5px 8px;
+  background: var(--bg-input, var(--bg-card)); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; font-size: 12px;
+}
+.proc-filter:focus { outline: none; border-color: var(--accent); }
 /* Zelfde onopvallende scrollbalk als de bestandslijst in de dropzone. */
 .project-list { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .project-list:hover { scrollbar-color: var(--text-dim) transparent; }
@@ -192,12 +205,8 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .role-row .role-name small { display: block; color: var(--text-dim); font-size: 10px; }
 .role-row .role-src { flex: 1; min-width: 0; }
 .role-row label { display: flex; align-items: center; gap: 4px; color: var(--text-dim); white-space: nowrap; }
-.project-sep {
-  display: flex; align-items: center; gap: 8px;
-  margin: 14px 2px 6px; font-size: 10px; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--text-dim);
-}
-.project-sep::before, .project-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+/* Het streepje IN de lijst is vervallen: PROCESSEN is nu een eigen sectiekop met
+   precies dezelfde vorm als AGENTS en DROPZONE. */
 /* Een ingebedde rol hoort visueel bij zijn gastheer: ingesprongen, met een
    streepje dat de band toont. Niet versleepbaar -- hij volgt de gastheer. */
 .project-card.embedded { margin-left: 14px; }
@@ -208,7 +217,7 @@ button, input, select, textarea { font-family: var(--ui-font); }
 }
 .na-kindcap { font-size: 11px; color: var(--text-dim); margin: 2px 0 6px; }
 /* Tweede lijst (processen): zelfde vorm, iets lucht ertussen. */
-.na-second { margin-top: 12px; }
+h2.na-second { margin-top: 22px; }
 .na-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .na-kind {
   display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; align-items: center;
@@ -299,9 +308,9 @@ body.reordering, body.reordering * { cursor: grabbing !important; }
 .icon-btn:hover { color: var(--text); border-color: var(--accent); }
 
 /* Sectiekop: gecentreerd label (---- PROJECTS ----) met een + rechts. */
-.section-head { display: flex; align-items: center; gap: 6px; }
+.section-head { display: flex; align-items: center; gap: 3px; }
 .section-head .dropzone-label { flex: 1; }
-.sec-add { padding: 2px 8px; font-size: 15px; }
+.sec-add { padding: 1px 6px; font-size: 13px; }
 
 /* ---- Stage ---- */
 .stage { position: relative; flex: 1; min-height: 0; }

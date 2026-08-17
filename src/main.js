@@ -173,6 +173,8 @@ const I18N = {
     na_kind_plain: "Map die je al hebt",
     na_kind_plain_sub: "een werkproces", na_kind_free: "Ander ICM-adres",
     group_processes: "Processen", grp_processes: "Processen",
+    fold_hide: "Inklappen", fold_show: "Uitklappen",
+    proc_find: "Zoek in processen", proc_filter_ph: "Filter op naam of pad…",
     na_kind_free_sub: "specialist, geen rol",
     na_where: "Waar werkt hij?", na_standing: "Staand — eigen werkplek",
     na_embedded_in: "In: {label}",
@@ -499,6 +501,8 @@ const I18N = {
     na_kind_plain: "A folder you have",
     na_kind_plain_sub: "a work process", na_kind_free: "Another ICM address",
     group_processes: "Processes", grp_processes: "Processes",
+    fold_hide: "Collapse", fold_show: "Expand",
+    proc_find: "Find a process", proc_filter_ph: "Filter by name or path…",
     na_kind_free_sub: "specialist, no role",
     na_where: "Where does it work?", na_standing: "Standing — its own workspace",
     na_embedded_in: "In: {label}",
@@ -1009,6 +1013,8 @@ const DEFAULT_SETTINGS = {
   // persistSessions-vinkje wordt nog gelezen zodat een bestaande config klopt.
   persistMode: "ask",
   persistSessions: true,
+  // Ingeklapte secties in de balk.
+  agentsFolded: false, procFolded: false,
   // Afsluiten vraagt om bevestiging zolang er iets draait (#168).
   confirmExit: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
@@ -1155,7 +1161,7 @@ function makeReorderable(el, opts) {
   });
 }
 
-// Lees de nieuwe kaartvolgorde uit de DOM (data-idx = originele render-index),
+// Lees de nieuwe kaartvolgorde uit de DOM (data-id = de id van het project),
 // herschik het projects-array, persist en herteken.
 function commitProjectOrder() {
   const snap = projects;
@@ -1163,9 +1169,9 @@ function commitProjectOrder() {
   // volgorde bovenin is BEREKEND in plaats van bewaard. Dus: lees alleen de
   // werkprocessen uit de DOM en zet de rest onveranderd terug -- anders zou
   // slepen die berekende bovenkant in projects.json vastleggen.
-  const dragged = [...els.list.children]
+  const dragged = [...els.procList.children]
     .filter((c) => c.classList.contains("project-card") && !c.classList.contains("embedded"))
-    .map((c) => snap[Number(c.dataset.idx)])
+    .map((c) => snap.find((p) => p.id === c.dataset.id))
     .filter((p) => p && !p.role && !p.origin && !p.parent);
   const rest = snap.filter((p) => !dragged.includes(p));
   const next = [...rest, ...dragged];
@@ -1291,41 +1297,54 @@ function projectOrder() {
     return i < 0 ? ROLES.length : i;
   };
   const roots = projects.filter((p) => !p.parent);
-  const top = roots
+  const agents = roots
     .filter((p) => p.role || p.origin)
     // Rollen op hun vaste plek; specialisten daarna, in de volgorde waarin je ze
     // uitrolde. Een rol die je verwijdert en opnieuw uitrolt komt dus terug waar
     // hij hoort, en niet onderaan.
     .sort((a, b) => (a.role ? 0 : 1) - (b.role ? 0 : 1) || roleRank(a) - roleRank(b));
-  const bottom = roots.filter((p) => !p.role && !p.origin);
-  const out = [];
-  const withKids = (p) => {
-    out.push({ p, child: false });
-    for (const k of projects.filter((x) => x.parent === p.id)) out.push({ p: k, child: true });
+  const processes = roots.filter((p) => !p.role && !p.origin);
+  const withKids = (list) => {
+    const out = [];
+    for (const p of list) {
+      out.push({ p, child: false });
+      for (const k of projects.filter((x) => x.parent === p.id)) out.push({ p: k, child: true });
+    }
+    return out;
   };
-  for (const p of top) withKids(p);
-  const sep = out.length > 0 && bottom.length > 0;
-  for (const p of bottom) withKids(p);
-  return { rows: out, sepAfter: sep ? top.reduce((n, p) => n + 1 + projects.filter((x) => x.parent === p.id).length, 0) : -1 };
+  return { agents: withKids(agents), processes: withKids(processes) };
+}
+
+// De kaart van een project, waar hij ook staat. Zoeken op `id` en niet op een
+// render-index: er zijn twee lijsten, en een index in de ene zegt niets over de
+// andere.
+function cardFor(p) {
+  if (!p || !p.id) return null;
+  return document.querySelector(`.project-card[data-id="${CSS.escape(p.id)}"]`);
+}
+function selectById(id) {
+  const p = projects.find((x) => x.id === id);
+  if (!p) return;
+  selectProject(p, cardFor(p));
+  showView("new");
 }
 
 function renderProjects() {
-  els.list.innerHTML = "";
-  const { rows, sepAfter } = projectOrder();
-  rows.forEach((row, seat) => {
+  const { agents, processes } = projectOrder();
+  els.agentList.innerHTML = "";
+  els.procList.innerHTML = "";
+  // Filter geldt alleen voor de processen: daar loopt het aantal op. Een agent
+  // wegfilteren zou een rol uit zijn vaste plek halen.
+  const q = (els.procFilter.value || "").trim().toLowerCase();
+  const shown = q
+    ? processes.filter((r) => (r.p.label + " " + r.p.path).toLowerCase().includes(q))
+    : processes;
+  const rows = agents.map((r) => ({ ...r, box: els.agentList })).concat(shown.map((r) => ({ ...r, box: els.procList })));
+  rows.forEach((row) => {
     const p = row.p;
-    const index = projects.indexOf(p);
-    // Het lijntje verschijnt alleen als er van beide soorten iets is -- geen
-    // streep boven niets.
-    if (seat === sepAfter) {
-      const sep = document.createElement("div");
-      sep.className = "project-sep";
-      sep.textContent = t("group_processes");
-      els.list.appendChild(sep);
-    }
     const card = document.createElement("div");
     card.className = "project-card" + (row.child ? " embedded" : "");
-    card.dataset.idx = String(index);
+    card.dataset.id = p.id;
     const loc = agentLocTag(p);
     card.innerHTML =
       `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${loc.cls}" title="${escapeHtml(loc.title)}">${escapeHtml(loc.text)}</span></div>` +
@@ -1357,8 +1376,11 @@ function renderProjects() {
     if (!row.child && !p.role && !p.origin) {
       makeReorderable(card, { axis: "y", itemClass: "project-card", endSelector: null, onDrop: commitProjectOrder });
     }
-    els.list.appendChild(card);
+    row.box.appendChild(card);
   });
+  // Een lege lijst valt weg (CSS :empty), dus een sectiekop zonder inhoud staat
+  // niet boven een gat.
+  els.procFilter.classList.toggle("hidden", !q && !procFilterOpen);
 }
 
 // Wat vraagt de bevestiging precies? Een werkproces met ingebedde rollen erin
@@ -3973,7 +3995,7 @@ function openCardMenu(x, y, p) {
 // startformulier klaar. Starten doe je zelf -- dan zie je nog wat er gaat gebeuren.
 function aimRoleAt(role, subject) {
   const idx = projects.indexOf(role);
-  selectProject(role, els.list.querySelector(`.project-card[data-idx="${idx}"]`));
+  selectProject(role, cardFor(role));
   showView("new");
   els.taskInput.value = t("aim_task").replace("{path}", subject.path);
   els.taskInput.focus();
@@ -4453,6 +4475,9 @@ function saveSettingsFromForm() {
 // zijn eerste agent maakte kreeg een overzicht van niets. Dit scherm maakt er
 // één, en toont verder niets.
 let naDraft = null;
+// Staat het filterveld open? Los van "er staat iets in": met iets erin blijft het
+// staan, want anders verlies je je filter door de knop per ongeluk aan te tikken.
+let procFilterOpen = false;
 
 // Padvergelijking voor "staat hier al een agent". Windows is
 // hoofdletterongevoelig en mengt / en \, dus normaliseren voor we vergelijken.
@@ -4791,10 +4816,7 @@ async function naDeploy() {
   // net uitgerolde agent niet meteen gestart wordt.
   toast(t("na_wrote").replace("{n}", rep.paths.length).replace("{dest}", rep.dest), "ok");
   const fresh = projects.find((p) => samePath(p.path, dest));
-  if (fresh) {
-    selectProject(fresh, els.list.querySelector(`.project-card[data-idx="${projects.indexOf(fresh)}"]`));
-    showView("new");
-  }
+  if (fresh) selectById(fresh.id);
 }
 
 function openNewAgent() {
@@ -4895,11 +4917,7 @@ async function saveNewAgent() {
     renderProjects();
     els.newagentModal.classList.add("hidden");
     const fresh = projects.find((p) => samePath(p.path, path) && (p.host_id || "") === host);
-    if (fresh) {
-      const idx = projects.indexOf(fresh);
-      selectProject(fresh, els.list.querySelector(`.project-card[data-idx="${idx}"]`));
-      showView("new");
-    }
+    if (fresh) selectById(fresh.id);
   } catch (e) {
     naSay(els.naStatus, "✗ " + e, "err");
   }
@@ -5591,7 +5609,9 @@ async function refreshSttStatus() {
 /* ============ init ============ */
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
-    list: document.querySelector("#project-list"),
+    agentList: document.querySelector("#agent-list"),
+    procList: document.querySelector("#process-list"),
+    procFilter: document.querySelector("#proc-filter"),
     tabbar: document.querySelector("#tabbar"),
     launchView: document.querySelector("#launch-view"),
     terminals: document.querySelector("#terminals"),
@@ -5935,6 +5955,26 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#editor-add").addEventListener("click", () => { editRows.push(blankRow()); renderEditor(); });
   document.querySelector("#manage-agents").addEventListener("click", () => openEditor(null));
   document.querySelector("#assign-btn").addEventListener("click", openAssignments);
+  // Inklappen per sectie, onthouden tussen starts: als je twintig processen hebt
+  // wil je de agents kunnen wegklappen, en omgekeerd.
+  const fold = (btn, box, key) => {
+    const apply = () => {
+      const shut = settings[key] === true;
+      box.classList.toggle("folded", shut);
+      btn.textContent = shut ? "+" : "−";
+      btn.title = t(shut ? "fold_show" : "fold_hide");
+    };
+    btn.addEventListener("click", () => { settings[key] = settings[key] !== true; saveSettings(); apply(); });
+    apply();
+  };
+  fold(document.querySelector("#agents-fold"), els.agentList, "agentsFolded");
+  fold(document.querySelector("#proc-fold"), els.procList, "procFolded");
+  document.querySelector("#proc-find").addEventListener("click", () => {
+    procFilterOpen = !procFilterOpen;
+    els.procFilter.classList.toggle("hidden", !procFilterOpen && !els.procFilter.value.trim());
+    if (procFilterOpen) els.procFilter.focus();
+  });
+  els.procFilter.addEventListener("input", renderProjects);
   document.querySelector("#assign-close").addEventListener("click", () => els.assignModal.classList.add("hidden"));
   // Annuleren is niets doen: de backend heeft het sluiten al tegengehouden.
   document.querySelector("#exit-cancel").addEventListener("click", () => els.exitModal.classList.add("hidden"));
