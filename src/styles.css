@@ -105,6 +105,10 @@ button, input, select, textarea { font-family: var(--ui-font); }
 }
 .pc-actions .pc-edit:hover { color: var(--accent); border-color: var(--accent); }
 .pc-actions .pc-del:hover { color: var(--red); border-color: var(--red); }
+/* Het pijltje staat er alleen als er echt een nieuwere versie is (#163), dus het
+   mag opvallen -- maar rustig: het is geen waarschuwing, het is een aanbod. */
+.pc-actions .pc-up { color: var(--signal-ok, var(--green)); }
+.pc-actions .pc-up:hover { border-color: var(--signal-ok, var(--green)); }
 .pc-confirm {
   display: none; position: absolute; inset: 0;
   align-items: center; justify-content: center; gap: 8px;
@@ -161,6 +165,24 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .hidden { display: none !important; }
 /* Nieuwe agent: de soorten als tegels (#159). Eén rij die wrapt, want zeven
    rollen plus twee gewone keuzes passen niet op één regel. */
+/* Het lijntje in de balk (#160): scheidt STAAND van BIJ EEN WERKPROCES, en
+   verschijnt alleen als er van beide soorten iets is. */
+/* Instellingen -> Agents (#166): één regel per rol, naam links, bron breed. */
+.role-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
+.role-row .role-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.role-row .role-name { width: 96px; flex: none; }
+.role-row .role-name small { display: block; color: var(--text-dim); font-size: 10px; }
+.role-row .role-src { flex: 1; min-width: 0; }
+.role-row label { display: flex; align-items: center; gap: 4px; color: var(--text-dim); white-space: nowrap; }
+.project-sep { height: 1px; background: var(--border); margin: 8px 2px; opacity: .8; }
+/* Een ingebedde rol hoort visueel bij zijn gastheer: ingesprongen, met een
+   streepje dat de band toont. Niet versleepbaar -- hij volgt de gastheer. */
+.project-card.embedded { margin-left: 14px; }
+.project-card.embedded .pc-label { font-size: 12px; }
+.project-card.embedded::before {
+  content: ""; position: absolute; left: -8px; top: 50%; width: 6px; height: 1px;
+  background: var(--border);
+}
 .na-kindcap { font-size: 11px; color: var(--text-dim); margin: 2px 0 6px; }
 .na-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .na-kind {

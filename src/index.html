@@ -198,6 +198,7 @@
           <button type="button" class="stab" data-tab="html" data-i18n="tab_html">HTML-preview</button>
           <button type="button" class="stab" data-tab="terminal" data-i18n="tab_terminal">Terminal</button>
           <button type="button" class="stab" data-tab="voice" data-i18n="tab_voice">Spraak</button>
+          <button type="button" class="stab" data-tab="agents" data-i18n="tab_agents">Agents</button>
           <button type="button" class="stab" data-tab="network" data-i18n="tab_network">Netwerk</button>
         </div>
 
@@ -308,6 +309,16 @@
           </div>
 
           <!-- Netwerk: dit werkstation bereikbaar maken voor collega's (#121) -->
+          <!-- De zeven ICM-rollen (#166). Geen bron = niet aan te vinken, en niet
+               aangevinkt = nergens te zien: niet in de balk en niet in het
+               Nieuwe-agent-scherm. Afwezig, niet uitgegrijsd. -->
+          <div class="spane" data-pane="agents">
+            <div class="setting-group">
+              <h3 data-i18n="grp_roles">Rollen</h3>
+              <div class="hint" data-i18n="roles_hint">De rol is van Taurus, de invulling van de repo. Wissel de bron en je houdt dezelfde veldmap, dus je geschiedenis blijft op één plek.</div>
+              <div id="role-rows" class="host-rows"></div>
+            </div>
+          </div>
           <div class="spane" data-pane="network">
             <!-- Eerst het netwerk vertrouwen; pas daarna komt de rest vrij. -->
             <div class="setting-group">
@@ -565,6 +576,22 @@
           <button id="mv-go" class="btn-primary" data-i18n="move_start">Synchroniseren</button>
         </div>
         <div id="mv-status" class="status-msg"></div>
+      </div>
+    </div>
+
+    <!-- ===== Nieuwe versie van een werkplek (#163) =====
+         Bijwerken gaat per werkplek. Het scherm zegt wat er BLIJFT voordat je
+         klikt, want een mapping of een diagnose is een verslag van wat er op dat
+         moment gezien is -- dat herschrijf je niet omdat de bron verder is. -->
+    <div id="update-modal" class="modal hidden">
+      <div class="modal-box">
+        <h2 id="up-title">—</h2>
+        <div id="up-rows" class="na-probe"></div>
+        <div class="modal-actions">
+          <button id="up-skip" class="btn-ghost" data-i18n="up_skip">Laat maar</button>
+          <button id="up-go" class="btn-primary" data-i18n="up_go">Bijwerken</button>
+        </div>
+        <div id="up-status" class="status-msg"></div>
       </div>
     </div>
 

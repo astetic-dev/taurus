@@ -69,6 +69,10 @@ struct Origin {
     // ISO-8601, gezet bij het uitrollen.
     #[serde(default)]
     installed: String,
+    // Sha waarvan je "laat maar" zei, zodat dezelfde versie niet elke start
+    // opnieuw wordt aangeboden. Een volgende commit vraagt weer.
+    #[serde(default)]
+    skipped: String,
 }
 
 // Lege defaults: een verse installatie start zonder projecten. De gebruiker
@@ -297,6 +301,69 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- #163: loopt een werkplek achter? ----------
+//
+// Bewaakt worden de WERKPLEKKEN, gegroepeerd op bron: zeven rollen met twintig
+// werkplekken kosten zeven `git ls-remote`, niet twintig. De check is per bron,
+// de uitkomst per map.
+//
+// `HEAD` in plaats van een taknaam: we klonen altijd de default branch, en dan is
+// HEAD op afstand precies het ding waarmee vergeleken moet worden -- zonder dat
+// we hoeven te weten hoe die tak heet.
+#[tauri::command(async)]
+fn check_sources(sources: Vec<String>) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    for src in sources {
+        // Een lokaal bronpad (#161) heeft geen sha om mee te vergelijken. Dat is
+        // geen fout: die werkplek krijgt simpelweg nooit een pijltje.
+        if !src.starts_with("https://") {
+            continue;
+        }
+        // Mislukt het -- offline, repo weg, ineens prive -- dan komt die bron niet
+        // in de uitkomst en verandert er niets zichtbaars. Offline is een normale
+        // toestand, geen fout om te melden.
+        if let Ok((txt, true)) = git_local(&["ls-remote", &src, "HEAD"]) {
+            if let Some(sha) = txt.split_whitespace().next() {
+                if sha.len() >= 40 {
+                    out.insert(src, sha.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+// Bijwerken gaat PER WERKPLEK en op verzoek. Nooit alle werkplekken van een rol
+// in een keer: de techniek staat naast zijn eigen uitkomst, en een werkplek die je
+// nooit bijwerkt hoort te blijven werken onder de regels waaronder hij is aangelegd.
+//
+// Hier draait NOOIT `git reset`, `git checkout --force` of `git clean`. De map is
+// van de gebruiker; een weigering die uitlegt is beter dan een merge die verrast.
+#[tauri::command(async)]
+fn update_workspace(path: String, host_id: String) -> Result<String, String> {
+    let p = path.trim().to_string();
+    if p.is_empty() {
+        return Err("Geen pad opgegeven.".into());
+    }
+    let (dirty, ok) = git_on(&host_id, &["-C", &p, "status", "--porcelain"])?;
+    if !ok {
+        return Err(format!("Dit is geen git-map (meer): {}", p));
+    }
+    if !dirty.trim().is_empty() {
+        return Err("DIRTY".into());
+    }
+    let (out, ok) = git_on(&host_id, &["-C", &p, "pull", "--ff-only"])?;
+    if !ok {
+        let low = out.to_lowercase();
+        if low.contains("diverge") || low.contains("non-fast-forward") || low.contains("not possible to fast-forward") {
+            return Err("DIVERGED".into());
+        }
+        return Err(out.trim().to_string());
+    }
+    let (sha, _) = git_on(&host_id, &["-C", &p, "rev-parse", "HEAD"])?;
+    Ok(sha.trim().to_string())
+}
+
 // ---------- rolinstallaties: waar een rol vandaan komt (#155) ----------
 //
 // Een eigen bestand naast projects.json/hosts.json/sessions.json, want een
@@ -383,6 +450,28 @@ fn save_roles(roles: Vec<RoleInstall>) -> Result<(), String> {
 // is wordt geweigerd; dezelfde lijn als de STT-downloads, want een willekeurig
 // adres binnenhalen en er een agent in laten draaien is precies het gat dat je
 // niet wilt.
+// Is dit een lokale map in plaats van een adres? Dan is de bron een pad, en
+// uitrollen is kopieren in plaats van klonen. Geen versiebewaking: er is geen sha
+// om mee te vergelijken, en mtimes vergelijken is te slim voor wat het oplevert.
+fn local_source(src: &str) -> Option<std::path::PathBuf> {
+    let s = src.trim();
+    if s.is_empty() || s.contains("://") {
+        return None;
+    }
+    // Een kaal eigenaar/repo is GEEN pad: dat is de GitHub-kortvorm.
+    let looks_like_path =
+        s.contains('\\') || s.starts_with('/') || s.starts_with('~') || s.get(1..2) == Some(":");
+    if !looks_like_path {
+        return None;
+    }
+    let p = std::path::PathBuf::from(expand_home(s));
+    if p.is_dir() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
 fn normalize_source(src: &str) -> Result<String, String> {
     let s = src.trim().trim_end_matches('/');
     if s.is_empty() {
@@ -619,6 +708,35 @@ fn probe_temp_dir(url: &str) -> std::path::PathBuf {
 // naar de map die de gebruiker kiest.
 #[tauri::command(async)]
 fn git_probe(source: String) -> Result<SourceProbe, String> {
+    // Lokale bron: geen clone, geen netwerk, gewoon kijken wat er ligt.
+    if let Some(dir) = local_source(&source) {
+        let mut p = SourceProbe {
+            url: dir.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        p.size_kb = dir_size_excluding_git(&dir) / 1024;
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().into_owned();
+                if n != ".git" {
+                    p.files.push(n);
+                }
+            }
+            p.files.sort();
+        }
+        p.has_claude_md = p.files.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md"));
+        p.shape = icm_shape(&p.files).into();
+        if p.shape == "unknown" {
+            return Err(format!(
+                "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
+                p.files.join(", ")
+            ));
+        }
+        let (name, desc) = read_repo_meta(&dir, &p.url);
+        p.name = name;
+        p.description = desc;
+        return Ok(p);
+    }
     let url = normalize_source(&source)?;
     let tmp = probe_temp_dir(&url);
     let _ = std::fs::remove_dir_all(&tmp);
@@ -784,6 +902,41 @@ fn git_deploy(
         if p.exists() && std::fs::read_dir(p).map(|mut d| d.next().is_some()).unwrap_or(false) {
             return Err(format!("Deze map bestaat al en is niet leeg: {}", dest));
         }
+    }
+
+    // Lokale bron: kopieren. Alleen lokaal -- een lokale map naar een andere
+    // machine sturen is de dropzone/sync, niet dit.
+    if let Some(src_dir) = local_source(&source) {
+        if !local {
+            return Err("Een lokale bron kan alleen op deze computer uitgerold worden.".into());
+        }
+        copy_recursive(&src_dir, Path::new(&dest)).map_err(|e| format!("Kopieren mislukte: {}", e))?;
+        let mut rep = DeployReport { dest: dest.clone(), ..Default::default() };
+        let roots: Vec<String> = std::fs::read_dir(&dest)
+            .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .unwrap_or_default();
+        if icm_shape(&roots) == "unknown" {
+            let _ = std::fs::remove_dir_all(Path::new(&dest));
+            return Err(format!(
+                "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
+                roots.join(", ")
+            ));
+        }
+        if roots.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md")) {
+            rep.claude_md = "kept".into();
+        } else {
+            let (name, _) = read_repo_meta(Path::new(&dest), &dest);
+            let body = generated_claude_md(&name, &role, &field, &src_dir.to_string_lossy(), "", "", &roots, "");
+            std::fs::write(Path::new(&dest).join("CLAUDE.md"), &body)
+                .map_err(|e| format!("CLAUDE.md schrijven mislukte: {}", e))?;
+            rep.claude_md = "written".into();
+        }
+        rep.paths = roots;
+        rep.paths.sort();
+        // Geen sha en geen tak: dit is een kopie, niet een clone. De kaart krijgt
+        // daarom nooit een pijltje, en dat zegt het rapport ook.
+        rep.notes.push("lokale bron: geen versiebewaking".into());
+        return Ok(rep);
     }
 
     let (out, ok) = git_on(&host_id, &["clone", "--quiet", &url, &dest])?;
@@ -6270,6 +6423,8 @@ pub fn run() {
             git_available,
             git_probe,
             git_deploy,
+            check_sources,
+            update_workspace,
             get_hosts,
             machines,
             remote_agents,
@@ -8216,6 +8371,21 @@ mod tests {
         assert!(!out[0].enabled, "zonder bron hoort enabled uit te staan");
         assert!(out[1].enabled);
         assert!(out[1].source.contains("icm-architect"));
+    }
+
+    // Een lokale map als bron (#161). De kortvorm `eigenaar/repo` mag NIET als
+    // pad gelezen worden, anders sluit een bestaande map met die naam per ongeluk
+    // het GitHub-adres uit.
+    #[test]
+    fn a_local_folder_is_told_apart_from_an_address() {
+        assert!(local_source("https://github.com/a/b").is_none());
+        assert!(local_source("RinDig/icm-architect").is_none(), "kortvorm is geen pad");
+        assert!(local_source("").is_none());
+        assert!(local_source("Z:\\bestaat\\niet").is_none(), "een pad dat niet bestaat is geen bron");
+        // Een map die er echt is: de map van deze crate.
+        let here = std::env::current_dir().expect("cwd");
+        let s = here.to_string_lossy().into_owned();
+        assert!(local_source(&s).is_some(), "bestaande map hoort erkend te worden: {}", s);
     }
 
     #[test]

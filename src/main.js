@@ -176,6 +176,21 @@ const I18N = {
     na_need_source: "✗ Vul een GitHub-adres in.",
     na_need_read: "✗ Lees de bron eerst.",
     na_wrote: "✓ {n} bestanden geschreven in {dest}",
+    // Versiebewaking (#163)
+    up_title: "{name} — nieuwe versie",
+    up_have: "jij hebt", up_there: "er is", up_stays: "dit blijft",
+    up_stays_v: "alles wat hier al gemaakt is",
+    up_go: "Bijwerken", up_skip: "Laat maar", up_working: "Bijwerken…",
+    up_done: "✓ {name} bijgewerkt naar {sha}",
+    up_dirty: "✗ Je hebt in deze map zelf iets gewijzigd. Bijwerken zou dat overschrijven, dus dat doet Taurus niet.",
+    up_diverged: "✗ Deze map loopt uit de pas met de bron. Taurus werkt alleen bij als het een simpele vooruitspoeling is.",
+    up_avail: "nieuwe versie beschikbaar",
+    // Instellingen -> Agents (#166)
+    tab_agents: "Agents", grp_roles: "Rollen",
+    roles_hint: "De rol is van Taurus, de invulling van de repo. Wissel de bron en je houdt dezelfde veldmap, dus je geschiedenis blijft op één plek.",
+    role_use: "gebruik", role_as_skill: "ook als skill",
+    role_src_ph: "GitHub-adres of een map op deze computer",
+    role_no_source: "geen bron — daarom niet aan te vinken",
     role_architect: "Architect", role_architect_q: "Ik wil een nieuw proces maken.",
     role_operator: "Operator", role_operator_q: "Dit moet zonder mij beslist worden.",
     role_cartographer: "Cartograaf", role_cartographer_q: "Wat is dit eigenlijk?",
@@ -461,6 +476,21 @@ const I18N = {
     na_need_source: "✗ Fill in a GitHub address.",
     na_need_read: "✗ Read the source first.",
     na_wrote: "✓ {n} files written in {dest}",
+    // Version watching (#163)
+    up_title: "{name} — newer version",
+    up_have: "you have", up_there: "there is", up_stays: "this stays",
+    up_stays_v: "everything already made here",
+    up_go: "Update", up_skip: "Not now", up_working: "Updating…",
+    up_done: "✓ {name} updated to {sha}",
+    up_dirty: "✗ You changed something in this folder yourself. Updating would overwrite it, so Taurus does not.",
+    up_diverged: "✗ This folder has diverged from its source. Taurus only updates when it is a plain fast-forward.",
+    up_avail: "newer version available",
+    // Settings -> Agents (#166)
+    tab_agents: "Agents", grp_roles: "Roles",
+    roles_hint: "The role belongs to Taurus, the implementation to the repository. Swap the source and you keep the same field folder, so your history stays in one place.",
+    role_use: "use", role_as_skill: "also as a skill",
+    role_src_ph: "GitHub address or a folder on this computer",
+    role_no_source: "no source — so it cannot be ticked",
     role_architect: "Architect", role_architect_q: "I want to build a new process.",
     role_operator: "Operator", role_operator_q: "This should be decided without me.",
     role_cartographer: "Cartographer", role_cartographer_q: "What is this, actually?",
@@ -1075,8 +1105,16 @@ function makeReorderable(el, opts) {
 // herschik het projects-array, persist en herteken.
 function commitProjectOrder() {
   const snap = projects;
-  const order = [...els.list.children].map((c) => Number(c.dataset.idx));
-  const next = order.map((i) => snap[i]).filter(Boolean);
+  // De balk bevat sinds #160 ook een lijntje en ingesprongen kinderen, en de
+  // volgorde bovenin is BEREKEND in plaats van bewaard. Dus: lees alleen de
+  // werkprocessen uit de DOM en zet de rest onveranderd terug -- anders zou
+  // slepen die berekende bovenkant in projects.json vastleggen.
+  const dragged = [...els.list.children]
+    .filter((c) => c.classList.contains("project-card") && !c.classList.contains("embedded"))
+    .map((c) => snap[Number(c.dataset.idx)])
+    .filter((p) => p && !p.role && !p.origin && !p.parent);
+  const rest = snap.filter((p) => !dragged.includes(p));
+  const next = [...rest, ...dragged];
   if (next.length === snap.length) {
     projects = next;
     invoke("save_projects", { projects }).catch((e) => toast("✗ " + e, "err"));
@@ -1108,17 +1146,137 @@ function commitTabOrder() {
 }
 
 /* ============ projecten ============ */
+/* ---- versiebewaking (#163) ---- */
+// bron -> sha op afstand, voor elke bron die achterloopt. Leeg = niets te melden.
+// Eén keer bij het starten en verder op verzoek; nooit op een timer, nooit
+// blokkerend, en een mislukte check verandert niets zichtbaars.
+let sourceHeads = new Map();
+function updateFor(p) {
+  const src = p.origin && p.origin.source;
+  if (!src) return null;
+  const remote = sourceHeads.get(src);
+  if (!remote || remote === p.origin.sha) return null;
+  // "Laat maar" gold voor DIE versie; een volgende commit vraagt weer.
+  if (p.origin.skipped && p.origin.skipped === remote) return null;
+  return remote;
+}
+async function checkSources() {
+  const sources = [...new Set(projects.map((p) => p.origin && p.origin.source).filter(Boolean))];
+  if (!sources.length) return;
+  try {
+    const heads = await invoke("check_sources", { sources });
+    sourceHeads = new Map(Object.entries(heads));
+    renderProjects();
+  } catch (_) { /* offline is een normale toestand */ }
+}
+
+let upTarget = null;
+function openUpdate(p) {
+  const remote = updateFor(p);
+  if (!remote) return;
+  upTarget = p;
+  els.upTitle.textContent = t("up_title").replace("{name}", p.label);
+  const row = (k, v) => `<div class="na-prow"><span class="na-pk">${escapeHtml(k)}</span><span class="na-pv">${escapeHtml(v)}</span></div>`;
+  els.upRows.innerHTML =
+    row(t("up_have"), (p.origin.sha || "").slice(0, 7)) +
+    row(t("up_there"), remote.slice(0, 7)) +
+    // Wat er BLIJFT, vóór de knop. Er wordt nooit iets opnieuw gemaakt: een
+    // verslag is wat er op dat moment gezien is, en dat herschrijf je niet omdat
+    // het leerboek herzien is.
+    row(t("up_stays"), t("up_stays_v")) +
+    row("", p.path);
+  naSay(els.upStatus, "", "");
+  els.updateModal.classList.remove("hidden");
+}
+async function doUpdate() {
+  const p = upTarget;
+  if (!p) return;
+  naSay(els.upStatus, t("up_working"), "");
+  els.upGo.disabled = true;
+  let sha = "";
+  try {
+    sha = await invoke("update_workspace", { path: p.path, hostId: p.host_id || "" });
+  } catch (e) {
+    els.upGo.disabled = false;
+    const msg = String(e);
+    naSay(els.upStatus, msg === "DIRTY" ? t("up_dirty") : msg === "DIVERGED" ? t("up_diverged") : "✗ " + msg, "err");
+    return;
+  }
+  els.upGo.disabled = false;
+  await patchOrigin(p, { sha, skipped: "" });
+  els.updateModal.classList.add("hidden");
+  toast(t("up_done").replace("{name}", p.label).replace("{sha}", sha.slice(0, 7)), "ok");
+}
+async function skipUpdate() {
+  const p = upTarget;
+  const remote = p && updateFor(p);
+  if (remote) await patchOrigin(p, { skipped: remote });
+  els.updateModal.classList.add("hidden");
+}
+// Eén plek waar `origin` bijgewerkt wordt, zodat het schrijven en het herladen
+// niet op twee manieren gebeuren.
+async function patchOrigin(p, patch) {
+  const next = projects.map((x) => (x.id === p.id ? { ...x, origin: { ...x.origin, ...patch } } : x));
+  try {
+    await invoke("save_projects", { projects: next });
+    projects = await invoke("get_projects");
+    if (selected) selected = projects.find((x) => x.id === selected.id) || null;
+    renderProjects();
+  } catch (e) { toast("✗ " + e, "err"); }
+}
+
+// De leesvolgorde van de balk (#160). Bovenaan wat op zichzelf staat -- de
+// staande rollen op hun vaste plek, dan de specialisten -- en onder het lijntje
+// je werkprocessen, elk met de rollen die erin wonen eronder ingesprongen.
+//
+// Het lijntje scheidt dus niet "special" van "gewoon" maar STAAND van BIJ EEN
+// WERKPROCES. Boven staan de mensen naar wie je terugkeert, onder staat je werk.
+function projectOrder() {
+  const roleRank = (p) => {
+    const i = ROLES.findIndex((r) => r.id === p.role);
+    return i < 0 ? ROLES.length : i;
+  };
+  const roots = projects.filter((p) => !p.parent);
+  const top = roots
+    .filter((p) => p.role || p.origin)
+    // Rollen op hun vaste plek; specialisten daarna, in de volgorde waarin je ze
+    // uitrolde. Een rol die je verwijdert en opnieuw uitrolt komt dus terug waar
+    // hij hoort, en niet onderaan.
+    .sort((a, b) => (a.role ? 0 : 1) - (b.role ? 0 : 1) || roleRank(a) - roleRank(b));
+  const bottom = roots.filter((p) => !p.role && !p.origin);
+  const out = [];
+  const withKids = (p) => {
+    out.push({ p, child: false });
+    for (const k of projects.filter((x) => x.parent === p.id)) out.push({ p: k, child: true });
+  };
+  for (const p of top) withKids(p);
+  const sep = out.length > 0 && bottom.length > 0;
+  for (const p of bottom) withKids(p);
+  return { rows: out, sepAfter: sep ? top.reduce((n, p) => n + 1 + projects.filter((x) => x.parent === p.id).length, 0) : -1 };
+}
+
 function renderProjects() {
   els.list.innerHTML = "";
-  projects.forEach((p, index) => {
+  const { rows, sepAfter } = projectOrder();
+  rows.forEach((row, seat) => {
+    const p = row.p;
+    const index = projects.indexOf(p);
+    // Het lijntje verschijnt alleen als er van beide soorten iets is -- geen
+    // streep boven niets.
+    if (seat === sepAfter) {
+      const sep = document.createElement("div");
+      sep.className = "project-sep";
+      els.list.appendChild(sep);
+    }
     const card = document.createElement("div");
-    card.className = "project-card";
+    card.className = "project-card" + (row.child ? " embedded" : "");
     card.dataset.idx = String(index);
     card.style.borderLeftColor = p.accent || "#7c9cff";
     const loc = agentLocTag(p);
     card.innerHTML =
       `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${loc.cls}" title="${escapeHtml(loc.title)}">${escapeHtml(loc.text)}</span></div>` +
       `<div class="pc-actions">` +
+        (updateFor(p) ? `<button class="pc-up" title="${escapeHtml(t("up_avail"))}">↑</button>` : "") +
         `<button class="pc-edit" title="${escapeHtml(t("edit"))}">✎</button>` +
         `<button class="pc-del" title="${escapeHtml(t("delete"))}">🗑</button>` +
       `</div>` +
@@ -1132,12 +1290,19 @@ function renderProjects() {
     // alleen op een draaiende tab.
     card.addEventListener("contextmenu", (e) => { e.preventDefault(); openMoveModal(p); });
     // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
+    const up = card.querySelector(".pc-up");
+    if (up) up.addEventListener("click", (e) => { e.stopPropagation(); openUpdate(p); });
     card.querySelector(".pc-edit").addEventListener("click", (e) => { e.stopPropagation(); openEditor(p); });
     card.querySelector(".pc-del").addEventListener("click", (e) => { e.stopPropagation(); card.classList.add("confirming"); });
     card.querySelector(".pc-confirm").addEventListener("click", (e) => e.stopPropagation());
     card.querySelector(".pc-no").addEventListener("click", (e) => { e.stopPropagation(); card.classList.remove("confirming"); });
     card.querySelector(".pc-yes").addEventListener("click", (e) => { e.stopPropagation(); deleteProject(p); });
-    makeReorderable(card, { axis: "y", itemClass: "project-card", endSelector: null, onDrop: commitProjectOrder });
+    // Alleen werkprocessen zijn versleepbaar. De staande rollen hebben een vaste
+    // plek -- dat is waar een vak voor is -- en een ingebedde kaart volgt zijn
+    // gastheer. Half-versleepbaar zou een regel zijn die je moet uitleggen.
+    if (!row.child && !p.role && !p.origin) {
+      makeReorderable(card, { axis: "y", itemClass: "project-card", endSelector: null, onDrop: commitProjectOrder });
+    }
     els.list.appendChild(card);
   });
 }
@@ -1195,7 +1360,14 @@ async function selectProject(p, card) {
   els.status.textContent = "";
   await refreshHostState(); // doet de lokale pad-checks, of slaat ze over bij remote
 }
-async function loadProjects() { projects = await invoke("get_projects"); renderProjects(); }
+async function loadProjects() {
+  projects = await invoke("get_projects");
+  renderProjects();
+  // Eén keer bij het starten kijken of een werkplek achterloopt (#163). Niet
+  // afwachten: de balk staat er al, het pijltje komt erbij zodra de bronnen
+  // geantwoord hebben.
+  checkSources();
+}
 
 /* ============ remote hosts (#98) ============ */
 // De machines waarop een tab een agent kan draaien. Leeg = alleen lokaal, en dan
@@ -3797,6 +3969,7 @@ function openSettings() {
   els.setTabRecap.checked = settings.tabRecap;
   els.setTabGroupAt.value = settings.tabGroups ? settings.tabGroupAt : 0;
   els.setFullPaths.checked = settings.fullPaths;
+  renderRoleRows();
   els.setPersistMode.value = persistMode();
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
@@ -4044,6 +4217,7 @@ function saveSettingsFromForm() {
   settings.tabGroupAt = Number.isFinite(drempel) && drempel > 0 ? drempel : DEFAULT_SETTINGS.tabGroupAt;
   settings.tabGroups = Number.isFinite(drempel) && drempel > 0;
   settings.fullPaths = els.setFullPaths.checked;
+  saveRoles();
   settings.persistMode = els.setPersistMode.value;
   settings.skin = els.setSkin.value;
   settings.ttsEnabled = els.ttsOn.checked;
@@ -4124,6 +4298,86 @@ const ROLES = [
 ];
 function roleById(id) { return ROLES.find((r) => r.id === id) || null; }
 
+// roles.json (#166): per rol de bron die JIJ kiest, of hij gebruikt wordt, en of
+// hij daarnaast machinebreed als skill geïnstalleerd wordt. Het bestand overrulet
+// de constante hierboven; die is alleen het voorstel waarmee je begint.
+let roleCfg = [];
+function roleEntry(id) { return roleCfg.find((r) => r.role === id) || null; }
+function roleSource(r) {
+  const e = roleEntry(r.id);
+  return e && e.source ? e.source : r.source;
+}
+// Geen bron = niet te gebruiken. Dat is dezelfde regel als in de backend, en hij
+// staat hier zodat het scherm en het bestand niet uiteen kunnen lopen.
+function roleEnabled(r) {
+  if (!roleSource(r)) return false;
+  const e = roleEntry(r.id);
+  return e ? e.enabled !== false : true;
+}
+function roleAsSkill(r) {
+  const e = roleEntry(r.id);
+  return !!(e && e.as_skill);
+}
+function enabledRoles() { return ROLES.filter(roleEnabled); }
+
+async function loadRoles() {
+  try { roleCfg = await invoke("get_roles"); } catch (_) { roleCfg = []; }
+}
+async function saveRoles() {
+  // Alleen regels die iets zeggen: een rol op zijn voorstel-bron, aan, zonder
+  // skill hoeft niet in het bestand te staan.
+  const list = ROLES.map((r) => {
+    const e = roleEntry(r.id) || {};
+    return {
+      role: r.id,
+      host_id: "",
+      source: e.source || "",
+      branch: "",
+      as_skill: !!e.as_skill,
+      skill_sha: e.skill_sha || "",
+      enabled: e.enabled !== false,
+      skipped: e.skipped || "",
+    };
+  });
+  roleCfg = list;
+  try { await invoke("save_roles", { roles: list }); } catch (e) { toast("✗ " + e, "err"); }
+}
+
+function renderRoleRows() {
+  const box = els.roleRows;
+  if (!box) return;
+  box.innerHTML = "";
+  for (const r of ROLES) {
+    const e = roleEntry(r.id) || {};
+    const row = document.createElement("div");
+    row.className = "role-row";
+    row.innerHTML =
+      `<span class="role-dot" style="background:${escapeHtml(r.accent)}"></span>` +
+      `<span class="role-name">${escapeHtml(r.name)}<small>${escapeHtml(t("role_" + r.id))}</small></span>` +
+      `<input class="role-src" type="text" placeholder="${escapeHtml(t("role_src_ph"))}" value="${escapeHtml(e.source || r.source || "")}" />` +
+      `<label><input class="role-on" type="checkbox"${roleEnabled(r) ? " checked" : ""} /> ${escapeHtml(t("role_use"))}</label>` +
+      `<label><input class="role-skill" type="checkbox"${roleAsSkill(r) ? " checked" : ""} /> ${escapeHtml(t("role_as_skill"))}</label>`;
+    const src = row.querySelector(".role-src");
+    const on = row.querySelector(".role-on");
+    const skill = row.querySelector(".role-skill");
+    const sync = () => {
+      const entry = roleEntry(r.id) || (roleCfg.push({ role: r.id }), roleEntry(r.id));
+      entry.source = src.value.trim();
+      // Zonder bron kan het vinkje niet aan blijven staan -- en dat laat het
+      // scherm ook zien in plaats van het stil te corrigeren bij het opslaan.
+      if (!entry.source) { on.checked = false; on.disabled = true; on.title = t("role_no_source"); }
+      else { on.disabled = false; on.title = ""; }
+      entry.enabled = on.checked;
+      entry.as_skill = skill.checked;
+    };
+    src.addEventListener("input", sync);
+    on.addEventListener("change", sync);
+    skill.addEventListener("change", sync);
+    sync();
+    box.appendChild(row);
+  }
+}
+
 // "plain" = een map die je al hebt; een rol-id; of "free" = een ICM-repo zonder rol.
 let naKind = "plain";
 let naProbe = null;
@@ -4183,7 +4437,7 @@ function renderNaKinds() {
     `><span>${escapeHtml(title)}</span><span class="na-kind-sub">${escapeHtml(sub)}</span></button>`;
   els.naKinds.innerHTML =
     tile("plain", t("na_kind_plain"), t("na_kind_plain_sub"), "") +
-    ROLES.map((r) => tile(r.id, r.name, t("role_" + r.id), r.accent)).join("") +
+    enabledRoles().map((r) => tile(r.id, r.name, t("role_" + r.id), r.accent)).join("") +
     tile("free", t("na_kind_free"), t("na_kind_free_sub"), "");
   for (const b of els.naKinds.querySelectorAll(".na-kind")) {
     b.addEventListener("click", () => selectNaKind(b.dataset.kind));
@@ -4206,7 +4460,7 @@ function selectNaKind(kind) {
   els.naRoleHead.innerHTML = role
     ? `<b>${escapeHtml(role.name)}</b> · ${escapeHtml(t("role_" + role.id))} — ${escapeHtml(t("role_" + role.id + "_q"))}`
     : "";
-  els.naSource.value = role ? role.source : "";
+  els.naSource.value = role ? roleSource(role) : "";
   els.naSubject.value = "";
   // Waar hij werkt: staand, of in een werkproces dat je al hebt. Geen
   // bladervenster -- Taurus kent de paden van je agents al.
@@ -4274,7 +4528,9 @@ async function naDeploy() {
       hostId: "",
       role: role ? role.id : "",
       field: role ? role.field + "/" : "",
-      asSkill: false,
+      // Laag 2 is een TOEVOEGING: de werkplek werkt zonder. Aan of uit staat per
+      // rol in de instellingen (#166).
+      asSkill: role ? roleAsSkill(role) : false,
     });
   } catch (e) {
     els.naSave.disabled = false;
@@ -4665,7 +4921,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.newagentModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
+  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.newagentModal.classList.add("hidden"); els.updateModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
     document.querySelector("#restore-modal").classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
@@ -5171,6 +5427,12 @@ window.addEventListener("DOMContentLoaded", () => {
     naProbe: document.querySelector("#na-probe"),
     naDestField: document.querySelector("#na-destfield"),
     naDest: document.querySelector("#na-dest"),
+    updateModal: document.querySelector("#update-modal"),
+    upTitle: document.querySelector("#up-title"),
+    upRows: document.querySelector("#up-rows"),
+    upGo: document.querySelector("#up-go"),
+    upStatus: document.querySelector("#up-status"),
+    roleRows: document.querySelector("#role-rows"),
     appVersion: document.querySelector("#app-version"),
     fileDropper: document.querySelector("#file-dropper"),
     dropperList: document.querySelector("#dropper-list"),
@@ -5262,6 +5524,8 @@ window.addEventListener("DOMContentLoaded", () => {
   els.naCancel.addEventListener("click", () => els.newagentModal.classList.add("hidden"));
   els.naSave.addEventListener("click", () => (naKind === "plain" ? saveNewAgent() : naDeploy()));
   document.querySelector("#na-read").addEventListener("click", naReadSource);
+  els.upGo.addEventListener("click", doUpdate);
+  document.querySelector("#up-skip").addEventListener("click", skipUpdate);
   // Van plek of onderwerp wisselen verandert het pad, dus meteen bijwerken --
   // anders staat er een pad dat niet meer bij je keuze hoort.
   els.naWhere.addEventListener("change", naRefreshDest);
@@ -5385,7 +5649,9 @@ window.addEventListener("DOMContentLoaded", () => {
   // titel toe, en dan zou een testexemplaar er ongemarkeerd bij staan.
   markTestInstance();
   renderTabs();
-  loadProjects();
+  // roles.json eerst: het Nieuwe-agent-scherm toont alleen rollen die je
+  // gebruikt, en dat staat daar.
+  loadRoles().then(loadProjects);
   // Hosts eerst: het herstellen moet een opgeslagen host_id kunnen opzoeken.
   loadHosts().then(startupRestore);
   // Stond er nog een hand omhoog toen de app sloot? Dan hoort de balk er te
