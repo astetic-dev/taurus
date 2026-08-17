@@ -3888,17 +3888,25 @@ listen("ssh-sessions-changed", () => refreshSshSessions());
 // aanroepen -- maar alleen als dit event ook aankomt, dus een kapotte frontend
 // kan het venster niet gijzelen.
 listen("exit-requested", () => {
-  // Meteen melden dat we leven: dat zet de wachthond in de backend af, zodat een
-  // openstaande vraag niet na tien seconden alsnog afsluit.
-  invoke("exit_ack").catch(() => {});
+  // De wachthond in de backend NIET hier afzetten. Hij hoort het hele pad te
+  // bewaken, en pas te stoppen als er echt een vraag in beeld staat -- dat doet
+  // openExitConfirm(). Zette je hem hier af, dan was het vangnet weg precies
+  // voordat het nodig was, en dat is hoe een venster kon blijven hangen.
+  //
   // Niets te verliezen, of de vraag staat uit: meteen door. Een vraag die niets
   // te melden heeft leert je hem weg te klikken.
   if (!els.exitModal || settings.confirmExit === false || liveSessions().length === 0) {
-    persistSessionsToDisk();
+    try { persistSessionsToDisk(); } catch (_) {}
     invoke("exit_now").catch(() => {});
     return;
   }
-  openExitConfirm();
+  try {
+    openExitConfirm();
+  } catch (e) {
+    // Kan de vraag niet getekend worden, dan is dat geen reden om je op te sluiten.
+    console.error("exit confirm failed:", e);
+    invoke("exit_now").catch(() => {});
+  }
 });
 
 listen("pty-exit", (event) => {
@@ -5181,6 +5189,8 @@ function openExitConfirm() {
   els.exitStatus.className = "status-msg";
   els.exitModal.classList.remove("hidden");
   els.exitGo.focus();
+  // Nu staat de vraag er echt: vanaf hier mag de wachthond stoppen.
+  invoke("exit_ack").catch(() => {});
 }
 
 async function doExit() {

@@ -1,6 +1,6 @@
 # Special agents — installeren en doorlopen
 
-Versie 0.6.4, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
+Versie 0.6.5, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
 zit staat onderaan.
 
 ## 1. Draaien zonder je productie aan te raken
@@ -171,7 +171,11 @@ ongemoeid. Er draait nooit `reset`, `checkout --force` of `clean`.
 
 ## 8. Afsluiten
 
-Sluit Taurus met een agent open. Nu komt er een vraag, met per sessie wat er
+**Zonder draaiende agents wordt er niets gevraagd** en sluit hij meteen. De vraag
+gaat over wat je kunt verliezen; is er niets, dan is er geen vraag. De backend
+beslist dat zelf, dus het afsluiten hangt dan ook niet aan de UI.
+
+Sluit Taurus wél met een agent open. Dan komt er een vraag, met per sessie wat er
 gebeurt: wat op een mux draait blijft doorlopen en is met ⇱ weer op te pikken, wat
 lokaal draait stopt en is bij de volgende start als conversatie te hervatten. Zet
 je de opstartkeuze op *schoon beginnen*, dan belooft de vraag dat laatste niet meer.

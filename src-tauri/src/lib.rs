@@ -4383,7 +4383,12 @@ fn stop_session_command(host: &Host, session: &str) -> Result<String, String> {
 // te sluiten; dan loopt precies hetzelfde pad als altijd -- inclusief
 // kill_all_sessions -- in plaats van een tweede afsluitroute die naast de eerste
 // uit de pas kan gaan lopen.
-#[tauri::command]
+// LET OP: `(async)`. Een synchroon commando draait op de event-loop-thread, en
+// `window.close()` daarvandaan wil een bericht naar diezelfde loop sturen -- dan
+// wacht het venster op zichzelf en gaat er niets meer dicht. Precies dat gebeurde:
+// geen vraag, geen sluiten, alleen nog hard afbreken. Met `(async)` draait dit op
+// een worker en komt het bericht wel aan.
+#[tauri::command(async)]
 fn exit_now(app: AppHandle, window: tauri::Window) -> Result<(), String> {
     use tauri::Manager;
     let st = app.state::<AppState>();
@@ -4393,8 +4398,12 @@ fn exit_now(app: AppHandle, window: tauri::Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
-// "Ik leef en ik heb de vraag gezien." Zet de wachthond af, zodat een gebruiker
-// die de bevestiging laat staan niet na tien seconden overvallen wordt.
+// "Ik toon de vraag nu." Zet de wachthond af, zodat een gebruiker die de
+// bevestiging laat staan niet na tien seconden overvallen wordt.
+//
+// Alleen aanroepen als de vraag ECHT in beeld staat. Deed de frontend dit zodra het
+// event aankwam, dan bewaakte de wachthond juist het stuk niet waar het kon
+// misgaan -- en dat is precies hoe een venster kon blijven hangen.
 #[tauri::command]
 fn exit_ack(app: AppHandle) {
     use tauri::Manager;
@@ -6563,8 +6572,20 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
                 let state = app.state::<AppState>();
-                // Nog niet bevestigd: vraag het de UI en houd het venster open.
+                // Is er niets te verliezen, dan wordt er ook niets gevraagd -- en
+                // dan gaat de frontend er niet aan te pas.
+                //
+                // DIT IS DE LES uit een venster dat niet meer dicht wilde: de vraag
+                // ging altijd langs de UI, ook als er nul sessies waren, en dan hing
+                // het afsluiten aan een rondje heen-en-weer dat het niet nodig had.
+                // De backend weet zelf wat er draait; die hoort dat niet te vragen.
+                let nothing_running = state
+                    .sessions
+                    .lock()
+                    .map(|m| m.is_empty())
+                    .unwrap_or(true);
                 if !state.exit_ok.load(Ordering::SeqCst)
+                    && !nothing_running
                     && window.emit("exit-requested", ()).is_ok()
                 {
                     api.prevent_close();
@@ -6574,20 +6595,30 @@ pub fn run() {
                     // levert af bij de webview, niet bij een handler. Een frontend
                     // die nog laadt of gecrasht is zou dus een venster achterlaten
                     // dat niet meer dicht kan, en niet kunnen afsluiten is erger
-                    // dan niet gevraagd worden. De UI zet `exit_pending` meteen uit
-                    // (exit_ack) als teken dat hij leeft; blijft het staan, dan
-                    // sluiten we alsnog.
+                    // dan niet gevraagd worden.
+                    //
+                    // De UI zet `exit_pending` pas uit als hij de vraag ECHT toont
+                    // (exit_ack). Eerder deed hij dat zodra het event aankwam, en
+                    // toen bewaakte de wachthond dus juist het stukje niet waar het
+                    // misging.
+                    //
+                    // Escaleren: eerst netjes sluiten, en als het venster er dan nog
+                    // staat het proces beeindigen. De Job Objects ruimen de
+                    // agent-bomen ook bij een harde exit op (#77), dus dat is veilig.
                     let w = window.clone();
                     let app2 = app.clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_secs(10));
                         let st = app2.state::<AppState>();
-                        if st.exit_pending.load(Ordering::SeqCst)
-                            && !st.exit_ok.load(Ordering::SeqCst)
+                        if !st.exit_pending.load(Ordering::SeqCst)
+                            || st.exit_ok.load(Ordering::SeqCst)
                         {
-                            st.exit_ok.store(true, Ordering::SeqCst);
-                            let _ = w.close();
+                            return;
                         }
+                        st.exit_ok.store(true, Ordering::SeqCst);
+                        let _ = w.close();
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        app2.exit(0);
                     });
                     return;
                 }
