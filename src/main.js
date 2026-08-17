@@ -206,6 +206,12 @@ const I18N = {
     ctx_aim: "👁 Laat {name} hiernaar kijken",
     aim_task: "Kijk naar deze map en doe wat je hoort te doen: {path}",
     aim_none: "Geen leesrol uitgerold",
+    // Opdrachten aan de rollen bewaren
+    foot_assign: "≡ Opdrachten", assign_title: "Opdrachten aan je rollen",
+    assign_none: "Nog geen opdrachten. Ze worden vastgelegd zodra je een rol met een taak start.",
+    assign_none_role: "nog niets gevraagd",
+    assign_in: "in {label}", assign_standing: "staand",
+    assign_count: "{n}",
     role_architect: "Architect", role_architect_q: "Ik wil een nieuw proces maken.",
     role_operator: "Operator", role_operator_q: "Dit moet zonder mij beslist worden.",
     role_cartographer: "Cartograaf", role_cartographer_q: "Wat is dit eigenlijk?",
@@ -522,6 +528,12 @@ const I18N = {
     ctx_aim: "👁 Have {name} look at this",
     aim_task: "Look at this folder and do what you are here to do: {path}",
     aim_none: "No reading role deployed",
+    // Keeping the assignments given to the roles
+    foot_assign: "≡ Assignments", assign_title: "Assignments to your roles",
+    assign_none: "No assignments yet. They are recorded as soon as you start a role with a task.",
+    assign_none_role: "nothing asked yet",
+    assign_in: "in {label}", assign_standing: "standing",
+    assign_count: "{n}",
     role_architect: "Architect", role_architect_q: "I want to build a new process.",
     role_operator: "Operator", role_operator_q: "This should be decided without me.",
     role_cartographer: "Cartographer", role_cartographer_q: "What is this, actually?",
@@ -1238,7 +1250,7 @@ async function doUpdate() {
   }
   els.upGo.disabled = false;
   await patchOrigin(p, { sha, skipped: "" });
-  els.updateModal.classList.add("hidden");
+  els.updateModal.classList.add("hidden"); els.assignModal.classList.add("hidden");
   toast(t("up_done").replace("{name}", p.label).replace("{sha}", sha.slice(0, 7)), "ok");
 }
 async function skipUpdate() {
@@ -3200,6 +3212,14 @@ async function startSession() {
   const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId });
   try {
     await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
+    // Wat je een rol opdraagt hoort bewaard te blijven: het antwoord komt in zijn
+    // werkplek, en zonder dit was de vraag weg zodra de tab sloot. Alleen voor de
+    // rollen, alleen lokaal (een remote map schrijven is een ander verhaal), en
+    // nooit blokkerend -- mislukt het, dan is dat geen reden de sessie niet te
+    // starten.
+    if (selected.role && !hostId && task.trim()) {
+      invoke("record_assignment", { path, task, when: assignStamp() }).catch(() => {});
+    }
     recordSession(session);
     showView(id);
     persistSessionsToDisk();
@@ -3949,6 +3969,66 @@ function aimRoleAt(role, subject) {
   showView("new");
   els.taskInput.value = t("aim_task").replace("{path}", subject.path);
   els.taskInput.focus();
+}
+
+// Datum en tijd zoals de gebruiker ze leest, niet ISO: dit bestand wordt door een
+// mens gelezen en door een agent, en beide hebben meer aan "17-08-2026 14:32".
+function assignStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// Overzicht van wat je elke rol gevraagd hebt. Leest de bestanden bij het openen:
+// een rol kan er zelf ook in geschreven hebben, en dan hoort dat mee te komen.
+async function openAssignments() {
+  const roleCards = projects.filter((p) => p.role);
+  els.assignBody.innerHTML = "";
+  if (!roleCards.length) {
+    els.assignBody.innerHTML = `<div class="assign-empty">${escapeHtml(t("assign_none"))}</div>`;
+    els.assignModal.classList.remove("hidden");
+    return;
+  }
+  els.assignModal.classList.remove("hidden");
+  let any = false;
+  for (const p of roleCards) {
+    const role = roleById(p.role);
+    let items = [];
+    try { items = await invoke("read_assignments", { path: p.path }); } catch (_) {}
+    if (items.length) any = true;
+    const host = p.parent ? projects.find((x) => x.id === p.parent) : null;
+    const where = host ? t("assign_in").replace("{label}", host.label) : t("assign_standing");
+    const head = document.createElement("div");
+    head.className = "assign-role";
+    head.innerHTML =
+      `<span class="role-dot" style="background:${escapeHtml(role ? role.accent : "#7c9cff")}"></span>` +
+      `<span>${escapeHtml(p.label)}</span>` +
+      `<span class="assign-where">${escapeHtml(where)} · ${items.length}</span>`;
+    els.assignBody.appendChild(head);
+    if (!items.length) {
+      const none = document.createElement("div");
+      none.className = "assign-item";
+      none.innerHTML = `<span class="assign-when"></span><span class="assign-task assign-empty">${escapeHtml(t("assign_none_role"))}</span>`;
+      els.assignBody.appendChild(none);
+      continue;
+    }
+    // Nieuwste bovenaan in het overzicht; in het bestand blijft het chronologisch,
+    // want dat leest een mens van boven naar beneden mee met de map.
+    for (const a of [...items].reverse()) {
+      const row = document.createElement("div");
+      row.className = "assign-item";
+      row.innerHTML =
+        `<span class="assign-when">${escapeHtml(a.when)}</span>` +
+        `<span class="assign-task">${escapeHtml(a.task)}</span>`;
+      els.assignBody.appendChild(row);
+    }
+  }
+  if (!any) {
+    const note = document.createElement("div");
+    note.className = "assign-empty";
+    note.textContent = t("assign_none");
+    els.assignBody.appendChild(note);
+  }
 }
 
 function openTabMenu(x, y, id) {
@@ -5632,6 +5712,8 @@ window.addEventListener("DOMContentLoaded", () => {
     upGo: document.querySelector("#up-go"),
     upStatus: document.querySelector("#up-status"),
     roleRows: document.querySelector("#role-rows"),
+    assignModal: document.querySelector("#assign-modal"),
+    assignBody: document.querySelector("#assign-body"),
     appVersion: document.querySelector("#app-version"),
     fileDropper: document.querySelector("#file-dropper"),
     dropperList: document.querySelector("#dropper-list"),
@@ -5818,6 +5900,8 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#editor-save").addEventListener("click", saveEditor);
   document.querySelector("#editor-add").addEventListener("click", () => { editRows.push(blankRow()); renderEditor(); });
   document.querySelector("#manage-agents").addEventListener("click", () => openEditor(null));
+  document.querySelector("#assign-btn").addEventListener("click", openAssignments);
+  document.querySelector("#assign-close").addEventListener("click", () => els.assignModal.classList.add("hidden"));
   // Annuleren is niets doen: de backend heeft het sluiten al tegengehouden.
   document.querySelector("#exit-cancel").addEventListener("click", () => els.exitModal.classList.add("hidden"));
   els.exitGo.addEventListener("click", doExit);

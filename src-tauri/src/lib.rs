@@ -345,7 +345,12 @@ fn update_workspace(path: String, host_id: String) -> Result<String, String> {
     if p.is_empty() {
         return Err("Geen pad opgegeven.".into());
     }
-    let (dirty, ok) = git_on(&host_id, &["-C", &p, "status", "--porcelain"])?;
+    // `--untracked-files=no`: een ongetrackt bestand blokkeert een fast-forward
+    // niet, en sinds we opdrachten in de werkplek bijhouden staat daar altijd een
+    // ongetrackt `_assignments.md`. Zonder dit zou elke bijwerking weigeren met
+    // "je hebt hier zelf iets gewijzigd". Zou de pull tóch een ongetrackt bestand
+    // overschrijven, dan weigert git zelf en die melding gaat letterlijk door.
+    let (dirty, ok) = git_on(&host_id, &["-C", &p, "status", "--porcelain", "--untracked-files=no"])?;
     if !ok {
         return Err(format!("Dit is geen git-map (meer): {}", p));
     }
@@ -362,6 +367,103 @@ fn update_workspace(path: String, host_id: String) -> Result<String, String> {
     }
     let (sha, _) = git_on(&host_id, &["-C", &p, "rev-parse", "HEAD"])?;
     Ok(sha.trim().to_string())
+}
+
+// ---------- opdrachten aan een rol bewaren ----------
+//
+// Wat je een rol opdraagt is de helft van zijn geschiedenis; het antwoord staat er
+// al (de rol werkt in zijn eigen werkplek), de vraag was tot nu toe weg zodra de
+// tab sloot. Dit legt de vraag vast, in de werkplek van die rol zelf -- dus onder
+// zijn eigen map, naast de uitkomst waar hij bij hoort.
+//
+// Eén append-only markdownbestand en geen map met losse bestanden: een overzicht
+// van "wat heb ik Mimir allemaal gevraagd" wil je in één keer kunnen lezen, en een
+// mens die de map opent moet hetzelfde zien als Taurus.
+const ASSIGNMENTS: &str = "_assignments.md";
+
+// Het bestand hoort niet als wijziging te gelden in de clone. `.git/info/exclude`
+// is lokaal en raakt de repo van de eigenaar dus niet -- een regel in de getrackte
+// .gitignore zetten zou wél zijn werk veranderen.
+fn exclude_locally(dir: &Path, name: &str) {
+    let info = dir.join(".git").join("info");
+    if !dir.join(".git").is_dir() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(&info);
+    let f = info.join("exclude");
+    let cur = std::fs::read_to_string(&f).unwrap_or_default();
+    if cur.lines().any(|l| l.trim() == name) {
+        return;
+    }
+    let mut next = cur;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str(name);
+    next.push('\n');
+    let _ = std::fs::write(f, next);
+}
+
+// `when` komt uit de frontend: die heeft de klok en de tijdzone van de gebruiker
+// al, en zo hoeft hier geen datumbibliotheek bij.
+#[tauri::command(async)]
+fn record_assignment(path: String, task: String, when: String) -> Result<(), String> {
+    let task = task.trim();
+    if task.is_empty() {
+        return Ok(()); // een lege sessie is geen opdracht
+    }
+    let dir = Path::new(&path);
+    if !dir.is_dir() {
+        return Err(format!("Map bestaat niet: {}", path));
+    }
+    let f = dir.join(ASSIGNMENTS);
+    let fresh = !f.exists();
+    let mut body = if fresh {
+        exclude_locally(dir, ASSIGNMENTS);
+        String::from("# Assignments\n\nWhat was asked of this role, newest last. Written by Taurus.\n")
+    } else {
+        std::fs::read_to_string(&f).map_err(|e| e.to_string())?
+    };
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body.push_str(&format!("\n## {}\n\n{}\n", when.trim(), task));
+    std::fs::write(&f, body).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(serde::Serialize, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+struct Assignment {
+    when: String,
+    task: String,
+}
+
+// Terugleren wat er staat. Bewust tolerant: iemand mag dit bestand met de hand
+// bijwerken, en dan moet het overzicht nog werken.
+#[tauri::command(async)]
+fn read_assignments(path: String) -> Vec<Assignment> {
+    let f = Path::new(&path).join(ASSIGNMENTS);
+    let Ok(txt) = std::fs::read_to_string(f) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Assignment> = Vec::new();
+    for line in txt.lines() {
+        if let Some(rest) = line.strip_prefix("## ") {
+            out.push(Assignment { when: rest.trim().to_string(), task: String::new() });
+        } else if let Some(last) = out.last_mut() {
+            let l = line.trim();
+            if l.is_empty() {
+                continue;
+            }
+            if !last.task.is_empty() {
+                last.task.push(' ');
+            }
+            last.task.push_str(l);
+        }
+    }
+    out.retain(|a| !a.task.is_empty());
+    out
 }
 
 // ---------- rolinstallaties: waar een rol vandaan komt (#155) ----------
@@ -6502,6 +6604,8 @@ pub fn run() {
             git_deploy,
             check_sources,
             update_workspace,
+            record_assignment,
+            read_assignments,
             exit_now,
             exit_ack,
             stop_remote_session_at,
@@ -8456,6 +8560,41 @@ mod tests {
     // Een lokale map als bron (#161). De kortvorm `eigenaar/repo` mag NIET als
     // pad gelezen worden, anders sluit een bestaande map met die naam per ongeluk
     // het GitHub-adres uit.
+    // Opdrachten bewaren: schrijven, terugleren, en netjes doorgaan op wat er al
+    // staat. Het bestand mag met de hand bijgewerkt worden, dus het teruglezen is
+    // bewust tolerant.
+    #[test]
+    fn assignments_are_appended_and_read_back() {
+        let dir = std::env::temp_dir().join("taurus-assignments-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.to_string_lossy().into_owned();
+
+        // Een lege opdracht is geen opdracht: een sessie zonder taak hoort niets
+        // achter te laten.
+        record_assignment(p.clone(), "   ".into(), "2026-08-17 14:00".into()).unwrap();
+        assert!(read_assignments(p.clone()).is_empty());
+        assert!(!dir.join(ASSIGNMENTS).exists());
+
+        record_assignment(p.clone(), "Breng X in kaart".into(), "2026-08-17 14:32".into()).unwrap();
+        record_assignment(p.clone(), "En nu Y".into(), "2026-08-17 15:01".into()).unwrap();
+        let got = read_assignments(p.clone());
+        assert_eq!(got.len(), 2, "{:?}", got);
+        assert_eq!(got[0].when, "2026-08-17 14:32");
+        assert_eq!(got[0].task, "Breng X in kaart");
+        assert_eq!(got[1].task, "En nu Y", "nieuwste hoort achteraan");
+
+        // Meerregelige opdracht: de regels worden tot één tekst samengevoegd.
+        record_assignment(p.clone(), "regel een\nregel twee".into(), "2026-08-17 16:00".into()).unwrap();
+        let got = read_assignments(p.clone());
+        assert_eq!(got.len(), 3);
+        assert_eq!(got[2].task, "regel een regel twee");
+
+        // Geen bestand = geen opdrachten, geen fout.
+        assert!(read_assignments(dir.join("bestaat-niet").to_string_lossy().into_owned()).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_local_folder_is_told_apart_from_an_address() {
         assert!(local_source("https://github.com/a/b").is_none());

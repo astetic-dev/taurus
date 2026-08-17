@@ -168,6 +168,16 @@ button, input, select, textarea { font-family: var(--ui-font); }
 /* Het lijntje in de balk (#160): scheidt STAAND van BIJ EEN WERKPROCES, en
    verschijnt alleen als er van beide soorten iets is. */
 /* Instellingen -> Agents (#166): één regel per rol, naam links, bron breed. */
+/* Opdrachtoverzicht: per rol een kop, daaronder de vragen met hun datum. */
+.assign-body { max-height: 60vh; overflow-y: auto; }
+.assign-role { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; font-size: 13px; }
+.assign-role:first-child { margin-top: 2px; }
+.assign-role .role-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.assign-role .assign-where { color: var(--text-dim); font-size: 11px; }
+.assign-item { display: flex; gap: 10px; padding: 3px 0 3px 16px; font-size: 12px; }
+.assign-item .assign-when { width: 116px; flex: none; color: var(--text-dim); font-size: 11px; }
+.assign-item .assign-task { min-width: 0; overflow-wrap: anywhere; }
+.assign-empty { color: var(--text-dim); font-size: 12px; padding: 6px 0; }
 .role-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
 .role-row .role-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .role-row .role-name { width: 96px; flex: none; }

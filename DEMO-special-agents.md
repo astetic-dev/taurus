@@ -1,7 +1,7 @@
 # Special agents — installeren en doorlopen
 
-Versie 0.6.0, branch `special-agents-roles`. Alles rondom dit thema zit erin
-behalve twee dingen; die staan onderaan.
+Versie 0.6.1, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
+zit staat onderaan.
 
 ## 1. Installeren
 
@@ -158,18 +158,45 @@ jou is; richten laat een staande rol ergens naar kíjken zonder er iets neer te
 zetten. Daarom gaat het pad in de taak en niet in een uitrol — en daarom kun je een
 leesrol ook op een map richten die geen ICM-werkproces is.
 
+## 11. Opdrachten worden bewaard
+
+Start een rol met een taak erin. Taurus legt die taak vast in de werkplek van die
+rol zelf, als `_assignments.md`:
+
+```markdown
+# Assignments
+
+What was asked of this role, newest last. Written by Taurus.
+
+## 2026-08-17 14:32
+
+Kijk naar deze map en doe wat je hoort te doen: C:\Users\AST\claude\NEXUS
+```
+
+Onderaan de balk staat **≡ Opdrachten**. Dat leest de bestanden van al je rollen en
+zet ze per rol op een rij, nieuwste bovenaan, met erbij of die rol staand is of in
+welk werkproces hij zit.
+
+Het bestand staat in de map van de rol zelf, dus onder zijn eigen map in de
+standaard uitrolmap, naast de uitkomst waar de vraag bij hoort. Het is ongetrackt
+en staat in `.git/info/exclude`, dus het geldt niet als wijziging van de repo van
+de eigenaar en het blokkeert **Bijwerken** niet.
+
+Een sessie zonder taak legt niets vast: dat is geen opdracht.
+
 ---
 
-## Nog niet gebouwd
+## Bewust niet gebouwd
 
-**Een onbekende repo verkennen** — de andere helft van #164: een adres plakken,
-naar een wegwerpmap klonen en een leesrol daarop richten. Richten op een map die
-je al hebt werkt wel (§10).
+**Repositories downloaden voor onderzoek.** Kvasir regelt dat zelf, in zijn eigen
+werkplek, en ruimt het daarna op. Taurus hoeft daar niets voor te doen -- en dat is
+ook waarom de andere helft van het richten (een adres naar een wegwerpmap klonen)
+er niet in zit.
 
-**Een agent registreren die door een agent gemaakt is** (#165) — bewust
-uitgesteld. Als Jake of Heimdall een map achterlaat, druk je zelf op ＋ → map die
-je al hebt. Dat werkt vandaag; de automatische variant wacht tot er een rol is die
-het afgesproken bestandje schrijft.
+**Een agent registreren die door een agent gemaakt is.** Als Jake of Heimdall een
+map achterlaat, druk je zelf op + en kies je hem als map die je al hebt. Dat werkt
+vandaag; de automatische variant wacht tot er een rol is die het afgesproken
+bestandje schrijft, anders bouwen we een lezer voor iets wat niemand schrijft.
 
 ## Niet getest, en dat hoor je te weten
 
@@ -177,7 +204,7 @@ het afgesproken bestandje schrijft.
   maar heeft nooit tegen een echte machine gedraaid.
 - **`ook als skill`** installeert naar `~/.claude/skills/icm-<rol>/`. Gebouwd, niet
   gedraaid.
-- **De schermen zelf.** De Rust-kant heeft 123 tests plus vier die echt met GitHub
+- **De schermen zelf.** De Rust-kant heeft 124 tests plus vier die echt met GitHub
   praten; de frontend is statisch gecontroleerd (syntax, elk element bestaat, alle
   i18n-sleutels in nl én en). Maar ik kon de launcher niet starten — deze sessie
   draait erin.

@@ -97,6 +97,7 @@
              opent de lijst met alles wat je al hebt. Die lijst had hiervoor geen
              eigen ingang -- de ＋ was de enige, en dat is precies het probleem. -->
         <button id="manage-agents" class="foot-link" type="button" data-i18n="foot_projects">✎ Agents</button>
+        <button id="assign-btn" class="foot-link" type="button" data-i18n="foot_assign">≡ Opdrachten</button>
         <div id="app-version" class="app-version"></div>
       </aside>
 
@@ -615,6 +616,20 @@
           <button id="exit-go" class="btn-primary" data-i18n="exit_go">Afsluiten</button>
         </div>
         <div id="exit-status" class="status-msg"></div>
+      </div>
+    </div>
+
+    <!-- ===== Opdrachten aan de rollen =====
+         Wat je een rol opdroeg is de helft van zijn geschiedenis; het antwoord
+         staat al in zijn werkplek, de vraag was weg zodra de tab sloot. Taurus
+         legt hem vast in de map van die rol, en dit is het overzicht. -->
+    <div id="assign-modal" class="modal hidden">
+      <div class="modal-box wide">
+        <h2 data-i18n="assign_title">Opdrachten</h2>
+        <div id="assign-body" class="assign-body"></div>
+        <div class="modal-actions">
+          <button id="assign-close" class="btn-primary" data-i18n="close">Sluiten</button>
+        </div>
       </div>
     </div>
 
