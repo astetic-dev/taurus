@@ -655,7 +655,7 @@ fn git_probe(source: String) -> Result<SourceProbe, String> {
     Ok(p)
 }
 
-#[derive(serde::Serialize, Default)]
+#[derive(serde::Serialize, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 struct DeployReport {
     dest: String,
@@ -8217,6 +8217,77 @@ mod tests {
         assert!(md.contains("mappings/"));
         assert!(md.contains("no installed skill is required"));
         assert!(md.is_ascii(), "gaat door een shell bij een remote host");
+    }
+
+    // Praat met GitHub en met de echte git, dus alleen zinvol met netwerk --
+    // vandaar #[ignore]: `cargo test -- --ignored` draait 'm bewust. Hij toetst
+    // wat we van een echte repo verwachten: geen manifest, geen CLAUDE.md, en
+    // een SKILL.md in de wortel.
+    #[test]
+    #[ignore]
+    fn probing_the_real_architect_repo_reads_what_is_there() {
+        let p = git_probe("RinDig/icm-architect".to_string()).expect("probe mislukt");
+        assert_eq!(p.url, "https://github.com/RinDig/icm-architect");
+        assert_eq!(p.shape, "skill", "SKILL.md in de wortel = skill-vorm");
+        assert!(!p.has_claude_md, "deze repo levert er geen; Taurus schrijft er dan een");
+        assert!(!p.sha.is_empty() && p.sha.len() >= 40);
+        assert!(!p.branch.is_empty());
+        assert!(p.files.iter().any(|f| f == "SKILL.md"));
+        assert!(p.files.iter().any(|f| f == "references"));
+        assert!(!p.name.trim().is_empty(), "naam moet af te leiden zijn");
+        assert!(p.size_kb > 0);
+        // En een uitrol in een niet-lege map hoort te weigeren.
+        let busy = std::env::temp_dir().join("taurus-deploy-test-busy");
+        std::fs::create_dir_all(&busy).unwrap();
+        std::fs::write(busy.join("iets.txt"), "x").unwrap();
+        let err = git_deploy(
+            "RinDig/icm-architect".into(),
+            busy.to_string_lossy().into_owned(),
+            String::new(),
+            "architect".into(),
+            "blueprints/".into(),
+            false,
+        )
+        .unwrap_err();
+        assert!(err.contains("niet leeg"), "onverwachte fout: {}", err);
+        let _ = std::fs::remove_dir_all(&busy);
+    }
+
+    // Uitrollen naar een verse map: de clone staat er, en omdat deze repo geen
+    // CLAUDE.md meelevert schrijft Taurus er een die naar SKILL.md wijst.
+    #[test]
+    #[ignore]
+    fn deploying_writes_a_claude_md_when_the_repo_has_none() {
+        let dest = std::env::temp_dir().join("taurus-deploy-test-fresh");
+        let _ = std::fs::remove_dir_all(&dest);
+        let rep = git_deploy(
+            "RinDig/icm-architect".into(),
+            dest.to_string_lossy().into_owned(),
+            String::new(),
+            "architect".into(),
+            "blueprints/".into(),
+            false,
+        )
+        .expect("deploy mislukt");
+        assert_eq!(rep.claude_md, "written");
+        assert!(rep.paths.iter().any(|p| p == "CLAUDE.md"));
+        assert!(rep.paths.iter().any(|p| p == "SKILL.md"));
+        assert!(!rep.sha.is_empty());
+        let md = std::fs::read_to_string(dest.join("CLAUDE.md")).unwrap();
+        assert!(md.contains("SKILL.md"));
+        assert!(md.contains("blueprints/"));
+        assert!(md.contains("no installed skill is required"));
+        // Nog een keer uitrollen hoort te weigeren: nooit samenvoegen.
+        let again = git_deploy(
+            "RinDig/icm-architect".into(),
+            dest.to_string_lossy().into_owned(),
+            String::new(),
+            "architect".into(),
+            "blueprints/".into(),
+            false,
+        );
+        assert!(again.is_err());
+        let _ = std::fs::remove_dir_all(&dest);
     }
 
     #[test]
