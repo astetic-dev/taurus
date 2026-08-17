@@ -1,6 +1,6 @@
 [package]
 name = "taurus"
-version = "0.5.11"
+version = "0.6.0"
 description = "Taurus - an agent launcher"
 authors = ["you"]
 edition = "2021"

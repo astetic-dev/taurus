@@ -202,6 +202,10 @@ const I18N = {
     role_use: "gebruik", role_as_skill: "ook als skill",
     role_src_ph: "GitHub-adres of een map op deze computer",
     role_no_source: "geen bron — daarom niet aan te vinken",
+    // Een leesrol op iets anders richten (#164)
+    ctx_aim: "👁 Laat {name} hiernaar kijken",
+    aim_task: "Kijk naar deze map en doe wat je hoort te doen: {path}",
+    aim_none: "Geen leesrol uitgerold",
     role_architect: "Architect", role_architect_q: "Ik wil een nieuw proces maken.",
     role_operator: "Operator", role_operator_q: "Dit moet zonder mij beslist worden.",
     role_cartographer: "Cartograaf", role_cartographer_q: "Wat is dit eigenlijk?",
@@ -514,6 +518,10 @@ const I18N = {
     role_use: "use", role_as_skill: "also as a skill",
     role_src_ph: "GitHub address or a folder on this computer",
     role_no_source: "no source — so it cannot be ticked",
+    // Aiming a reading role at something else (#164)
+    ctx_aim: "👁 Have {name} look at this",
+    aim_task: "Look at this folder and do what you are here to do: {path}",
+    aim_none: "No reading role deployed",
     role_architect: "Architect", role_architect_q: "I want to build a new process.",
     role_operator: "Operator", role_operator_q: "This should be decided without me.",
     role_cartographer: "Cartographer", role_cartographer_q: "What is this, actually?",
@@ -1314,7 +1322,7 @@ function renderProjects() {
     card.addEventListener("click", () => { if (suppressNextClick) return; selectProject(p, card); showView("new"); });
     // Verplaatsen gaat over de AGENT, dus het hoort ook hier te kunnen -- niet
     // alleen op een draaiende tab.
-    card.addEventListener("contextmenu", (e) => { e.preventDefault(); openMoveModal(p); });
+    card.addEventListener("contextmenu", (e) => { e.preventDefault(); openCardMenu(e.clientX, e.clientY, p); });
     // e.stopPropagation() zodat de kaart-klik (project kiezen) niet meevuurt.
     const up = card.querySelector(".pc-up");
     if (up) up.addEventListener("click", (e) => { e.stopPropagation(); openUpdate(p); });
@@ -3893,6 +3901,56 @@ async function restartSession(id) {
 
 let tabMenuEl = null;
 function closeTabMenu() { if (tabMenuEl) { tabMenuEl.remove(); tabMenuEl = null; } }
+// Rechtermuisknop op een agentkaart (#164). Opende hiervoor meteen het
+// verplaats/sync-scherm; dat is nu één regel in een menu, met daaronder de
+// leesrollen die je hebt staan.
+//
+// Een leesrol richten is NIET hetzelfde als hem ergens inbedden. Inbedden zet een
+// submap in een map die van jou is; richten laat een staande rol ergens naar
+// KIJKEN zonder er iets neer te zetten. Daarom gaat het pad in de taak en niet in
+// een uitrol.
+function aimableRoles() {
+  // Alleen rollen die niets in hun onderwerp wijzigen, en alleen als er echt een
+  // staande van uitgerold is -- afwezig, niet uitgegrijsd.
+  const reading = ["cartographer", "diagnostician", "editor"];
+  return projects.filter((p) => reading.includes(p.role) && !p.parent);
+}
+function openCardMenu(x, y, p) {
+  closeTabMenu();
+  const m = document.createElement("div");
+  m.className = "ctx-menu";
+  const aims = aimableRoles().filter((r) => r.id !== p.id);
+  m.innerHTML =
+    `<div class="ctx-item" data-act="move">${t("ctx_move")}</div>` +
+    (aims.length
+      ? aims.map((r, i) => `<div class="ctx-item" data-aim="${i}">${escapeHtml(t("ctx_aim").replace("{name}", r.label))}</div>`).join("")
+      : `<div class="ctx-item disabled">${escapeHtml(t("aim_none"))}</div>`);
+  m.style.left = x + "px";
+  m.style.top = y + "px";
+  m.querySelector('[data-act="move"]').addEventListener("click", () => { closeTabMenu(); openMoveModal(p); });
+  m.querySelectorAll("[data-aim]").forEach((el) => {
+    el.addEventListener("click", () => {
+      closeTabMenu();
+      aimRoleAt(aims[Number(el.dataset.aim)], p);
+    });
+  });
+  document.body.appendChild(m);
+  tabMenuEl = m;
+  // Binnen het venster houden, net als het tabmenu.
+  const r = m.getBoundingClientRect();
+  if (r.bottom > window.innerHeight) m.style.top = Math.max(4, window.innerHeight - r.height - 4) + "px";
+  if (r.right > window.innerWidth) m.style.left = Math.max(4, window.innerWidth - r.width - 4) + "px";
+}
+// Kies de rol, vul zijn taak met het pad van het onderwerp, en zet het
+// startformulier klaar. Starten doe je zelf -- dan zie je nog wat er gaat gebeuren.
+function aimRoleAt(role, subject) {
+  const idx = projects.indexOf(role);
+  selectProject(role, els.list.querySelector(`.project-card[data-idx="${idx}"]`));
+  showView("new");
+  els.taskInput.value = t("aim_task").replace("{path}", subject.path);
+  els.taskInput.focus();
+}
+
 function openTabMenu(x, y, id) {
   closeTabMenu();
   const s = sessions.get(id);
