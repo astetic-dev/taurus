@@ -194,7 +194,7 @@ What was asked of this role, newest last. Written by Taurus.
 
 ## 2026-08-17 14:32
 
-Kijk naar deze map en doe wat je hoort te doen: X:\AI
+Kijk naar deze map en doe wat je hoort te doen: C:\Users\AST\claude\ontwikkelmap
 ```
 
 Onderaan de balk staat **≡ Opdrachten**. Dat leest de bestanden van al je rollen en
