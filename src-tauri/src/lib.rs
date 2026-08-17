@@ -475,7 +475,23 @@ fn git_available(host_id: String) -> bool {
     git_on(&host_id, &["--version"]).map(|(_, ok)| ok).unwrap_or(false)
 }
 
-#[derive(serde::Serialize, Default)]
+// Wat maakt een repo een ICM-werkproces? Gemeten over de dertien repo's die het
+// aangaat: er zijn twee vormen en elk heeft één onmiskenbaar teken in de wortel.
+// `identity.md` (wie je hier bent) bij een werkmap, `SKILL.md` (de methode zelf)
+// bij een skill. Verder niets is bewijs -- `rules.md` alleen zou een repo met
+// lint-regels doorlaten, en een README zegt niks.
+fn icm_shape(files: &[String]) -> &'static str {
+    let has = |n: &str| files.iter().any(|f| f.eq_ignore_ascii_case(n));
+    if has("SKILL.md") {
+        "skill"
+    } else if has("identity.md") {
+        "workspace"
+    } else {
+        "unknown"
+    }
+}
+
+#[derive(serde::Serialize, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 struct SourceProbe {
     url: String,
@@ -638,20 +654,25 @@ fn git_probe(source: String) -> Result<SourceProbe, String> {
         }
         p.files.sort();
     }
-    let has = |n: &str| p.files.iter().any(|f| f.eq_ignore_ascii_case(n));
-    p.has_claude_md = has("CLAUDE.md");
-    p.shape = if has("SKILL.md") {
-        "skill".into()
-    } else if has("identity.md") || has("rules.md") {
-        "workspace".into()
-    } else {
-        "unknown".into()
-    };
+    p.has_claude_md = p.files.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md"));
+    p.shape = icm_shape(&p.files).into();
     let (name, desc) = read_repo_meta(&tmp, &url);
     p.name = name;
     p.description = desc;
+    let files_seen = p.files.join(", ");
 
     let _ = std::fs::remove_dir_all(&tmp);
+
+    // Geen ICM-werkproces: weigeren, en zeggen wat er MIST en wat er WEL staat.
+    // Een weigering die alleen nee zegt leert je niets; met de wortellijst zie je
+    // of je het verkeerde adres plakte of de verkeerde branch pakte. Dit gebeurt
+    // in de wegwerpmap, dus het kost je niets dan het wachten.
+    if p.shape == "unknown" {
+        return Err(format!(
+            "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
+            if files_seen.is_empty() { "niets".into() } else { files_seen }
+        ));
+    }
     Ok(p)
 }
 
@@ -790,6 +811,21 @@ fn git_deploy(
         .iter()
         .map(|f| f.split('/').next().unwrap_or(f).to_string())
         .collect();
+
+    // Dezelfde ICM-regel als in de probe. Hier ook, want git_deploy is los
+    // aanroepbaar en dan zou de regel te omzeilen zijn. De clone staat er al, dus
+    // opruimen en dan pas weigeren -- niets achterlaten wat de gebruiker niet vroeg.
+    if icm_shape(&roots) == "unknown" {
+        if local {
+            let _ = std::fs::remove_dir_all(Path::new(&dest));
+        } else {
+            rep.notes.push(format!("de clone staat nog op {}", dest));
+        }
+        return Err(format!(
+            "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
+            roots.join(", ")
+        ));
+    }
 
     // CLAUDE.md alleen schrijven als de repo er zelf geen heeft. Een van de
     // bestaande repo's levert er wel een; die blijft ongemoeid.
@@ -8253,6 +8289,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&busy);
     }
 
+    // De ICM-regel tegen echte repo's, inclusief een echte die het NIET is.
+    #[test]
+    #[ignore]
+    fn a_repo_that_is_not_an_icm_workspace_is_refused() {
+        // Een werkmap-rol: identity.md, en die levert zelf een CLAUDE.md mee.
+        let mimir = git_probe("astetic-dev/mimir".to_string()).expect("mimir hoort door te komen");
+        assert_eq!(mimir.shape, "workspace");
+        assert!(mimir.has_claude_md, "mimir levert zelf een CLAUDE.md; die blijft ongemoeid");
+
+        // Eén die het niet is -- Taurus zelf. De melding moet zeggen wat er mist
+        // EN wat er wel staat, want anders weet je niet of je het verkeerde adres
+        // plakte of de verkeerde branch pakte.
+        let err = git_probe("astetic-dev/taurus".to_string()).unwrap_err();
+        assert!(err.contains("identity.md"), "moet zeggen wat er mist: {}", err);
+        assert!(err.contains("SKILL.md"), "moet zeggen wat er mist: {}", err);
+        assert!(err.contains("src-tauri"), "moet zeggen wat er wel staat: {}", err);
+        // En er mag niets van blijven staan.
+        assert!(!probe_temp_dir("https://github.com/astetic-dev/taurus").exists());
+    }
+
     // Uitrollen naar een verse map: de clone staat er, en omdat deze repo geen
     // CLAUDE.md meelevert schrijft Taurus er een die naar SKILL.md wijst.
     #[test]
@@ -8288,6 +8344,51 @@ mod tests {
         );
         assert!(again.is_err());
         let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    // Rollen zijn verwisselbaar -- elke ICM-repo mag elk vak vullen -- maar het
+    // moet er wel een ZIJN. De marker is het enige bewijs; geen allow-list, want
+    // dan kan niemand anders een eigen ICM-werkmap gebruiken.
+    #[test]
+    fn only_an_icm_workspace_is_recognised() {
+        let ws = ["README.md", "identity.md", "rules.md", "reference"].map(String::from);
+        assert_eq!(icm_shape(&ws), "workspace");
+        let skill = ["README.md", "SKILL.md", "references", "assets"].map(String::from);
+        assert_eq!(icm_shape(&skill), "skill");
+        // SKILL.md wint: dan is het een skill, ook al staat er ook een identity.md.
+        let both = ["SKILL.md", "identity.md"].map(String::from);
+        assert_eq!(icm_shape(&both), "skill");
+        // Hoofdletters mogen niet uitmaken.
+        assert_eq!(icm_shape(&["Identity.MD".to_string()]), "workspace");
+
+        // En wat er NIET door mag. Een gewone repo:
+        let normal = ["README.md", "src", "package.json", "LICENSE"].map(String::from);
+        assert_eq!(icm_shape(&normal), "unknown");
+        // rules.md alleen is geen bewijs -- een repo met lint-regels zou anders
+        // als werkproces doorgaan.
+        assert_eq!(icm_shape(&["README.md".to_string(), "rules.md".to_string()]), "unknown");
+        // Een lege wortel ook niet.
+        assert_eq!(icm_shape(&[]), "unknown");
+    }
+
+    // De zeven bronnen zoals ze op 17 aug 2026 zijn: zes werkmappen en één skill.
+    // Deze test bevriest de vorm die we gemeten hebben, zodat een wijziging in de
+    // marker-regel meteen zichtbaar wordt tegen echte repo's.
+    #[test]
+    fn the_seven_sources_all_pass_the_marker() {
+        let roots: [(&str, &[&str], &str); 7] = [
+            ("mimir", &["README.md", "CLAUDE.md", "identity.md", "rules.md", "reference", "checks", "eval"], "workspace"),
+            ("forseti", &["README.md", "CLAUDE.md", "identity.md", "rules.md", "reference", "checks"], "workspace"),
+            ("cassini-cartographer", &["README.md", "identity.md", "rules.md", "reference", "docs", "film"], "workspace"),
+            ("kvasir", &["README.md", "identity.md", "rules.md", "reference", "checks"], "workspace"),
+            ("heimdall", &["README.md", "identity.md", "rules.md", "reference", "sample"], "workspace"),
+            ("vor", &["README.md", "identity.md", "rules.md", "reference", "sample"], "workspace"),
+            ("icm-architect", &["README.md", "SKILL.md", "references", "assets"], "skill"),
+        ];
+        for (name, files, want) in roots {
+            let owned: Vec<String> = files.iter().map(|s| s.to_string()).collect();
+            assert_eq!(icm_shape(&owned), want, "{} verkeerd geclassificeerd", name);
+        }
     }
 
     #[test]

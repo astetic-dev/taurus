@@ -378,7 +378,36 @@
     <div id="newagent-modal" class="modal hidden">
       <div class="modal-box wide">
         <h2 data-i18n="new_agent_title">Nieuwe agent</h2>
-        <div class="e-fields">
+
+        <!-- Wat voor agent (#159). De zeven ICM-rollen staan hier naast "een map
+             die je al hebt": de rol is van Taurus, de invulling van de repo. -->
+        <div class="na-kindcap" data-i18n="na_kind">Wat voor agent?</div>
+        <div id="na-kinds" class="na-kinds"></div>
+
+        <!-- Rol of vrij adres: eerst waar hij werkt en waarover, dan de bron. Je
+             weet eerst waarvoor je iets haalt, dan pas waarvandaan. -->
+        <div id="na-role" class="e-fields hidden">
+          <div id="na-role-head" class="na-role-head"></div>
+          <div class="e-grid">
+            <div class="e-field"><span class="e-cap" data-i18n="na_where">Waar werkt hij?</span>
+              <select id="na-where"></select></div>
+            <div class="e-field"><span class="e-cap" data-i18n="na_subject">Waar gaat deze over?</span>
+              <input id="na-subject" type="text" autocomplete="off" data-i18n-ph="na_subject_ph" /></div>
+          </div>
+          <div class="e-field"><span class="e-cap" data-i18n="na_source">Bron</span>
+            <div class="e-pathrow">
+              <input id="na-source" type="text" autocomplete="off" data-i18n-ph="na_source_ph" />
+              <button id="na-read" class="btn-ghost" data-i18n="na_read">Lezen</button>
+            </div></div>
+          <div id="na-probe" class="na-probe hidden"></div>
+          <div id="na-destfield" class="e-field hidden"><span class="e-cap" data-i18n="na_dest">Komt in</span>
+            <div class="e-pathrow">
+              <input id="na-dest" type="text" autocomplete="off" />
+              <button id="na-pickparent" class="e-browse">📁</button>
+            </div></div>
+        </div>
+
+        <div id="na-plain" class="e-fields">
           <div class="e-grid">
             <div class="e-field"><span class="e-cap" data-i18n="cap_button">Knop</span>
               <input id="na-label" type="text" autocomplete="off" /></div>

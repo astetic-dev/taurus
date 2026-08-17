@@ -157,6 +157,32 @@ const I18N = {
     manage_projects: "Agents beheren", add_agent: "＋ Agent toevoegen",
     // Nieuwe agent (#157) en bewerken/verwijderen (#158)
     new_agent_title: "Nieuwe agent", new_agent_create: "Maak agent",
+    // De zeven ICM-rollen (#159)
+    na_kind: "Wat voor agent?", na_kind_plain: "Map die je al hebt",
+    na_kind_plain_sub: "gewone agent", na_kind_free: "Ander ICM-adres",
+    na_kind_free_sub: "specialist, geen rol",
+    na_where: "Waar werkt hij?", na_standing: "Staand — eigen werkplek",
+    na_embedded_in: "In: {label}",
+    na_subject: "Waar gaat deze over?", na_subject_ph: "bijv. meetings — leeg mag",
+    na_source: "Bron", na_source_ph: "https://github.com/eigenaar/repo",
+    na_read: "Lezen", na_reading: "Ophalen en lezen…",
+    na_dest: "Komt in", na_deploy: "Uitrollen",
+    na_deploying: "Uitrollen…",
+    na_shape_skill: "skill", na_shape_workspace: "werkmap",
+    na_p_shape: "vorm", na_p_version: "versie", na_p_claude: "bevat",
+    na_p_size: "grootte", na_p_role: "vak",
+    na_claude_kept: "eigen CLAUDE.md — die blijft ongemoeid",
+    na_claude_gen: "geen CLAUDE.md — Taurus schrijft er een",
+    na_need_source: "✗ Vul een GitHub-adres in.",
+    na_need_read: "✗ Lees de bron eerst.",
+    na_wrote: "✓ {n} bestanden geschreven in {dest}",
+    role_architect: "Architect", role_architect_q: "Ik wil een nieuw proces maken.",
+    role_operator: "Operator", role_operator_q: "Dit moet zonder mij beslist worden.",
+    role_cartographer: "Cartograaf", role_cartographer_q: "Wat is dit eigenlijk?",
+    role_diagnostician: "Diagnosticus", role_diagnostician_q: "Waarom doet dit niet wat het hoort?",
+    role_editor: "Editor", role_editor_q: "Wat kan hier beter?",
+    role_researcher: "Onderzoeker", role_researcher_q: "Zoek dit voor me uit.",
+    role_coach: "Coach", role_coach_q: "Ik wil hier beter in worden.",
     add_agent_hint: "Bewaart deze map als agent én start hem meteen. De ＋ links maakt er een zonder te starten.",
     del_kept_folder: "Kaart weg. De map blijft staan: {path}",
     edit_agent_title: "Agent bewerken",
@@ -416,6 +442,32 @@ const I18N = {
     manage_projects: "Manage agents", add_agent: "＋ Add agent",
     // New agent (#157) and edit/delete (#158)
     new_agent_title: "New agent", new_agent_create: "Create agent",
+    // The seven ICM roles (#159)
+    na_kind: "What kind of agent?", na_kind_plain: "A folder you have",
+    na_kind_plain_sub: "regular agent", na_kind_free: "Another ICM address",
+    na_kind_free_sub: "specialist, no role",
+    na_where: "Where does it work?", na_standing: "Standing — its own workspace",
+    na_embedded_in: "In: {label}",
+    na_subject: "What is this one about?", na_subject_ph: "e.g. meetings — may be empty",
+    na_source: "Source", na_source_ph: "https://github.com/owner/repo",
+    na_read: "Read", na_reading: "Fetching and reading…",
+    na_dest: "Goes in", na_deploy: "Deploy",
+    na_deploying: "Deploying…",
+    na_shape_skill: "skill", na_shape_workspace: "workspace",
+    na_p_shape: "shape", na_p_version: "version", na_p_claude: "contains",
+    na_p_size: "size", na_p_role: "slot",
+    na_claude_kept: "its own CLAUDE.md — left untouched",
+    na_claude_gen: "no CLAUDE.md — Taurus writes one",
+    na_need_source: "✗ Fill in a GitHub address.",
+    na_need_read: "✗ Read the source first.",
+    na_wrote: "✓ {n} files written in {dest}",
+    role_architect: "Architect", role_architect_q: "I want to build a new process.",
+    role_operator: "Operator", role_operator_q: "This should be decided without me.",
+    role_cartographer: "Cartographer", role_cartographer_q: "What is this, actually?",
+    role_diagnostician: "Diagnostician", role_diagnostician_q: "Why is this not doing what it should?",
+    role_editor: "Editor", role_editor_q: "What could be better here?",
+    role_researcher: "Researcher", role_researcher_q: "Find this out for me.",
+    role_coach: "Coach", role_coach_q: "I want to get better at this.",
     add_agent_hint: "Saves this folder as an agent and starts it right away. The ＋ on the left creates one without starting it.",
     del_kept_folder: "Card removed. The folder stays: {path}",
     edit_agent_title: "Edit agent",
@@ -4052,6 +4104,226 @@ function uniqueId(label) {
   return `${base}-${n}`;
 }
 
+/* ---- de zeven ICM-rollen (#159) ---- */
+// Naam, bron, veld, accent en de vraag waarmee je binnenkomt staan HIER en niet
+// in de repo. Dat is met opzet: de rol is van Taurus, de invulling van de
+// repo-eigenaar. Daardoor schrijft een vervangende bron in dezelfde veldmap en
+// blijft je geschiedenis op één plek staan, en kan andermans repo niet bepalen
+// waar hij in jouw balk terechtkomt.
+//
+// De volgorde is de vaste volgorde in de balk. Geen levenscyclus: elk vak gaat
+// open door zijn eigen vraag, en je hoeft ze niet allemaal te gebruiken.
+const ROLES = [
+  { id: "architect",     name: "Jake",     field: "blueprints", accent: "#8b7cff", source: "https://github.com/RinDig/icm-architect" },
+  { id: "operator",      name: "Heimdall", field: "operations", accent: "#a04a4a", source: "https://github.com/astetic-dev/heimdall" },
+  { id: "cartographer",  name: "Cassini",  field: "mappings",   accent: "#0f6d7e", source: "https://github.com/astetic-dev/cassini-cartographer" },
+  { id: "diagnostician", name: "Mimir",    field: "diagnosis",  accent: "#c07a3e", source: "https://github.com/astetic-dev/mimir" },
+  { id: "editor",        name: "Forseti",  field: "editorials", accent: "#b5647c", source: "https://github.com/astetic-dev/forseti" },
+  { id: "researcher",    name: "Kvasir",   field: "research",   accent: "#4f8f5a", source: "https://github.com/astetic-dev/kvasir" },
+  { id: "coach",         name: "Vör",      field: "coaching",   accent: "#7f8fa6", source: "https://github.com/astetic-dev/vor" },
+];
+function roleById(id) { return ROLES.find((r) => r.id === id) || null; }
+
+// "plain" = een map die je al hebt; een rol-id; of "free" = een ICM-repo zonder rol.
+let naKind = "plain";
+let naProbe = null;
+
+// Waar een nieuwe staande agent standaard komt te staan: de map die de meeste
+// van je lokale agents al delen. Geen nieuwe instelling nodig, en na de eerste
+// keer onthouden we simpelweg wat je koos.
+function defaultAgentParent() {
+  if (settings.lastAgentParent) return settings.lastAgentParent;
+  const counts = new Map();
+  for (const p of projects) {
+    if (p.host_id || !p.path) continue;
+    const parent = p.path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+    if (parent) counts.set(parent, (counts.get(parent) || 0) + 1);
+  }
+  let best = "", n = 0;
+  for (const [k, v] of counts) if (v > n) { best = k; n = v; }
+  return best;
+}
+// Mapnamen zijn Engels en slug-vorm, ook in de Nederlandse UI: ze worden door
+// agents gelezen en gaan mee in jouw git. Een mapnaam die met de taalinstelling
+// meebeweegt maakt twee werkplekken onderling onverenigbaar.
+function subjectSlug(s) {
+  const v = slugify(s || "");
+  return v === "project" && !(s || "").trim() ? "general" : v;
+}
+function joinPath(base, ...parts) {
+  const sep = base.includes("/") && !base.includes("\\") ? "/" : "\\";
+  return [base.replace(/[\\/]+$/, ""), ...parts].join(sep);
+}
+
+// Het pad dat uit de keuzes volgt. Staand: <ouder>/<Naam>/<veld>/<onderwerp>.
+// Ingebed: <werkproces>/_<veld>/<onderwerp> -- de underscore omdat ICM die
+// gebruikt voor mappen die niet in de genummerde stroom van het proces meelopen.
+function naComputeDest() {
+  const role = roleById(naKind);
+  const host = els.naWhere.value ? projects.find((p) => p.id === els.naWhere.value) : null;
+  const subject = subjectSlug(els.naSubject.value);
+  const field = role ? role.field : "";
+  const leaf = naProbe && naProbe.name ? slugify(naProbe.name) : (role ? slugify(role.name) : "agent");
+  if (host) {
+    return field ? joinPath(host.path, "_" + field, subject) : joinPath(host.path, "_" + leaf, subject);
+  }
+  const parent = defaultAgentParent();
+  if (!parent) return "";
+  return field ? joinPath(parent, role.name, field, subject) : joinPath(parent, leaf);
+}
+function naRefreshDest() {
+  if (!naProbe) return;
+  els.naDest.value = naComputeDest();
+}
+
+function renderNaKinds() {
+  const tile = (kind, title, sub, accent) =>
+    `<button type="button" class="na-kind${naKind === kind ? " on" : ""}" data-kind="${escapeHtml(kind)}"` +
+    (accent ? ` style="border-left-color:${escapeHtml(accent)}"` : "") +
+    `><span>${escapeHtml(title)}</span><span class="na-kind-sub">${escapeHtml(sub)}</span></button>`;
+  els.naKinds.innerHTML =
+    tile("plain", t("na_kind_plain"), t("na_kind_plain_sub"), "") +
+    ROLES.map((r) => tile(r.id, r.name, t("role_" + r.id), r.accent)).join("") +
+    tile("free", t("na_kind_free"), t("na_kind_free_sub"), "");
+  for (const b of els.naKinds.querySelectorAll(".na-kind")) {
+    b.addEventListener("click", () => selectNaKind(b.dataset.kind));
+  }
+}
+
+function selectNaKind(kind) {
+  naKind = kind;
+  naProbe = null;
+  const role = roleById(kind);
+  els.naProbe.classList.add("hidden");
+  els.naDestField.classList.add("hidden");
+  els.naPlain.classList.toggle("hidden", kind !== "plain");
+  els.naRole.classList.toggle("hidden", kind === "plain");
+  els.naSave.textContent = t(kind === "plain" ? "new_agent_create" : "na_deploy");
+  naSay(els.naStatus, "", "");
+  renderNaKinds();
+  if (kind === "plain") { els.naLabel.focus(); return; }
+  // De rolkop zegt welke rol dit is en met welke vraag je binnenkomt.
+  els.naRoleHead.innerHTML = role
+    ? `<b>${escapeHtml(role.name)}</b> · ${escapeHtml(t("role_" + role.id))} — ${escapeHtml(t("role_" + role.id + "_q"))}`
+    : "";
+  els.naSource.value = role ? role.source : "";
+  els.naSubject.value = "";
+  // Waar hij werkt: staand, of in een werkproces dat je al hebt. Geen
+  // bladervenster -- Taurus kent de paden van je agents al.
+  els.naWhere.innerHTML =
+    `<option value="">${escapeHtml(t("na_standing"))}</option>` +
+    projects
+      .filter((p) => !p.host_id && !p.parent)
+      .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(t("na_embedded_in").replace("{label}", p.label))}</option>`)
+      .join("");
+  // Voorselectie, geen beperking: heb je van deze rol nog niets staan, dan
+  // staat "staand" voor; heb je er al een, dan ingebed.
+  const have = role && projects.some((p) => p.role === role.id && !p.parent);
+  if (have && els.naWhere.options.length > 1) els.naWhere.selectedIndex = 1;
+  els.naSource.focus();
+}
+
+async function naReadSource() {
+  const source = els.naSource.value.trim();
+  if (!source) { naSay(els.naStatus, t("na_need_source"), "err"); return; }
+  naSay(els.naStatus, t("na_reading"), "");
+  els.naProbe.classList.add("hidden");
+  els.naDestField.classList.add("hidden");
+  naProbe = null;
+  try {
+    naProbe = await invoke("git_probe", { source });
+  } catch (e) {
+    // Hier komt ook de ICM-weigering langs: die zegt wat er mist en wat er wel
+    // staat, dus letterlijk doorgeven is beter dan hem samenvatten.
+    naSay(els.naStatus, "✗ " + e, "err");
+    return;
+  }
+  naSay(els.naStatus, "", "");
+  const role = roleById(naKind);
+  const row = (k, v) => `<div class="na-prow"><span class="na-pk">${escapeHtml(k)}</span><span class="na-pv">${escapeHtml(v)}</span></div>`;
+  const when = naProbe.date ? new Date(naProbe.date).toLocaleDateString(settings.lang === "en" ? "en-GB" : "nl-NL") : "";
+  els.naProbe.innerHTML =
+    `<div class="na-plead"><b>${escapeHtml(naProbe.name)}</b>${naProbe.description ? " — " + escapeHtml(naProbe.description) : ""}</div>` +
+    (role ? row(t("na_p_role"), t("role_" + role.id)) : "") +
+    row(t("na_p_shape"), t(naProbe.shape === "skill" ? "na_shape_skill" : "na_shape_workspace")) +
+    row(t("na_p_version"), `${naProbe.branch} @ ${(naProbe.sha || "").slice(0, 7)}${when ? ", " + when : ""}`) +
+    row(t("na_p_claude"), t(naProbe.hasClaudeMd ? "na_claude_kept" : "na_claude_gen")) +
+    row(t("na_p_size"), `${naProbe.sizeKb} KB`);
+  els.naProbe.classList.remove("hidden");
+  els.naDestField.classList.remove("hidden");
+  naRefreshDest();
+}
+
+async function naDeploy() {
+  if (!naProbe) { naSay(els.naStatus, t("na_need_read"), "err"); return; }
+  const role = roleById(naKind);
+  const dest = els.naDest.value.trim();
+  if (!dest) { naSay(els.naStatus, t("na_need_path"), "err"); return; }
+  const host = els.naWhere.value ? projects.find((p) => p.id === els.naWhere.value) : null;
+  if (projects.some((p) => samePath(p.path, dest) && !p.host_id)) {
+    naSay(els.naStatus, t("na_dup_path").replace("{label}", projects.find((p) => samePath(p.path, dest)).label), "err");
+    return;
+  }
+  naSay(els.naStatus, t("na_deploying"), "");
+  els.naSave.disabled = true;
+  let rep = null;
+  try {
+    rep = await invoke("git_deploy", {
+      source: naProbe.url,
+      dest,
+      hostId: "",
+      role: role ? role.id : "",
+      field: role ? role.field + "/" : "",
+      asSkill: false,
+    });
+  } catch (e) {
+    els.naSave.disabled = false;
+    naSay(els.naStatus, "✗ " + e, "err");
+    return;
+  }
+  els.naSave.disabled = false;
+
+  // Registreren gebeurt NA een geslaagde uitrol, nooit ervoor.
+  const subject = (els.naSubject.value || "").trim();
+  const label = subject ? `${naProbe.name} · ${subject}` : naProbe.name;
+  const made = {
+    ...blankRow(),
+    id: uniqueId(label),
+    label,
+    path: dest,
+    title: naProbe.name,
+    task: role ? t("role_" + role.id + "_q") : "",
+    accent: role ? role.accent : "#7c9cff",
+    role: role ? role.id : "",
+    parent: host ? host.id : "",
+    origin: { source: naProbe.url, branch: naProbe.branch, sha: naProbe.sha, installed: new Date().toISOString() },
+  };
+  try {
+    await invoke("save_projects", { projects: projects.concat([made]) });
+    projects = await invoke("get_projects");
+  } catch (e) { naSay(els.naStatus, "✗ " + e, "err"); return; }
+
+  // Onthoud de ouder die je koos, zodat de volgende rol daar ook voorgesteld wordt.
+  if (!host) {
+    // Een rol legt <Naam>/<veld>/<onderwerp> aan, een vrije specialist alleen
+    // <naam>. Even zoveel niveaus terug als we eraan geplakt hebben, anders
+    // onthouden we een map die twee lagen te diep zit.
+    const depth = role ? 3 : 1;
+    const up = dest.replace(/[\\/]+$/, "").split(/[\\/]/).slice(0, -depth).join("\\");
+    if (up) { settings.lastAgentParent = up; saveSettings(); }
+  }
+  renderProjects();
+  els.newagentModal.classList.add("hidden");
+  // Elk geschreven pad noemen: dat is het rapport, en het is de reden dat een
+  // net uitgerolde agent niet meteen gestart wordt.
+  toast(t("na_wrote").replace("{n}", rep.paths.length).replace("{dest}", rep.dest), "ok");
+  const fresh = projects.find((p) => samePath(p.path, dest));
+  if (fresh) {
+    selectProject(fresh, els.list.querySelector(`.project-card[data-idx="${projects.indexOf(fresh)}"]`));
+    showView("new");
+  }
+}
+
 function openNewAgent() {
   naDraft = blankRow();
   els.naLabel.value = "";
@@ -4064,6 +4336,7 @@ function openNewAgent() {
   naSay(els.naNote, "", "");
   renderNewAgentHost();
   renderNewAgentAgent();
+  selectNaKind("plain");
   els.newagentModal.classList.remove("hidden");
   els.naLabel.focus();
 }
@@ -4887,6 +5160,17 @@ window.addEventListener("DOMContentLoaded", () => {
     naCmdField: document.querySelector("#na-cmdfield"),
     naCommand: document.querySelector("#na-command"),
     naStatus: document.querySelector("#na-status"),
+    naSave: document.querySelector("#na-save"),
+    naKinds: document.querySelector("#na-kinds"),
+    naPlain: document.querySelector("#na-plain"),
+    naRole: document.querySelector("#na-role"),
+    naRoleHead: document.querySelector("#na-role-head"),
+    naWhere: document.querySelector("#na-where"),
+    naSubject: document.querySelector("#na-subject"),
+    naSource: document.querySelector("#na-source"),
+    naProbe: document.querySelector("#na-probe"),
+    naDestField: document.querySelector("#na-destfield"),
+    naDest: document.querySelector("#na-dest"),
     appVersion: document.querySelector("#app-version"),
     fileDropper: document.querySelector("#file-dropper"),
     dropperList: document.querySelector("#dropper-list"),
@@ -4976,7 +5260,22 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   els.naCancel = document.querySelector("#na-cancel");
   els.naCancel.addEventListener("click", () => els.newagentModal.classList.add("hidden"));
-  document.querySelector("#na-save").addEventListener("click", saveNewAgent);
+  els.naSave.addEventListener("click", () => (naKind === "plain" ? saveNewAgent() : naDeploy()));
+  document.querySelector("#na-read").addEventListener("click", naReadSource);
+  // Van plek of onderwerp wisselen verandert het pad, dus meteen bijwerken --
+  // anders staat er een pad dat niet meer bij je keuze hoort.
+  els.naWhere.addEventListener("change", naRefreshDest);
+  els.naSubject.addEventListener("input", naRefreshDest);
+  document.querySelector("#na-pickparent").addEventListener("click", async () => {
+    let dir = null;
+    try { dir = await invoke("pick_folder"); } catch (_) { return; }
+    if (!dir) return;
+    const role = roleById(naKind);
+    const leaf = naProbe && naProbe.name ? naProbe.name : "agent";
+    els.naDest.value = role
+      ? joinPath(dir, role.name, role.field, subjectSlug(els.naSubject.value))
+      : joinPath(dir, slugify(leaf));
+  });
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
   document.querySelector("#settings-cancel").addEventListener("click", () => { hideHelpTip(); els.settingsModal.classList.add("hidden"); });
   // Spraak: mic-knop + F9-event uit de backend + instellingen-acties.

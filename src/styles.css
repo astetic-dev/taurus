@@ -159,6 +159,29 @@ button, input, select, textarea { font-family: var(--ui-font); }
 /* ---- Panel ---- */
 .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .hidden { display: none !important; }
+/* Nieuwe agent: de soorten als tegels (#159). Eén rij die wrapt, want zeven
+   rollen plus twee gewone keuzes passen niet op één regel. */
+.na-kindcap { font-size: 11px; color: var(--text-dim); margin: 2px 0 6px; }
+.na-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.na-kind {
+  display: flex; flex-direction: column; gap: 1px; align-items: flex-start;
+  padding: 6px 10px; min-width: 104px; cursor: pointer;
+  background: var(--bg-card); color: var(--text);
+  border: 1px solid var(--border); border-left-width: 3px; border-radius: 7px;
+  font-size: 12px; text-align: left;
+}
+.na-kind:hover { border-color: var(--accent); }
+.na-kind.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.na-kind .na-kind-sub { font-size: 10px; color: var(--text-dim); }
+.na-role-head { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+.na-role-head b { color: var(--text); font-size: 13px; }
+/* Het leesrapport: vaste kolommen, zodat het te scannen is als een label-lijst. */
+.na-probe { margin: 4px 0 12px; font-size: 12px; }
+.na-probe .na-prow { display: flex; gap: 10px; padding: 2px 0; }
+.na-probe .na-pk { width: 92px; flex: none; color: var(--text-dim); font-size: 11px; }
+.na-probe .na-pv { min-width: 0; overflow-wrap: anywhere; }
+.na-probe .na-plead { margin-bottom: 6px; }
+.na-probe .na-plead b { font-size: 13px; }
 
 /* ---- Tabbalk ---- */
 .tabbar {
@@ -937,6 +960,8 @@ select:-webkit-autofill {
   box-shadow: 0 6px 24px rgba(0, 0, 0, .45); z-index: 9999;
 }
 .toast.err { border-left-color: var(--red); }
+/* Een gelukte actie hoort er ook uit te zien als een gelukte actie. */
+.toast.ok { border-left-color: var(--signal-ok, var(--green)); }
 .toast.hidden { display: none; }
 
 /* ===== Taurus als SSH-host: gekoppelde computers + toestemming (#121) ===== */
