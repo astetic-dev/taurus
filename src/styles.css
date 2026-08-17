@@ -202,6 +202,11 @@ button, input, select, textarea { font-family: var(--ui-font); }
 /* Het pad onder de rolnaam: dan weet je waar _assignments.md staat. */
 .assign-path { padding: 0 0 2px 18px; font-size: 10.5px; color: var(--text-dim); opacity: .7; overflow-wrap: anywhere; }
 .assign-note { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; }
+/* Wat je kunt aanklikken hoort er ook naar te lijken. */
+.assign-body .clickable { cursor: pointer; border-radius: 6px; }
+.assign-body .clickable:hover { background: var(--bg-card-hover, var(--bg-card)); }
+.assign-item.clickable:hover .assign-task { color: var(--accent); }
+.assign-path.clickable:hover { color: var(--accent); opacity: 1; }
 .role-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
 .role-row .role-ico { width: 18px; flex: none; text-align: center; opacity: .85; }
 .role-row .role-name { width: 96px; flex: none; }
