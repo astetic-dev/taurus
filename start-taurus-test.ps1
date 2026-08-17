@@ -16,8 +16,33 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$exe  = if ($Exe) { $Exe } else { Join-Path $root 'src-tauri\target\release\taurus.exe' }
 $cfg  = Join-Path $env:APPDATA 'Taurus-TEST'
+
+# Zonder -Exe: pak de NIEUWSTE van de bekende buildplekken, niet blind
+# target\release. Zodra dit testexemplaar draait houdt het die exe vergrendeld, dus
+# gaat een volgende build naar target\fixbuild - en dan startte dit script daarna
+# stil de OUDE build weer. Dat kostte een ronde uitzoeken waarom een wijziging er
+# niet in zat.
+$candidates = @(
+    (Join-Path $root 'src-tauri\target\release\taurus.exe'),
+    (Join-Path $root 'src-tauri\target\fixbuild\release\taurus.exe')
+)
+if ($Exe) {
+    $exe = $Exe
+} else {
+    $found = @(Get-Item $candidates -EA 0 | Sort-Object LastWriteTime -Descending)
+    if ($found.Count -eq 0) {
+        Write-Host "Geen build gevonden. Draai eerst in src-tauri: cargo build --release"
+        return
+    }
+    $exe = $found[0].FullName
+    if ($found.Count -gt 1) {
+        Write-Host "Meerdere builds gevonden; de nieuwste gekozen:"
+        foreach ($f in $found) {
+            Write-Host ("  {0}  {1}  {2}" -f $f.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), $f.VersionInfo.FileVersion, $f.FullName)
+        }
+    }
+}
 
 if (-not (Test-Path $exe)) {
     Write-Host "Geen build gevonden op $exe - draai eerst: cargo build --release (in src-tauri)"
@@ -39,8 +64,12 @@ if ($cfg -ieq (Join-Path $env:APPDATA 'Taurus')) {
     throw "TAURUS_CONFIG_DIR wijst naar de ECHTE configmap - gestopt."
 }
 
+# De versie erbij, want "welke build draait hier eigenlijk" is precies de vraag die
+# je je stelt als een wijziging er niet in lijkt te zitten.
+$ver = (Get-Item $exe).VersionInfo.FileVersion
 Write-Host "Configmap : $cfg"
 Write-Host "Binary    : $exe"
+Write-Host "Versie    : $ver  ($((Get-Item $exe).LastWriteTime.ToString('yyyy-MM-dd HH:mm')))"
 Write-Host "Sessies   : $(if (Test-Path (Join-Path $cfg 'sessions.json')) { 'eigen sessions.json aanwezig' } else { 'geen - start leeg, raakt je echte sessies niet aan' })"
 
 $env:TAURUS_CONFIG_DIR = $cfg

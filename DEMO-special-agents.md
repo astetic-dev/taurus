@@ -16,15 +16,26 @@ in een gewone PowerShell:
 
 ```powershell
 cd C:\Users\AST\claude\Taurus
-.\start-taurus-test.ps1 -Exe C:\Users\AST\claude\Taurus\src-tauri\target\fixbuild\release\taurus.exe
+.\start-taurus-test.ps1
 ```
+
+Het script kiest zelf de **nieuwste** build en drukt af welke versie hij start:
+
+```
+Configmap : C:\Users\AST\AppData\Roaming\Taurus-TEST
+Binary    : C:\Users\AST\claude\Taurus\src-tauri\target\fixbuild\release\taurus.exe
+Versie    : 0.6.3  (2026-08-17 21:31)
+```
+
+Klopt die versie niet met wat je verwacht, dan is dat meteen zichtbaar in plaats van
+na een ronde uitzoeken. Een specifieke build forceren kan met `-Exe <volledig pad>`.
 
 De titelbalk zegt **TEST**. Er staat nog geen enkele agent in, en dat is precies
 wat je wilt om dit uit te proberen.
 
-**Waarom `fixbuild`:** het testexemplaar dat je nu draait houdt
-`C:\Users\AST\claude\Taurus\src-tauri\target\release\taurus.exe` vergrendeld, dus
-deze versie staat in een aparte map. Dat is ook wat het script zelf voorstelt.
+**Waarom er twee buildmappen zijn:** zodra een testexemplaar draait houdt het
+`...\target\release\taurus.exe` vergrendeld, dus gaat een volgende build naar
+`...\target\fixbuild\release\`. Het script kijkt naar beide en pakt de nieuwste.
 
 Eén ding is wel gedeeld: **de instellingen.** Die staan in localStorage van de
 webview en niet in de configmap, dus taal, thema, "vragen voor afsluiten" en de
