@@ -2265,6 +2265,15 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+// Wanneer is deze binary gebouwd (seconden sinds epoch)? Twee builds van dezelfde
+// avond dragen hetzelfde versienummer, dus dit is het enige dat ze onderscheidt.
+#[tauri::command]
+fn app_built() -> u64 {
+    option_env!("TAURUS_BUILT_AT")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
 // Heeft de gekozen map een CLAUDE.md (hoofdletterongevoelig)? Een ad-hoc map
 // openen mag altijd, maar de UI geeft een hint als die ontbreekt -- "optimaal"
 // is een map met projectinstructies voor Claude.
@@ -6674,6 +6683,7 @@ pub fn run() {
             pick_file,
             path_exists,
             app_version,
+            app_built,
             has_claude_md,
             save_sessions,
             get_sessions,

@@ -174,6 +174,7 @@ const I18N = {
     na_kind_plain_sub: "een werkproces", na_kind_free: "Ander ICM-adres",
     group_processes: "Processen", grp_processes: "Processen",
     fold_hide: "Inklappen", fold_show: "Uitklappen",
+    build_of: "Build van {when}",
     proc_find: "Zoek in processen", proc_filter_ph: "Filter op naam of pad…",
     na_kind_free_sub: "specialist, geen rol",
     na_where: "Waar werkt hij?", na_standing: "Staand — eigen werkplek",
@@ -504,6 +505,7 @@ const I18N = {
     na_kind_plain_sub: "a work process", na_kind_free: "Another ICM address",
     group_processes: "Processes", grp_processes: "Processes",
     fold_hide: "Collapse", fold_show: "Expand",
+    build_of: "Built {when}",
     proc_find: "Find a process", proc_filter_ph: "Filter by name or path…",
     na_kind_free_sub: "specialist, no role",
     na_where: "Where does it work?", na_standing: "Standing — its own workspace",
@@ -5691,6 +5693,16 @@ async function refreshSttStatus() {
 }
 
 /* ============ init ============ */
+// Een niet-afgevangen fout maakte hiervoor stilletjes knoppen dood: gooit iets in
+// het bedradingsblok, dan wordt alles daarna niet meer aangesloten en doet de helft
+// van de balk niets, zonder één melding. Nu zie je het.
+window.addEventListener("error", (e) => {
+  try { toast("✗ " + (e.message || "javascriptfout") + (e.filename ? ` (${String(e.lineno)})` : ""), "err"); } catch (_) {}
+});
+window.addEventListener("unhandledrejection", (e) => {
+  try { toast("✗ " + String((e.reason && e.reason.message) || e.reason || "onbehandelde fout"), "err"); } catch (_) {}
+});
+
 window.addEventListener("DOMContentLoaded", () => {
   Object.assign(els, {
     agentList: document.querySelector("#agent-list"),
@@ -6112,5 +6124,17 @@ window.addEventListener("DOMContentLoaded", () => {
   syncAskingBanner();
 
   // Toon de app-versie discreet onderin de sidebar.
-  invoke("app_version").then((v) => { if (v) els.appVersion.textContent = "v" + v; }).catch(() => {});
+  // Versie EN buildmoment. Het nummer wijzigt pas bij een release, dus zonder de
+  // tijd weet je niet of je je eigen wijziging voor je hebt.
+  Promise.all([
+    invoke("app_version").catch(() => ""),
+    invoke("app_built").catch(() => 0),
+  ]).then(([v, built]) => {
+    if (!v) return;
+    const d = built ? new Date(built * 1000) : null;
+    const p = (n) => String(n).padStart(2, "0");
+    const stamp = d ? `${p(d.getDate())}-${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}` : "";
+    els.appVersion.textContent = stamp ? `v${v} · ${stamp}` : "v" + v;
+    els.appVersion.title = d ? t("build_of").replace("{when}", d.toLocaleString()) : "";
+  });
 });
