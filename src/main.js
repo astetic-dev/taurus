@@ -214,8 +214,10 @@ const I18N = {
     aim_none: "Geen leesrol uitgerold",
     // Opdrachten aan de rollen bewaren
     foot_assign: "≡ Opdrachten", assign_title: "Opdrachten aan je rollen",
-    assign_none: "Nog geen opdrachten. Ze worden vastgelegd zodra je een rol met een taak start.",
+    assign_none: "Nog geen opdrachten. Er komt een regel bij zodra je een rol start met iets in het taak-veld — uitrollen alleen legt niets vast.",
+    assign_no_roles: "Nog geen rollen uitgerold. Rol er een uit met ＋ en start hem met een taak.",
     assign_none_role: "nog niets gevraagd",
+    assign_failed: "kon niet gelezen worden: {err}",
     assign_in: "in {label}", assign_standing: "staand",
     assign_count: "{n}",
     role_architect: "Architect", role_architect_q: "Ik wil een nieuw proces maken.",
@@ -542,8 +544,10 @@ const I18N = {
     aim_none: "No reading role deployed",
     // Keeping the assignments given to the roles
     foot_assign: "≡ Assignments", assign_title: "Assignments to your roles",
-    assign_none: "No assignments yet. They are recorded as soon as you start a role with a task.",
+    assign_none: "No assignments yet. A line is added the moment you start a role with something in the task field — deploying alone records nothing.",
+    assign_no_roles: "No roles deployed yet. Deploy one with ＋ and start it with a task.",
     assign_none_role: "nothing asked yet",
+    assign_failed: "could not be read: {err}",
     assign_in: "in {label}", assign_standing: "standing",
     assign_count: "{n}",
     role_architect: "Architect", role_architect_q: "I want to build a new process.",
@@ -4020,36 +4024,87 @@ function assignStamp() {
 
 // Overzicht van wat je elke rol gevraagd hebt. Leest de bestanden bij het openen:
 // een rol kan er zelf ook in geschreven hebben, en dan hoort dat mee te komen.
+// Overzicht van wat je elke rol gevraagd hebt.
+//
+// SCHERM EERST, inhoud daarna. Het opbouwen gebeurde hiervoor vóór het openen, dus
+// als daar iets misging zag je helemaal niets -- en dan lijkt de knop stuk terwijl
+// de fout ergens anders zit. Een knop die niets zichtbaar doet is altijd de fout,
+// ook als de oorzaak elders ligt.
 async function openAssignments() {
-  const roleCards = projects.filter((p) => p.role);
-  els.assignBody.innerHTML = "";
-  if (!roleCards.length) {
-    els.assignBody.innerHTML = `<div class="assign-empty">${escapeHtml(t("assign_none"))}</div>`;
-    els.assignModal.classList.remove("hidden");
+  // Zelfs het scherm zelf kan ontbreken (markup weggevallen bij een verbouwing).
+  // Dan nog steeds iets zeggen in plaats van een knop die niets doet.
+  if (!els.assignModal || !els.assignBody) {
+    toast("✗ assignments: scherm niet gevonden", "err");
     return;
   }
   els.assignModal.classList.remove("hidden");
-  let any = false;
-  for (const p of roleCards) {
+  els.assignBody.innerHTML = `<div class="assign-empty">${escapeHtml(t("attach_loading"))}</div>`;
+  try {
+    await renderAssignments();
+  } catch (e) {
+    // Niet stil falen: als het opbouwen niet lukt hoor je te zien waaraan.
+    console.error("assignments failed:", e);
+    els.assignBody.innerHTML = `<div class="assign-empty">\u2717 ${escapeHtml(String(e && e.message ? e.message : e))}</div>`;
+  }
+}
+
+async function renderAssignments() {
+  const roleCards = projects.filter((p) => p.role);
+  const box = els.assignBody;
+  box.innerHTML = "";
+  if (!roleCards.length) {
+    box.innerHTML = `<div class="assign-empty">${escapeHtml(t("assign_no_roles"))}</div>`;
+    return;
+  }
+  // Alles in één keer ophalen, en een rol die faalt levert zijn eigen melding op in
+  // plaats van de hele lijst mee te nemen.
+  const results = await Promise.all(
+    roleCards.map((p) =>
+      invoke("read_assignments", { path: p.path })
+        .then((items) => ({ items }))
+        .catch((err) => ({ items: [], err: String(err) }))
+    )
+  );
+
+  let total = 0;
+  roleCards.forEach((p, n) => {
+    const { items, err } = results[n];
+    total += items.length;
     const role = roleById(p.role);
-    let items = [];
-    try { items = await invoke("read_assignments", { path: p.path }); } catch (_) {}
-    if (items.length) any = true;
     const host = p.parent ? projects.find((x) => x.id === p.parent) : null;
     const where = host ? t("assign_in").replace("{label}", host.label) : t("assign_standing");
+
     const head = document.createElement("div");
     head.className = "assign-role";
     head.innerHTML =
-      `<span class="role-ico" aria-hidden="true">${escapeHtml(role ? role.icon : "⬡")}</span>` +
+      `<span class="role-ico" aria-hidden="true">${escapeHtml(role ? role.icon : "\u2b21")}</span>` +
       `<span>${escapeHtml(p.label)}</span>` +
-      `<span class="assign-where">${escapeHtml(where)} · ${items.length}</span>`;
-    els.assignBody.appendChild(head);
+      `<span class="assign-where">${escapeHtml(where)} \u00b7 ${items.length}</span>`;
+    // Het pad erbij: dan weet je waar `_assignments.md` staat en kun je er zelf in
+    // kijken. Het overzicht is een gemak, het bestand is de waarheid.
+    const path = document.createElement("div");
+    path.className = "assign-path";
+    path.textContent = p.path;
+    box.appendChild(head);
+    box.appendChild(path);
+
+    if (err) {
+      const bad = document.createElement("div");
+      bad.className = "assign-item";
+      bad.innerHTML =
+        `<span class="assign-when"></span>` +
+        `<span class="assign-task assign-empty">${escapeHtml(t("assign_failed").replace("{err}", err))}</span>`;
+      box.appendChild(bad);
+      return;
+    }
     if (!items.length) {
       const none = document.createElement("div");
       none.className = "assign-item";
-      none.innerHTML = `<span class="assign-when"></span><span class="assign-task assign-empty">${escapeHtml(t("assign_none_role"))}</span>`;
-      els.assignBody.appendChild(none);
-      continue;
+      none.innerHTML =
+        `<span class="assign-when"></span>` +
+        `<span class="assign-task assign-empty">${escapeHtml(t("assign_none_role"))}</span>`;
+      box.appendChild(none);
+      return;
     }
     // Nieuwste bovenaan in het overzicht; in het bestand blijft het chronologisch,
     // want dat leest een mens van boven naar beneden mee met de map.
@@ -4059,14 +4114,17 @@ async function openAssignments() {
       row.innerHTML =
         `<span class="assign-when">${escapeHtml(a.when)}</span>` +
         `<span class="assign-task">${escapeHtml(a.task)}</span>`;
-      els.assignBody.appendChild(row);
+      box.appendChild(row);
     }
-  }
-  if (!any) {
+  });
+
+  // Rollen wel, opdrachten nog niet: zeg dan WANNEER er iets komt te staan, want
+  // anders lijkt een leeg overzicht op een kapot overzicht.
+  if (total === 0) {
     const note = document.createElement("div");
-    note.className = "assign-empty";
+    note.className = "assign-empty assign-note";
     note.textContent = t("assign_none");
-    els.assignBody.appendChild(note);
+    box.appendChild(note);
   }
 }
 
