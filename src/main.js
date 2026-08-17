@@ -178,6 +178,8 @@ const I18N = {
     na_source: "Bron", na_source_ph: "https://github.com/eigenaar/repo",
     na_read: "Lezen", na_reading: "Ophalen en lezen…",
     na_dest: "Komt in", na_deploy: "Uitrollen",
+    na_dest_hint: "Voorstel — pas het aan of kies met 📁 een andere plek.",
+    na_dest_pick: "Kies met 📁 waar deze mag komen.",
     na_deploying: "Uitrollen…",
     na_shape_skill: "skill", na_shape_workspace: "werkmap",
     na_p_shape: "vorm", na_p_version: "versie", na_p_claude: "bevat",
@@ -500,6 +502,8 @@ const I18N = {
     na_source: "Source", na_source_ph: "https://github.com/owner/repo",
     na_read: "Read", na_reading: "Fetching and reading…",
     na_dest: "Goes in", na_deploy: "Deploy",
+    na_dest_hint: "A proposal — edit it, or pick another place with 📁.",
+    na_dest_pick: "Pick where this may go with 📁.",
     na_deploying: "Deploying…",
     na_shape_skill: "skill", na_shape_workspace: "workspace",
     na_p_shape: "shape", na_p_version: "version", na_p_claude: "contains",
@@ -4595,25 +4599,34 @@ function joinPath(base, ...parts) {
   return [base.replace(/[\\/]+$/, ""), ...parts].join(sep);
 }
 
-// Het pad dat uit de keuzes volgt. Staand: <ouder>/<Naam>/<veld>/<onderwerp>.
-// Ingebed: <werkproces>/_<veld>/<onderwerp> -- de underscore omdat ICM die
-// gebruikt voor mappen die niet in de genummerde stroom van het proces meelopen.
-function naComputeDest() {
-  const role = roleById(naKind);
-  const host = els.naWhere.value ? projects.find((p) => p.id === els.naWhere.value) : null;
-  const subject = subjectSlug(els.naSubject.value);
-  const field = role ? role.field : "";
-  const leaf = naProbe && naProbe.name ? slugify(naProbe.name) : (role ? slugify(role.name) : "agent");
-  if (host) {
-    return field ? joinPath(host.path, "_" + field, subject) : joinPath(host.path, "_" + leaf, subject);
-  }
-  const parent = defaultAgentParent();
+// Het pad dat uit de keuzes volgt, ONDER een gegeven ouder. Staand:
+// <ouder>/<Naam>/<veld>/<onderwerp>. Ingebed: <ouder>/_<veld>/<onderwerp> -- de
+// underscore omdat ICM die gebruikt voor mappen die niet in de genummerde stroom
+// van het proces meelopen.
+//
+// Eén functie met de ouder als parameter, zodat de 📁-knop hetzelfde rekent als
+// het voorstel. Daarvoor rekende die knop altijd de STAANDE vorm, ook als je
+// ingebed had gekozen -- dan koos je een plek en kreeg je een andere structuur.
+function naDestUnder(parent) {
   if (!parent) return "";
-  return field ? joinPath(parent, role.name, field, subject) : joinPath(parent, leaf);
+  const role = roleById(naKind);
+  const embedded = !!els.naWhere.value;
+  const subject = subjectSlug(els.naSubject.value);
+  const field = role ? role.field : (naProbe && naProbe.name ? slugify(naProbe.name) : "agent");
+  if (embedded) return joinPath(parent, "_" + field, subject);
+  const leaf = naProbe && naProbe.name ? slugify(naProbe.name) : "agent";
+  return role ? joinPath(parent, role.name, field, subject) : joinPath(parent, leaf);
+}
+function naComputeDest() {
+  const host = els.naWhere.value ? projects.find((p) => p.id === els.naWhere.value) : null;
+  return naDestUnder(host ? host.path : defaultAgentParent());
 }
 function naRefreshDest() {
   if (!naProbe) return;
   els.naDest.value = naComputeDest();
+  // Zeg dat dit een VOORSTEL is. Zonder dat leest een voorgevuld pad als een
+  // besluit, en dan staat er ineens een submap in een map die je niet bedoelde.
+  els.naDestHint.textContent = els.naDest.value ? t("na_dest_hint") : t("na_dest_pick");
 }
 
 function renderNaKinds() {
@@ -5706,6 +5719,7 @@ window.addEventListener("DOMContentLoaded", () => {
     naProbe: document.querySelector("#na-probe"),
     naDestField: document.querySelector("#na-destfield"),
     naDest: document.querySelector("#na-dest"),
+    naDestHint: document.querySelector("#na-desthint"),
     updateModal: document.querySelector("#update-modal"),
     upTitle: document.querySelector("#up-title"),
     upRows: document.querySelector("#up-rows"),
@@ -5815,11 +5829,8 @@ window.addEventListener("DOMContentLoaded", () => {
     let dir = null;
     try { dir = await invoke("pick_folder"); } catch (_) { return; }
     if (!dir) return;
-    const role = roleById(naKind);
-    const leaf = naProbe && naProbe.name ? naProbe.name : "agent";
-    els.naDest.value = role
-      ? joinPath(dir, role.name, role.field, subjectSlug(els.naSubject.value))
-      : joinPath(dir, slugify(leaf));
+    els.naDest.value = naDestUnder(dir);
+    els.naDestHint.textContent = t("na_dest_hint");
   });
   document.querySelector("#add-file-btn").addEventListener("click", addFileViaPicker);
   document.querySelector("#settings-cancel").addEventListener("click", () => { hideHelpTip(); els.settingsModal.classList.add("hidden"); });

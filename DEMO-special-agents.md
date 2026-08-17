@@ -1,26 +1,40 @@
 # Special agents — installeren en doorlopen
 
-Versie 0.6.1, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
+Versie 0.6.2, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
 zit staat onderaan.
 
-## 1. Installeren
+## 1. Draaien zonder je productie aan te raken
 
-Taurus vergrendelt zijn eigen exe zolang hij draait, dus dit gaat niet terwijl
-het venster open staat. En omdat deze sessie ín Taurus draait, moet jij het doen.
+**Je hoeft niets af te sluiten.** Dit start de nieuwe build naast je draaiende
+Taurus, met een eigen configmap (`%APPDATA%\Taurus-TEST`): eigen `projects.json`,
+eigen `sessions.json`, eigen `roles.json`. Je lopende agents blijven waar ze zijn
+en worden niet overgenomen.
 
-Sluit Taurus, en draai dan in een gewone PowerShell:
+In een gewone PowerShell, in de Taurus-map:
+
+```powershell
+.\start-taurus-test.ps1
+```
+
+De titelbalk zegt **TEST**. Er staat nog geen enkele agent in, en dat is precies
+wat je wilt om dit uit te proberen.
+
+Twee dingen om te weten:
+
+- Zodra dit testexemplaar draait houdt het `target\release\taurus.exe`
+  vergrendeld. Een nieuwe build moet dan naar een andere map
+  (`cargo build --release --target-dir target\fixbuild`) en start je met
+  `.\start-taurus-test.ps1 -Exe src-tauri\target\fixbuild\release\taurus.exe`.
+- **De instellingen zijn wel gedeeld.** Die staan in localStorage van de webview
+  en niet in de configmap, dus taal, thema, "vragen voor afsluiten" en de
+  onthouden uitrolmap gelden voor beide exemplaren. Agents, sessies en rollen zijn
+  gescheiden; de voorkeuren niet.
+
+Wil je hem later echt in gebruik nemen, dan moet Taurus wel dicht:
 
 ```powershell
 Copy-Item "C:\Users\AST\claude\Taurus\src-tauri\target\release\taurus.exe" "C:\Tools\Taurus\taurus.exe" -Force
 ```
-
-Wil je eerst terug kunnen:
-
-```powershell
-Copy-Item "C:\Tools\Taurus\taurus.exe" "C:\Tools\Taurus\taurus-0.5.11.exe"
-```
-
-Start daarna `C:\Tools\Taurus\taurus.exe`.
 
 ## 2. De zeven rollen zien
 
@@ -59,9 +73,14 @@ grootte    <n> KB
 Dat "eigen CLAUDE.md" is echt: Mimir en Forseti leveren er een mee, de andere vier
 niet. Bij Cassini staat er *geen CLAUDE.md — Taurus schrijft er een*.
 
-Daaronder staat **Komt in** met het volledige pad:
-`C:\Users\AST\claude\Mimir\diagnosis\general`. De ouder is de map die de meeste
-van je lokale agents al delen; 📁 als je hem elders wilt.
+Daaronder staat **Komt in** met het volledige pad, en eronder staat dat het een
+**voorstel** is. Pas het aan, of kies met 📁 een andere ouder -- dan rekent Taurus
+de rest van het pad opnieuw uit onder die plek.
+
+In het testexemplaar stelt hij nog niets voor: de ouder wordt afgeleid uit de map
+die je bestaande lokale agents delen, en dat lijstje is daar leeg. Kies dus zelf,
+bijvoorbeeld `C:\Users\AST\claude\_taurus-test` -- dan blijft je echte `claude`-map
+schoon terwijl je dit uitprobeert.
 
 **Uitrollen.** De kaart verschijnt bovenin, en de toast zegt hoeveel bestanden waar
 geland zijn. Hij wordt niet gestart — dat rapport is het ding dat je wilt lezen.
@@ -75,8 +94,13 @@ zegt dat er geen skill nodig is).
 Klik **＋ → Vör**. *Waar werkt hij?* staat nu op **In: …** zodra je één werkproces
 hebt — kies bijvoorbeeld `Taurus dev`. Vul bij het onderwerp `meetings` in.
 
-Het pad wordt `C:\Users\AST\claude\Taurus\_coaching\meetings`. Na het uitrollen
-staat de kaart **ingesprongen onder Taurus dev**, met een streepje ernaar toe.
+Het voorstel wordt dan `<map van dat werkproces>\_coaching\meetings`: een submap in
+de map van het proces waar hij over gaat. **Ook dat is een voorstel.** Wil je die
+map niet in een productie-repo hebben, kies dan met 📁 een andere ouder -- Taurus
+houdt de underscore-vorm aan, want ingebed blijft ingebed.
+
+Na het uitrollen staat de kaart **ingesprongen onder zijn werkproces**, met een
+streepje ernaartoe.
 
 Doe het nog eens met onderwerp `projectmanagement`. Twee coaches in hetzelfde
 werkproces, naast elkaar, elk met een eigen map onder `_coaching/`.
@@ -149,8 +173,8 @@ Rechtermuisknop op een kaart. Dat opende hiervoor meteen het verplaats/sync-sche
 nu is dat één regel in een menu, met daaronder de leesrollen die je hebt staan —
 Cassini, Mimir, Forseti, als je ze uitgerold hebt.
 
-Klik **"Laat Cassini hiernaar kijken"** op bijvoorbeeld `NEXUS AI dev`. Taurus
-selecteert Cassini en zet het pad van die map in zijn taak. Starten doe je zelf,
+Klik **"Laat Cassini hiernaar kijken"** op een van je bestaande kaarten. Taurus
+selecteert Cassini en zet het pad van die kaart in zijn taak. Starten doe je zelf,
 zodat je nog ziet wat er gaat gebeuren.
 
 Richten is niet hetzelfde als inbedden. Inbedden zet een submap in een map die van
@@ -170,7 +194,7 @@ What was asked of this role, newest last. Written by Taurus.
 
 ## 2026-08-17 14:32
 
-Kijk naar deze map en doe wat je hoort te doen: C:\Users\AST\claude\NEXUS
+Kijk naar deze map en doe wat je hoort te doen: X:\AI
 ```
 
 Onderaan de balk staat **≡ Opdrachten**. Dat leest de bestanden van al je rollen en
