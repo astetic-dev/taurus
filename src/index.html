@@ -605,6 +605,12 @@
       </div>
     </div>
 
+    <!-- LET OP bij het toevoegen van een modal: hij hoort een DIRECT kind van
+         <body> te zijn, naast de andere. Bij een merge zijn hier ooit twee
+         sluit-tags weggevallen, waardoor drie modals EN de toast in een verborgen
+         modal terechtkwamen. Alles daarin was onzichtbaar -- inclusief elke
+         foutmelding die dat had moeten verraden. -->
+
     <!-- ===== Nieuwe versie van een werkplek (#163) =====
          Bijwerken gaat per werkplek. Het scherm zegt wat er BLIJFT voordat je
          klikt, want een mapping of een diagnose is een verslag van wat er op dat
@@ -618,6 +624,9 @@
           <button id="up-go" class="btn-primary" data-i18n="up_go">Bijwerken</button>
         </div>
         <div id="up-status" class="status-msg"></div>
+      </div>
+    </div>
+
     <!-- ===== Afsluiten bevestigen (#168) =====
          Afsluiten kilde elke agent zonder iets te vragen. Deze vraag zegt per
          sessie wat er met hem gebeurt, want dat verschilt echt: een sessie op

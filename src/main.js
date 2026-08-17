@@ -6139,6 +6139,17 @@ window.addEventListener("DOMContentLoaded", () => {
     const need = [...Object.keys(SIDEBAR_ACTIONS), "assign-modal", "assign-body", "newagent-modal", "exit-modal", "update-modal", "agent-list", "process-list"];
     const missing = need.filter((id) => !document.getElementById(id));
     if (missing.length) toast("✗ ontbreekt in de UI: " + missing.join(", "), "err");
+    // En: hangt elke modal wel DIRECT onder <body>? Een modal die per ongeluk in
+    // een andere modal belandt is er wel, maar wordt nooit zichtbaar -- die zat
+    // hier echt, en nam de toast mee, dus zelfs de melding erover was onzichtbaar.
+    // Alleen bestaan is niet genoeg; hij moet ook getoond kunnen worden.
+    const buried = [...document.querySelectorAll(".modal, #toast")]
+      .filter((el) => el.parentElement !== document.body)
+      .map((el) => el.id || el.className);
+    if (buried.length) {
+      console.error("modal not a child of body:", buried);
+      alert("Taurus: deze schermen zitten verkeerd in de pagina en kunnen niet getoond worden: " + buried.join(", "));
+    }
   }
   // roles.json eerst: het Nieuwe-agent-scherm toont alleen rollen die je
   // gebruikt, en dat staat daar.
