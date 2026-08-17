@@ -178,7 +178,7 @@ const I18N = {
     na_kind_free_sub: "specialist, geen rol",
     na_where: "Waar werkt hij?", na_standing: "Staand — eigen werkplek",
     na_embedded_in: "In: {label}",
-    na_subject: "Waar gaat deze over?", na_subject_ph: "bijv. meetings — leeg mag",
+    na_subject: "Waar gaat dit over? (één woord)", na_subject_ph: "bijv. meetings — leeg mag",
     na_source: "Bron", na_source_ph: "https://github.com/eigenaar/repo",
     na_read: "Lezen", na_reading: "Ophalen en lezen…",
     na_dest: "Komt in", na_deploy: "Uitrollen",
@@ -506,7 +506,7 @@ const I18N = {
     na_kind_free_sub: "specialist, no role",
     na_where: "Where does it work?", na_standing: "Standing — its own workspace",
     na_embedded_in: "In: {label}",
-    na_subject: "What is this one about?", na_subject_ph: "e.g. meetings — may be empty",
+    na_subject: "What is this about? (one word)", na_subject_ph: "e.g. meetings — may be empty",
     na_source: "Source", na_source_ph: "https://github.com/owner/repo",
     na_read: "Read", na_reading: "Fetching and reading…",
     na_dest: "Goes in", na_deploy: "Deploy",
@@ -4628,12 +4628,25 @@ function defaultAgentParent() {
   for (const [k, v] of counts) if (v > n) { best = k; n = v; }
   return best;
 }
-// Mapnamen zijn Engels en slug-vorm, ook in de Nederlandse UI: ze worden door
-// agents gelezen en gaan mee in jouw git. Een mapnaam die met de taalinstelling
-// meebeweegt maakt twee werkplekken onderling onverenigbaar.
+// Het onderwerp is ÉÉN WOORD. Typ je er een hele opdracht in, dan werd dat een
+// mapnaam als `diagnose-why-it-s-taking-so-long-and-so-much-credits-to-build-the-
+// new-engine` -- en die staat daarna voor altijd in je boom. Dus: het eerste
+// woord, en hooguit 24 tekens.
+//
+// Mapnamen zijn slug-vorm, ook in de Nederlandse UI: ze worden door agents gelezen
+// en gaan mee in jouw git. Een mapnaam die met de taalinstelling meebeweegt maakt
+// twee werkplekken onderling onverenigbaar.
 function subjectSlug(s) {
-  const v = slugify(s || "");
-  return v === "project" && !(s || "").trim() ? "general" : v;
+  const first = (s || "").trim().split(/\s+/)[0] || "";
+  // Niet via slugify(): die valt bij niets-bruikbaars terug op "project", en dan
+  // zou een map "project" gaan heten omdat je "!!!" typte.
+  const v = first
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 24)
+    .replace(/-+$/, "");
+  return v || "general";
 }
 function joinPath(base, ...parts) {
   const sep = base.includes("/") && !base.includes("\\") ? "/" : "\\";
@@ -4791,8 +4804,10 @@ async function naDeploy() {
   els.naSave.disabled = false;
 
   // Registreren gebeurt NA een geslaagde uitrol, nooit ervoor.
-  const subject = (els.naSubject.value || "").trim();
-  const label = subject ? `${naProbe.name} · ${subject}` : naProbe.name;
+  // Zelfde woord als in de map: een kaart die anders heet dan zijn map is een
+  // kaart die je later niet terugvindt.
+  const subject = subjectSlug(els.naSubject.value);
+  const label = subject !== "general" ? `${naProbe.name} · ${subject}` : naProbe.name;
   const made = {
     ...blankRow(),
     id: uniqueId(label),
