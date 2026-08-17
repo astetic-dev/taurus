@@ -75,11 +75,19 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .brand-sub { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
 .sidebar-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); padding: 6px; }
 .project-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1; }
+/* Zelfde onopvallende scrollbalk als de bestandslijst in de dropzone. */
+.project-list { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.project-list:hover { scrollbar-color: var(--text-dim) transparent; }
+.project-list::-webkit-scrollbar { width: 8px; }
+.project-list::-webkit-scrollbar-track { background: transparent; }
+.project-list::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 4px; border: 2px solid transparent; background-clip: content-box;
+}
+.project-list:hover::-webkit-scrollbar-thumb { background: var(--text-dim); background-clip: content-box; }
 
 .project-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
   border-radius: 8px;
   padding: 7px 12px;
   cursor: pointer;
@@ -172,19 +180,24 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .assign-body { max-height: 60vh; overflow-y: auto; }
 .assign-role { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; font-size: 13px; }
 .assign-role:first-child { margin-top: 2px; }
-.assign-role .role-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.assign-role .role-ico { width: 18px; flex: none; text-align: center; opacity: .85; }
 .assign-role .assign-where { color: var(--text-dim); font-size: 11px; }
 .assign-item { display: flex; gap: 10px; padding: 3px 0 3px 16px; font-size: 12px; }
 .assign-item .assign-when { width: 116px; flex: none; color: var(--text-dim); font-size: 11px; }
 .assign-item .assign-task { min-width: 0; overflow-wrap: anywhere; }
 .assign-empty { color: var(--text-dim); font-size: 12px; padding: 6px 0; }
 .role-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
-.role-row .role-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.role-row .role-ico { width: 18px; flex: none; text-align: center; opacity: .85; }
 .role-row .role-name { width: 96px; flex: none; }
 .role-row .role-name small { display: block; color: var(--text-dim); font-size: 10px; }
 .role-row .role-src { flex: 1; min-width: 0; }
 .role-row label { display: flex; align-items: center; gap: 4px; color: var(--text-dim); white-space: nowrap; }
-.project-sep { height: 1px; background: var(--border); margin: 8px 2px; opacity: .8; }
+.project-sep {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 2px 6px; font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.project-sep::before, .project-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 /* Een ingebedde rol hoort visueel bij zijn gastheer: ingesprongen, met een
    streepje dat de band toont. Niet versleepbaar -- hij volgt de gastheer. */
 .project-card.embedded { margin-left: 14px; }
@@ -194,14 +207,18 @@ button, input, select, textarea { font-family: var(--ui-font); }
   background: var(--border);
 }
 .na-kindcap { font-size: 11px; color: var(--text-dim); margin: 2px 0 6px; }
+/* Tweede lijst (processen): zelfde vorm, iets lucht ertussen. */
+.na-second { margin-top: 12px; }
 .na-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .na-kind {
-  display: flex; flex-direction: column; gap: 1px; align-items: flex-start;
-  padding: 6px 10px; min-width: 104px; cursor: pointer;
+  display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; align-items: center;
+  padding: 7px 11px; min-width: 132px; cursor: pointer;
   background: var(--bg-card); color: var(--text);
-  border: 1px solid var(--border); border-left-width: 3px; border-radius: 7px;
+  border: 1px solid var(--border); border-radius: 7px;
   font-size: 12px; text-align: left;
 }
+.na-kind .na-kind-ico { grid-row: span 2; font-size: 16px; line-height: 1; opacity: .85; }
+.na-kind .na-kind-title { font-size: 12.5px; }
 .na-kind:hover { border-color: var(--accent); }
 .na-kind.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .na-kind .na-kind-sub { font-size: 10px; color: var(--text-dim); }
@@ -626,7 +643,7 @@ select:-webkit-autofill {
   font-size: 11px; color: var(--text-dim); opacity: .7;
 }
 .foot-link:hover { color: var(--accent); opacity: 1; }
-.app-version { margin-top: 8px; text-align: center; font-size: 10px; letter-spacing: .5px; color: var(--text-dim); opacity: .55; user-select: text; }
+.app-version { font-size: 10px; letter-spacing: .5px; color: var(--text-dim); opacity: .55; user-select: text; align-self: center; margin-right: 4px; }
 
 /* ---- Tab-activiteit ---- */
 .tab.working .tab-dot { background: var(--green); }

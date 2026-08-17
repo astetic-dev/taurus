@@ -1,39 +1,40 @@
 # Special agents — installeren en doorlopen
 
-Versie 0.6.2, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
+Versie 0.6.3, op `main`. Alles rondom dit thema zit erin; wat er bewust niet in
 zit staat onderaan.
 
 ## 1. Draaien zonder je productie aan te raken
 
 **Je hoeft niets af te sluiten.** Dit start de nieuwe build naast je draaiende
-Taurus, met een eigen configmap (`%APPDATA%\Taurus-TEST`): eigen `projects.json`,
-eigen `sessions.json`, eigen `roles.json`. Je lopende agents blijven waar ze zijn
-en worden niet overgenomen.
+Taurus, met een eigen configmap (`C:\Users\AST\AppData\Roaming\Taurus-TEST`): eigen
+`projects.json`, eigen `sessions.json`, eigen `roles.json`. Je lopende agents
+blijven waar ze zijn en worden niet overgenomen.
 
-In een gewone PowerShell, in de Taurus-map:
+Draait er al een testexemplaar, sluit dat dan eerst -- twee testexemplaren zouden
+diezelfde Taurus-TEST-map delen en elkaar precies aandoen wat dit voorkomt. Daarna,
+in een gewone PowerShell:
 
 ```powershell
-.\start-taurus-test.ps1
+cd C:\Users\AST\claude\Taurus
+.\start-taurus-test.ps1 -Exe C:\Users\AST\claude\Taurus\src-tauri\target\fixbuild\release\taurus.exe
 ```
 
 De titelbalk zegt **TEST**. Er staat nog geen enkele agent in, en dat is precies
 wat je wilt om dit uit te proberen.
 
-Twee dingen om te weten:
+**Waarom `fixbuild`:** het testexemplaar dat je nu draait houdt
+`C:\Users\AST\claude\Taurus\src-tauri\target\release\taurus.exe` vergrendeld, dus
+deze versie staat in een aparte map. Dat is ook wat het script zelf voorstelt.
 
-- Zodra dit testexemplaar draait houdt het `target\release\taurus.exe`
-  vergrendeld. Een nieuwe build moet dan naar een andere map
-  (`cargo build --release --target-dir target\fixbuild`) en start je met
-  `.\start-taurus-test.ps1 -Exe src-tauri\target\fixbuild\release\taurus.exe`.
-- **De instellingen zijn wel gedeeld.** Die staan in localStorage van de webview
-  en niet in de configmap, dus taal, thema, "vragen voor afsluiten" en de
-  onthouden uitrolmap gelden voor beide exemplaren. Agents, sessies en rollen zijn
-  gescheiden; de voorkeuren niet.
+Eén ding is wel gedeeld: **de instellingen.** Die staan in localStorage van de
+webview en niet in de configmap, dus taal, thema, "vragen voor afsluiten" en de
+onthouden uitrolmap gelden voor beide exemplaren. Agents, sessies en rollen zijn
+gescheiden; de voorkeuren niet.
 
 Wil je hem later echt in gebruik nemen, dan moet Taurus wel dicht:
 
 ```powershell
-Copy-Item "C:\Users\AST\claude\Taurus\src-tauri\target\release\taurus.exe" "C:\Tools\Taurus\taurus.exe" -Force
+Copy-Item "C:\Users\AST\claude\Taurus\src-tauri\target\fixbuild\release\taurus.exe" "C:\Tools\Taurus\taurus.exe" -Force
 ```
 
 ## 2. De zeven rollen zien
@@ -48,10 +49,16 @@ geschiedenis van die rol blijft op één plek staan.
 
 ## 3. Een rol uitrollen
 
-**＋** in de balk. Bovenin staat nu een rij tegels: *Map die je al hebt*, de zeven
-rollen op naam, en *Ander ICM-adres*.
+**＋** in de balk. Twee lijsten:
 
-Klik **Mimir**. Dan:
+- **Wat voor agent?** — de zeven rollen, met een icoon, de **rol als titel** en de
+  naam van de invulling eronder. Je installeert een Diagnosticus, niet een Mimir;
+  wissel je later de bron, dan verandert die ondertitel en de titel niet. Plus
+  *Ander ICM-adres* voor een specialist zonder rol.
+- **Nieuw proces** — een map die je al hebt. Dat is wat voorheen een project heette:
+  een werkproces dat je hiervandaan start.
+
+Klik **Diagnosticus**. Dan:
 
 - de kop zegt welke rol het is en met welke vraag je binnenkomt;
 - *Waar werkt hij?* staat op **Staand** (je hebt er nog geen);
@@ -73,11 +80,17 @@ grootte    <n> KB
 Dat "eigen CLAUDE.md" is echt: Mimir en Forseti leveren er een mee, de andere vier
 niet. Bij Cassini staat er *geen CLAUDE.md — Taurus schrijft er een*.
 
-Daaronder staat **Komt in** met het volledige pad, en eronder staat dat het een
-**voorstel** is. Pas het aan, of kies met 📁 een andere ouder -- dan rekent Taurus
+Daaronder staat **Komt in** met het volledige pad — `<jouw map>\diagnosis\general`
+— en eronder staat dat het een **voorstel** is. Pas het aan, of kies met 📁 een andere ouder -- dan rekent Taurus
 de rest van het pad opnieuw uit onder die plek.
 
-In het testexemplaar stelt hij nog niets voor: de ouder wordt afgeleid uit de map
+De map heet naar het **veld**, niet naar de invulling. Geen `Jake\blueprints`, want
+dat zet je vast op Jake: wissel je de bron, dan staat je geschiedenis onder een naam
+die er niet meer is. Het onderwerp blijft wel een eigen laag (`diagnosis\general`),
+want twee instanties van dezelfde rol moeten naast elkaar kunnen staan -- zonder die
+laag zou de tweede in de eerste komen, een clone in een clone.
+
+In het testexemplaar stelt hij nog geen ouder voor: die wordt afgeleid uit de map
 die je bestaande lokale agents delen, en dat lijstje is daar leeg. Kies dus zelf,
 bijvoorbeeld `C:\Users\AST\claude\_taurus-test` -- dan blijft je echte `claude`-map
 schoon terwijl je dit uitprobeert.
@@ -153,19 +166,30 @@ je de opstartkeuze op *schoon beginnen*, dan belooft de vraag dat laatste niet m
 **Annuleer** laat alles draaien. **Niet meer vragen** komt terug als een vinkje in
 Instellingen → Sessies.
 
-## 9. Wat er ook nog is rechtgezet
+## 9. De linkerbalk
+
+- **Geen kleuren meer.** Een lijst van twintig regels wordt er niet mooier van. De
+  kleur blijft wel op de **tabs**, want daar onderscheidt hij wel echt sessies.
+- **Agents boven, dan een streepje met `PROCESSEN` erin, dan je processen** met de
+  ingebedde rollen ingesprongen eronder.
+- **De versie staat rechtsboven** bij ⚙ en ⟳, niet meer onderin de balk.
+- **De twee voetlinks zijn weg.** Het opdrachtoverzicht zit nu als **≡** in de kop
+  van de agentlijst; *Processen beheren* staat in Instellingen → Agents.
+- **De dicteerknop is er alleen als dicteren kan.** Is de spraakengine of het model
+  niet geïnstalleerd, dan staat hij er niet — in plaats van er te staan en niets te
+  doen.
+- **De scrollbalk** is dezelfde onopvallende als die van de bestandslijst in de
+  dropzone.
+
+## 9b. Wat er ook nog is rechtgezet
 
 - De **✎** op een kaart bewerkt nu díe agent. Hij opende hiervoor de hele lijst,
   ingeklapt, en negeerde waar je op klikte.
-- **Verwijderen** doet overal hetzelfde. Een werkproces verwijderen neemt de
-  kaarten van zijn ingebedde rollen mee, met het aantal in de bevestiging. Er gaat
-  niets van schijf, en de toast noemt het pad dat blijft staan.
-- **Beheren** zit onderaan de balk (`✎ Agents`). Die lijst had geen eigen ingang —
-  de `＋` was de enige, en daarom vielen aanmaken en beheren samen.
-- Bij het aanmaken van een gewone agent zegt Taurus **vóór** het opslaan of er een
+- **Verwijderen** doet overal hetzelfde. Een proces verwijderen neemt de kaarten van
+  zijn ingebedde rollen mee, met het aantal in de bevestiging. Er gaat niets van
+  schijf, en de toast noemt het pad dat blijft staan.
+- Bij het aanmaken van een proces zegt Taurus **vóór** het opslaan of er een
   `CLAUDE.md` in de map staat. Ook als hij er wél is; dat zei de app nooit.
-
----
 
 ## 10. Een leesrol op iets anders richten
 
@@ -197,7 +221,7 @@ What was asked of this role, newest last. Written by Taurus.
 Kijk naar deze map en doe wat je hoort te doen: C:\Users\AST\claude\ontwikkelmap
 ```
 
-Onderaan de balk staat **≡ Opdrachten**. Dat leest de bestanden van al je rollen en
+De **≡** in de kop van de agentlijst opent het overzicht. Dat leest de bestanden van al je rollen en
 zet ze per rol op een rij, nieuwste bovenaan, met erbij of die rol staand is of in
 welk werkproces hij zit.
 

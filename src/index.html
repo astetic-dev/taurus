@@ -27,11 +27,12 @@
           <div class="sidebar-label dropzone-label" data-i18n="projects">Agents</div>
           <button id="hosts-btn" class="icon-btn sec-add" data-i18n-title="host_manage">🖥</button>
           <button id="attach-btn" class="icon-btn sec-add" data-i18n-title="attach_menu">⇱</button>
+          <button id="assign-btn" class="icon-btn sec-add" data-i18n-title="assign_title">≡</button>
           <button id="add-project-btn" class="icon-btn sec-add" data-i18n-title="new_project">＋</button>
         </div>
         <div id="project-list" class="project-list"></div>
 
-        <div id="record-widget" class="record-widget">
+        <div id="record-widget" class="record-widget hidden">
           <button id="record-btn" class="record-btn" type="button" data-i18n-title="rec_idle">
             <span class="rec-ring" aria-hidden="true"></span>
             <span class="rec-mic" aria-hidden="true">
@@ -93,18 +94,15 @@
           <div id="dropper-list" class="dropper-list"></div>
         </div>
 
-        <!-- Beheren is niet aanmaken (#157). De ＋ bovenaan maakt er één; deze
-             opent de lijst met alles wat je al hebt. Die lijst had hiervoor geen
-             eigen ingang -- de ＋ was de enige, en dat is precies het probleem. -->
-        <button id="manage-agents" class="foot-link" type="button" data-i18n="foot_projects">✎ Agents</button>
-        <button id="assign-btn" class="foot-link" type="button" data-i18n="foot_assign">≡ Opdrachten</button>
-        <div id="app-version" class="app-version"></div>
       </aside>
 
       <main class="panel">
         <div class="topbar">
           <div id="tabbar" class="tabbar"></div>
           <div class="top-controls">
+            <!-- De versie stond onderin de balk en nam daar ruimte af van de
+                 agents en processen; hier hoort hij bij de andere app-dingen. -->
+            <div id="app-version" class="app-version"></div>
             <button id="settings-btn" class="icon-btn" data-i18n-title="settings">⚙</button>
             <button id="reload-btn" class="icon-btn" data-i18n-title="reload">⟳</button>
           </div>
@@ -320,6 +318,10 @@
               <div class="hint" data-i18n="roles_hint">De rol is van Taurus, de invulling van de repo. Wissel de bron en je houdt dezelfde veldmap, dus je geschiedenis blijft op één plek.</div>
               <div id="role-rows" class="host-rows"></div>
             </div>
+            <div class="setting-group">
+              <h3 data-i18n="grp_processes">Processen</h3>
+              <button id="manage-agents" class="btn-ghost add" type="button" data-i18n="manage_projects">Processen beheren…</button>
+            </div>
           </div>
           <div class="spane" data-pane="network">
             <!-- Eerst het netwerk vertrouwen; pas daarna komt de rest vrij. -->
@@ -394,8 +396,13 @@
 
         <!-- Wat voor agent (#159). De zeven ICM-rollen staan hier naast "een map
              die je al hebt": de rol is van Taurus, de invulling van de repo. -->
+        <!-- Je installeert een ARCHITECT, niet een Jake: de rol is de titel en de
+             naam van de invulling staat eronder. Wissel je de bron, dan verandert
+             die naam en de titel niet. -->
         <div class="na-kindcap" data-i18n="na_kind">Wat voor agent?</div>
         <div id="na-kinds" class="na-kinds"></div>
+        <div class="na-kindcap na-second" data-i18n="na_process">Nieuw proces</div>
+        <div id="na-kinds2" class="na-kinds"></div>
 
         <!-- Rol of vrij adres: eerst waar hij werkt en waarover, dan de bron. Je
              weet eerst waarvoor je iets haalt, dan pas waarvandaan. -->

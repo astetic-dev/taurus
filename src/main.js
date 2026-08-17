@@ -165,12 +165,14 @@ const I18N = {
     recap_none: "(nog niets van deze agent te zien)", recap_exited: "afgesloten",
     c_mouse: "Agent mag de muis gebruiken (anders selecteert/scrolt de muis lokaal)",
     cancel: "Annuleer", save: "Opslaan",
-    manage_projects: "Agents beheren", add_agent: "＋ Agent toevoegen",
+    manage_projects: "Processen beheren…", add_agent: "＋ Agent toevoegen",
     // Nieuwe agent (#157) en bewerken/verwijderen (#158)
     new_agent_title: "Nieuwe agent", new_agent_create: "Maak agent",
     // De zeven ICM-rollen (#159)
-    na_kind: "Wat voor agent?", na_kind_plain: "Map die je al hebt",
-    na_kind_plain_sub: "gewone agent", na_kind_free: "Ander ICM-adres",
+    na_kind: "Wat voor agent?", na_process: "Nieuw proces",
+    na_kind_plain: "Map die je al hebt",
+    na_kind_plain_sub: "een werkproces", na_kind_free: "Ander ICM-adres",
+    group_processes: "Processen", grp_processes: "Processen",
     na_kind_free_sub: "specialist, geen rol",
     na_where: "Waar werkt hij?", na_standing: "Staand — eigen werkplek",
     na_embedded_in: "In: {label}",
@@ -489,12 +491,14 @@ const I18N = {
     recap_none: "(nothing from this agent yet)", recap_exited: "exited",
     c_mouse: "Let the agent use the mouse (otherwise the mouse selects/scrolls locally)",
     cancel: "Cancel", save: "Save",
-    manage_projects: "Manage agents", add_agent: "＋ Add agent",
+    manage_projects: "Manage processes…", add_agent: "＋ Add agent",
     // New agent (#157) and edit/delete (#158)
     new_agent_title: "New agent", new_agent_create: "Create agent",
     // The seven ICM roles (#159)
-    na_kind: "What kind of agent?", na_kind_plain: "A folder you have",
-    na_kind_plain_sub: "regular agent", na_kind_free: "Another ICM address",
+    na_kind: "What kind of agent?", na_process: "New process",
+    na_kind_plain: "A folder you have",
+    na_kind_plain_sub: "a work process", na_kind_free: "Another ICM address",
+    group_processes: "Processes", grp_processes: "Processes",
     na_kind_free_sub: "specialist, no role",
     na_where: "Where does it work?", na_standing: "Standing — its own workspace",
     na_embedded_in: "In: {label}",
@@ -1316,12 +1320,12 @@ function renderProjects() {
     if (seat === sepAfter) {
       const sep = document.createElement("div");
       sep.className = "project-sep";
+      sep.textContent = t("group_processes");
       els.list.appendChild(sep);
     }
     const card = document.createElement("div");
     card.className = "project-card" + (row.child ? " embedded" : "");
     card.dataset.idx = String(index);
-    card.style.borderLeftColor = p.accent || "#7c9cff";
     const loc = agentLocTag(p);
     card.innerHTML =
       `<div class="pc-label">${escapeHtml(p.label)} <span class="pc-drive ${loc.cls}" title="${escapeHtml(loc.title)}">${escapeHtml(loc.text)}</span></div>` +
@@ -4005,7 +4009,7 @@ async function openAssignments() {
     const head = document.createElement("div");
     head.className = "assign-role";
     head.innerHTML =
-      `<span class="role-dot" style="background:${escapeHtml(role ? role.accent : "#7c9cff")}"></span>` +
+      `<span class="role-ico" aria-hidden="true">${escapeHtml(role ? role.icon : "⬡")}</span>` +
       `<span>${escapeHtml(p.label)}</span>` +
       `<span class="assign-where">${escapeHtml(where)} · ${items.length}</span>`;
     els.assignBody.appendChild(head);
@@ -4477,14 +4481,17 @@ function uniqueId(label) {
 //
 // De volgorde is de vaste volgorde in de balk. Geen levenscyclus: elk vak gaat
 // open door zijn eigen vraag, en je hoeft ze niet allemaal te gebruiken.
+// `accent` is er nog voor de TAB -- daar onderscheidt kleur echt sessies. In de
+// linkerbalk en op de tegels wordt hij niet getoond: een lijst van twintig regels
+// wordt er niet mooier van, alleen onrustiger. `icon` doet daar het werk.
 const ROLES = [
-  { id: "architect",     name: "Jake",     field: "blueprints", accent: "#8b7cff", source: "https://github.com/RinDig/icm-architect" },
-  { id: "operator",      name: "Heimdall", field: "operations", accent: "#a04a4a", source: "https://github.com/astetic-dev/heimdall" },
-  { id: "cartographer",  name: "Cassini",  field: "mappings",   accent: "#0f6d7e", source: "https://github.com/astetic-dev/cassini-cartographer" },
-  { id: "diagnostician", name: "Mimir",    field: "diagnosis",  accent: "#c07a3e", source: "https://github.com/astetic-dev/mimir" },
-  { id: "editor",        name: "Forseti",  field: "editorials", accent: "#b5647c", source: "https://github.com/astetic-dev/forseti" },
-  { id: "researcher",    name: "Kvasir",   field: "research",   accent: "#4f8f5a", source: "https://github.com/astetic-dev/kvasir" },
-  { id: "coach",         name: "Vör",      field: "coaching",   accent: "#7f8fa6", source: "https://github.com/astetic-dev/vor" },
+  { id: "architect",     name: "Jake",     icon: "📐", field: "blueprints", accent: "#8b7cff", source: "https://github.com/RinDig/icm-architect" },
+  { id: "operator",      name: "Heimdall", icon: "🚦", field: "operations", accent: "#a04a4a", source: "https://github.com/astetic-dev/heimdall" },
+  { id: "cartographer",  name: "Cassini",  icon: "🗺", field: "mappings",   accent: "#0f6d7e", source: "https://github.com/astetic-dev/cassini-cartographer" },
+  { id: "diagnostician", name: "Mimir",    icon: "🩺", field: "diagnosis",  accent: "#c07a3e", source: "https://github.com/astetic-dev/mimir" },
+  { id: "editor",        name: "Forseti",  icon: "✒", field: "editorials", accent: "#b5647c", source: "https://github.com/astetic-dev/forseti" },
+  { id: "researcher",    name: "Kvasir",   icon: "🔎", field: "research",   accent: "#4f8f5a", source: "https://github.com/astetic-dev/kvasir" },
+  { id: "coach",         name: "Vör",      icon: "💬", field: "coaching",   accent: "#7f8fa6", source: "https://github.com/astetic-dev/vor" },
 ];
 function roleById(id) { return ROLES.find((r) => r.id === id) || null; }
 
@@ -4542,7 +4549,7 @@ function renderRoleRows() {
     const row = document.createElement("div");
     row.className = "role-row";
     row.innerHTML =
-      `<span class="role-dot" style="background:${escapeHtml(r.accent)}"></span>` +
+      `<span class="role-ico" aria-hidden="true">${escapeHtml(r.icon)}</span>` +
       `<span class="role-name">${escapeHtml(r.name)}<small>${escapeHtml(t("role_" + r.id))}</small></span>` +
       `<input class="role-src" type="text" placeholder="${escapeHtml(t("role_src_ph"))}" value="${escapeHtml(e.source || r.source || "")}" />` +
       `<label><input class="role-on" type="checkbox"${roleEnabled(r) ? " checked" : ""} /> ${escapeHtml(t("role_use"))}</label>` +
@@ -4613,9 +4620,15 @@ function naDestUnder(parent) {
   const embedded = !!els.naWhere.value;
   const subject = subjectSlug(els.naSubject.value);
   const field = role ? role.field : (naProbe && naProbe.name ? slugify(naProbe.name) : "agent");
-  if (embedded) return joinPath(parent, "_" + field, subject);
-  const leaf = naProbe && naProbe.name ? slugify(naProbe.name) : "agent";
-  return role ? joinPath(parent, role.name, field, subject) : joinPath(parent, leaf);
+  // Het VELD is de map, niet de naam van de invulling. Een map `Jakelueprints`
+  // zet je vast op Jake: wissel je de bron, dan klopt de mapnaam niet meer en
+  // staat je geschiedenis onder een naam die er niet meer is. En een extra laag
+  // waar alleen die ene agent in zit voegt niets toe.
+  //
+  // Het onderwerp blijft wel een eigen laag: twee instanties van dezelfde rol
+  // moeten naast elkaar kunnen staan, en zonder die laag zou de tweede IN de
+  // eerste komen -- een clone in een clone.
+  return joinPath(parent, (embedded ? "_" : "") + field, subject);
 }
 function naComputeDest() {
   const host = els.naWhere.value ? projects.find((p) => p.id === els.naWhere.value) : null;
@@ -4630,15 +4643,20 @@ function naRefreshDest() {
 }
 
 function renderNaKinds() {
-  const tile = (kind, title, sub, accent) =>
-    `<button type="button" class="na-kind${naKind === kind ? " on" : ""}" data-kind="${escapeHtml(kind)}"` +
-    (accent ? ` style="border-left-color:${escapeHtml(accent)}"` : "") +
-    `><span>${escapeHtml(title)}</span><span class="na-kind-sub">${escapeHtml(sub)}</span></button>`;
+  // Je installeert een ARCHITECT, niet een Jake. Dus de rol is de titel en de
+  // naam van de invulling staat eronder -- wissel je de bron, dan verandert die
+  // ondertitel en de titel niet.
+  const tile = (kind, icon, title, sub) =>
+    `<button type="button" class="na-kind${naKind === kind ? " on" : ""}" data-kind="${escapeHtml(kind)}">` +
+    `<span class="na-kind-ico" aria-hidden="true">${escapeHtml(icon)}</span>` +
+    `<span class="na-kind-title">${escapeHtml(title)}</span>` +
+    `<span class="na-kind-sub">${escapeHtml(sub)}</span></button>`;
   els.naKinds.innerHTML =
-    tile("plain", t("na_kind_plain"), t("na_kind_plain_sub"), "") +
-    enabledRoles().map((r) => tile(r.id, r.name, t("role_" + r.id), r.accent)).join("") +
-    tile("free", t("na_kind_free"), t("na_kind_free_sub"), "");
-  for (const b of els.naKinds.querySelectorAll(".na-kind")) {
+    enabledRoles().map((r) => tile(r.id, r.icon, t("role_" + r.id), r.name)).join("") +
+    tile("free", "⬡", t("na_kind_free"), t("na_kind_free_sub"));
+  // Een proces is geen agent: eigen lijst, eigen kopje. Dit was voorheen "project".
+  els.naKinds2.innerHTML = tile("plain", "📁", t("na_kind_plain"), t("na_kind_plain_sub"));
+  for (const b of [...els.naKinds.querySelectorAll(".na-kind"), ...els.naKinds2.querySelectorAll(".na-kind")]) {
     b.addEventListener("click", () => selectNaKind(b.dataset.kind));
   }
 }
@@ -5558,6 +5576,10 @@ async function refreshSttStatus() {
   let st = { engine: false, model: false, downloading: false };
   try { st = await invoke("stt_status"); } catch (_) {}
   const ok = st.engine && st.model;
+  // De dicteerknop alleen tonen als er ook echt gedicteerd kan worden. Stond hij
+  // er altijd, dan nam hij ruimte af van de agents en processen voor iets dat
+  // niets doet -- afwezig is eerlijker dan aanwezig-en-stil.
+  if (els.recordWidget) els.recordWidget.classList.toggle("hidden", !ok);
   els.sttState.textContent = st.downloading ? t("stt_downloading") : (ok ? t("stt_ready_lbl") : t("stt_missing_lbl"));
   els.sttState.className = "stt-state " + (ok ? "ok" : "miss");
   els.sttDownload.disabled = !!st.downloading || ok;
@@ -5710,6 +5732,7 @@ window.addEventListener("DOMContentLoaded", () => {
     naStatus: document.querySelector("#na-status"),
     naSave: document.querySelector("#na-save"),
     naKinds: document.querySelector("#na-kinds"),
+    naKinds2: document.querySelector("#na-kinds2"),
     naPlain: document.querySelector("#na-plain"),
     naRole: document.querySelector("#na-role"),
     naRoleHead: document.querySelector("#na-role-head"),
@@ -5949,6 +5972,9 @@ window.addEventListener("DOMContentLoaded", () => {
   // roles.json eerst: het Nieuwe-agent-scherm toont alleen rollen die je
   // gebruikt, en dat staat daar.
   loadRoles().then(loadProjects);
+  // Meteen kijken of dicteren kan; zo niet, dan blijft de mic-knop weg. Hij stond
+  // hiervoor altijd in de balk en werd pas bijgewerkt als je de instellingen opende.
+  refreshSttStatus();
   // Hosts eerst: het herstellen moet een opgeslagen host_id kunnen opzoeken.
   loadHosts().then(startupRestore);
   // Stond er nog een hand omhoog toen de app sloot? Dan hoort de balk er te
