@@ -41,6 +41,34 @@ struct Project {
     // is `path` een pad op DIE machine (#98).
     #[serde(default)]
     host_id: String,
+    // ---- special agents (#155) ----
+    // Waar deze map vandaan komt, als Taurus hem gekloond heeft. Geldt voor een
+    // rolwerkplek EN voor een specialist zonder rol: het verschil zit in `role`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin: Option<Origin>,
+    // Welke ICM-rol hier woont; leeg = een gewone agent of een specialist.
+    #[serde(default)]
+    role: String,
+    // De `id` van het werkproces waar deze agent IN woont (ingebed). Leeg =
+    // staat op zichzelf.
+    #[serde(default)]
+    parent: String,
+}
+
+// Herkomst van een gekloonde map. Alleen wat we nodig hebben om te weten of hij
+// achterloopt; wat er IN de map staat is zijn eigen bewijs.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default, PartialEq)]
+struct Origin {
+    // https-URL of een lokaal bronpad.
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    branch: String,
+    #[serde(default)]
+    sha: String,
+    // ISO-8601, gezet bij het uitrollen.
+    #[serde(default)]
+    installed: String,
 }
 
 // Lege defaults: een verse installatie start zonder projecten. De gebruiker
@@ -122,12 +150,138 @@ fn backup_invalid(p: &Path) {
     }
 }
 
+// Slug voor een `id` dat leeg is. Zelfde regel als slugify() in main.js, zodat
+// een id dat de frontend maakt en een id dat de backend maakt niet uiteenlopen.
+fn slugify_id(s: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in s.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            dash = false;
+        } else if !dash && !out.is_empty() {
+            out.push('-');
+            dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "project".into()
+    } else {
+        out
+    }
+}
+
+// Padvergelijking voor "ligt dit kind in de map van zijn gastheer". Windows is
+// hoofdletterongevoelig en mengt / en \, dus normaliseren voordat we vergelijken.
+fn norm_path_key(p: &str) -> String {
+    p.trim()
+        .trim_end_matches(['/', '\\'])
+        .replace('\\', "/")
+        .to_lowercase()
+}
+
+fn path_is_inside(child: &str, parent: &str) -> bool {
+    let (c, p) = (norm_path_key(child), norm_path_key(parent));
+    if p.is_empty() || c.is_empty() {
+        return false;
+    }
+    c.len() > p.len() && c.starts_with(&p) && c.as_bytes()[p.len()] == b'/'
+}
+
+// Repareer wat niet kan kloppen, en gooi nooit een agent weg (#155).
+//
+// BEWUST repareren in plaats van weigeren: `save_projects` schrijft de HELE
+// lijst, dus een weigering betekent dat een gebruiker met een oud bestand niets
+// meer kan opslaan. Een kapotte `parent` verliezen is te herstellen, je agents
+// niet kunnen bewaren niet. De teruggegeven regels zijn voor tests en logging.
+fn normalize_projects(mut list: Vec<Project>) -> (Vec<Project>, Vec<String>) {
+    let mut notes = Vec::new();
+
+    // 1. `id` uniek. Een leeg id krijgt een slug van het label; een dubbel id
+    //    krijgt een achtervoegsel. De EERSTE houdt zijn id, zodat bestaande
+    //    verwijzingen (sessies, tabs) blijven kloppen.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut renamed: std::collections::HashMap<usize, (String, String)> =
+        std::collections::HashMap::new();
+    for (i, p) in list.iter_mut().enumerate() {
+        if p.id.trim().is_empty() {
+            p.id = slugify_id(&p.label);
+        }
+        let base = p.id.trim().to_string();
+        if seen.insert(base.clone()) {
+            p.id = base;
+            continue;
+        }
+        let mut n = 2;
+        let mut candidate = format!("{}-{}", base, n);
+        while !seen.insert(candidate.clone()) {
+            n += 1;
+            candidate = format!("{}-{}", base, n);
+        }
+        notes.push(format!("dubbel id '{}' hernoemd naar '{}'", base, candidate));
+        renamed.insert(i, (base, candidate.clone()));
+        p.id = candidate;
+    }
+
+    // Een kind dat naar een hernoemd id wees, wijst nu nergens meer heen. We
+    // kunnen niet raden welke van de twee bedoeld was, dus dat wordt hieronder
+    // gewoon een losgemaakte parent -- zichtbaar, en niet stil verkeerd.
+    let _ = renamed;
+
+    // 2. `parent`: naar een bestaand id, niet naar jezelf, geen boom van meer
+    //    dan één niveau, zelfde machine, en het pad moet er echt onder liggen.
+    let index: std::collections::HashMap<String, (String, String, String)> = list
+        .iter()
+        .map(|p| {
+            (
+                p.id.clone(),
+                (p.parent.clone(), p.path.clone(), p.host_id.clone()),
+            )
+        })
+        .collect();
+    for p in list.iter_mut() {
+        let parent = p.parent.trim().to_string();
+        if parent.is_empty() {
+            p.parent = String::new();
+            continue;
+        }
+        let drop = |why: &str| format!("agent '{}': parent losgemaakt ({})", p.id, why);
+        let Some((grandparent, ppath, phost)) = index.get(&parent) else {
+            notes.push(drop("gastheer bestaat niet"));
+            p.parent = String::new();
+            continue;
+        };
+        if parent == p.id {
+            notes.push(drop("verwees naar zichzelf"));
+            p.parent = String::new();
+        } else if !grandparent.trim().is_empty() {
+            notes.push(drop("gastheer is zelf ingebed"));
+            p.parent = String::new();
+        } else if p.host_id.trim() != phost.trim() {
+            notes.push(drop("staat op een andere machine"));
+            p.parent = String::new();
+        } else if !path_is_inside(&p.path, ppath) {
+            notes.push(drop("pad ligt niet onder dat van de gastheer"));
+            p.parent = String::new();
+        } else {
+            p.parent = parent;
+        }
+    }
+    (list, notes)
+}
+
 #[tauri::command]
 fn get_projects() -> Vec<Project> {
     let p = ensure_config();
     if let Ok(txt) = std::fs::read_to_string(&p) {
         match serde_json::from_str::<Vec<Project>>(&txt) {
-            Ok(list) => return list,
+            // Ook bij LEZEN normaliseren: een bestand met dubbele id's bestaat
+            // in het wild, en dan moet de UI meteen met de gerepareerde lijst
+            // werken -- anders schrijft de eerstvolgende save er een van weg.
+            Ok(list) => return normalize_projects(list).0,
             Err(_) => backup_invalid(&p),
         }
     }
@@ -137,9 +291,581 @@ fn get_projects() -> Vec<Project> {
 #[tauri::command]
 fn save_projects(projects: Vec<Project>) -> Result<(), String> {
     let _ = std::fs::create_dir_all(config_dir());
+    let (projects, _notes) = normalize_projects(projects);
     let txt = serde_json::to_string_pretty(&projects).map_err(|e| e.to_string())?;
     std::fs::write(config_path(), txt).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ---------- rolinstallaties: waar een rol vandaan komt (#155) ----------
+//
+// Een eigen bestand naast projects.json/hosts.json/sessions.json, want een
+// rolinstallatie is geen project: hij hoort bij de MACHINE en niet bij een map.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+struct RoleInstall {
+    // architect | operator | cartographer | diagnostician | editor | researcher | coach
+    role: String,
+    // Op welke machine deze installatie slaat; leeg = deze computer.
+    #[serde(default)]
+    host_id: String,
+    // https-URL of een lokaal mappad. Leeg = deze rol heeft geen bron, en dan
+    // kan hij ook niet aangezet worden (#166).
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    branch: String,
+    // Ook installeren in ~/.claude/skills/icm-<rol>/ ? Een TOEVOEGING: een
+    // werkplek werkt zonder dat hier iets staat.
+    #[serde(default)]
+    as_skill: bool,
+    #[serde(default)]
+    skill_sha: String,
+    #[serde(default)]
+    enabled: bool,
+    // Sha waarvan de gebruiker "laat maar" zei, zodat dezelfde versie niet elke
+    // start opnieuw wordt aangeboden.
+    #[serde(default)]
+    skipped: String,
+}
+
+fn roles_path() -> std::path::PathBuf {
+    config_dir().join("roles.json")
+}
+
+// Geen bron = niet aan te zetten. Dat is de regel uit #166, en hij hoort hier
+// zodat een handgeschreven roles.json hem ook niet kan omzeilen.
+fn normalize_roles(mut list: Vec<RoleInstall>) -> Vec<RoleInstall> {
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    list.retain(|r| {
+        !r.role.trim().is_empty()
+            && seen.insert((r.role.trim().to_lowercase(), r.host_id.trim().to_string()))
+    });
+    for r in list.iter_mut() {
+        r.role = r.role.trim().to_lowercase();
+        r.source = r.source.trim().to_string();
+        if r.source.is_empty() {
+            r.enabled = false;
+        }
+    }
+    list
+}
+
+#[tauri::command]
+fn get_roles() -> Vec<RoleInstall> {
+    let p = roles_path();
+    if let Ok(txt) = std::fs::read_to_string(&p) {
+        match serde_json::from_str::<Vec<RoleInstall>>(&txt) {
+            Ok(list) => return normalize_roles(list),
+            Err(_) => backup_invalid(&p),
+        }
+    }
+    // Geen bestand = geen rollen geinstalleerd. Geen fout.
+    Vec::new()
+}
+
+#[tauri::command]
+fn save_roles(roles: Vec<RoleInstall>) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(config_dir());
+    let roles = normalize_roles(roles);
+    let txt = serde_json::to_string_pretty(&roles).map_err(|e| e.to_string())?;
+    std::fs::write(roles_path(), txt).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---------- #156: een bron verkennen en uitrollen ----------
+//
+// Uitrollen is `git clone`. Geen nieuwe dependency (git staat op PATH of niet,
+// en dan is de mogelijkheid AFWEZIG), de gebruiker houdt een echte repo over die
+// hij bezit, en de versiecheck is later een enkele `git ls-remote`.
+
+// Naar een clone-bare URL. Geaccepteerd: https://github.com/eigenaar/repo (met
+// of zonder .git) en het kale eigenaar/repo. Alles wat geen https + github.com
+// is wordt geweigerd; dezelfde lijn als de STT-downloads, want een willekeurig
+// adres binnenhalen en er een agent in laten draaien is precies het gat dat je
+// niet wilt.
+fn normalize_source(src: &str) -> Result<String, String> {
+    let s = src.trim().trim_end_matches('/');
+    if s.is_empty() {
+        return Err("Geen adres opgegeven.".into());
+    }
+    let s = s.strip_suffix(".git").unwrap_or(s);
+    if !s.contains("://") && !s.contains(char::is_whitespace) {
+        let parts: Vec<&str> = s.split('/').collect();
+        let ok_part =
+            |p: &&str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c));
+        if parts.len() == 2 && parts.iter().all(ok_part) {
+            return Ok(format!("https://github.com/{}/{}", parts[0], parts[1]));
+        }
+    }
+    let rest = s
+        .strip_prefix("https://")
+        .ok_or_else(|| format!("Alleen https-adressen: {}", src.trim()))?;
+    let host = rest.split('/').next().unwrap_or("");
+    if !host.eq_ignore_ascii_case("github.com") && !host.eq_ignore_ascii_case("www.github.com") {
+        return Err(format!("Alleen github.com: {}", src.trim()));
+    }
+    if rest.split('/').filter(|p| !p.is_empty()).count() < 3 {
+        return Err(format!("Geen eigenaar/repo in: {}", src.trim()));
+    }
+    Ok(s.to_string())
+}
+
+// "meeting-coach-miles" -> "Meeting Coach Miles". Laatste redmiddel voor een
+// naam, als de repo er zelf geen geeft.
+fn deslug(s: &str) -> String {
+    s.split(|c| c == '-' || c == '_' || c == ' ')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut cs = w.chars();
+            match cs.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + cs.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn repo_leaf(url: &str) -> String {
+    url.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("agent")
+        .to_string()
+}
+
+fn git_local(args: &[&str]) -> Result<(String, bool), String> {
+    let out = quiet_command("git")
+        .args(args)
+        .output()
+        .map_err(|e| format!("git starten mislukte: {}", e))?;
+    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
+    if s.trim().is_empty() {
+        s = String::from_utf8_lossy(&out.stderr).into_owned();
+    }
+    Ok((s, out.status.success()))
+}
+
+// Draai git op de machine die de doelmap bezit. Leeg host_id = deze computer.
+fn git_on(host_id: &str, args: &[&str]) -> Result<(String, bool), String> {
+    if host_id.trim().is_empty() {
+        return git_local(args);
+    }
+    let host = lookup_host(host_id)?
+        .ok_or_else(|| format!("Machine '{}' is niet bekend.", host_id))?;
+    // Argumenten quoten voor de remote shell. Paden bevatten spaties; de rest is
+    // van ons. LET OP: dit pad is NIET getest tegen een echte remote host.
+    let cmd = std::iter::once("git".to_string())
+        .chain(args.iter().map(|a| {
+            if a.contains(' ') {
+                format!("\"{}\"", a.replace('"', "\\\""))
+            } else {
+                a.to_string()
+            }
+        }))
+        .collect::<Vec<_>>()
+        .join(" ");
+    ssh_run(&host, &cmd)
+}
+
+// Is git beschikbaar op de machine waar de map komt te staan? Zo niet, dan is
+// de hele mogelijkheid AFWEZIG -- niet aanwezig met een waarschuwing erbij.
+#[tauri::command(async)]
+fn git_available(host_id: String) -> bool {
+    git_on(&host_id, &["--version"]).map(|(_, ok)| ok).unwrap_or(false)
+}
+
+#[derive(serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SourceProbe {
+    url: String,
+    name: String,
+    description: String,
+    // "skill" (SKILL.md in de wortel) | "workspace" (identity.md/rules.md) | "unknown"
+    shape: String,
+    branch: String,
+    sha: String,
+    date: String,
+    size_kb: u64,
+    has_claude_md: bool,
+    // De wortelbestanden die ertoe doen, zodat de UI kan tonen wat er ligt.
+    files: Vec<String>,
+}
+
+// Naam en omschrijving uit de gekloonde map halen. Volgorde: taurus.json (als
+// die er is), dan de eerste `# `-kop van README.md, dan de repo-naam ontsleufd.
+// GEEN GitHub-API: geen token, geen limiet van 60 verzoeken per uur, en een
+// mechanisme minder.
+fn read_repo_meta(dir: &Path, url: &str) -> (String, String) {
+    let mut name = String::new();
+    let mut desc = String::new();
+
+    // Een taurus.json die niet parst wordt genegeerd. Andermans repo mag de
+    // installatie niet kunnen breken door slechte JSON mee te sturen.
+    if let Ok(txt) = std::fs::read_to_string(dir.join("taurus.json")) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
+            let pick = |key: &str| -> String {
+                match v.get(key) {
+                    Some(serde_json::Value::String(s)) => s.clone(),
+                    Some(serde_json::Value::Object(o)) => o
+                        .get("en")
+                        .or_else(|| o.get("nl"))
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    _ => String::new(),
+                }
+            };
+            name = pick("name");
+            desc = pick("description");
+        }
+    }
+
+    if name.is_empty() || desc.is_empty() {
+        if let Ok(readme) = std::fs::read_to_string(dir.join("README.md")) {
+            let mut lines = readme.lines();
+            let heading = lines.find(|l| l.trim_start().starts_with("# "));
+            if let Some(h) = heading {
+                if name.is_empty() {
+                    let raw = h.trim_start().trim_start_matches("# ").trim();
+                    // "# Astrid - your project assistant" -> "Astrid"
+                    let cut = raw
+                        .find(" \u{2014} ")
+                        .or_else(|| raw.find(" - "))
+                        .or_else(|| raw.find(": "));
+                    name = match cut {
+                        Some(i) => raw[..i].trim().to_string(),
+                        None => raw.to_string(),
+                    };
+                }
+                if desc.is_empty() {
+                    // Eerste regel die op proza lijkt: geen HTML, geen badge,
+                    // geen kop. Astrid's README opent met <p align="center">.
+                    for l in lines {
+                        let s = l.trim();
+                        if s.is_empty()
+                            || s.starts_with('<')
+                            || s.starts_with('[')
+                            || s.starts_with('!')
+                            || s.starts_with('#')
+                            || s.starts_with('-')
+                            || s.starts_with('>')
+                            || s.starts_with("---")
+                        {
+                            continue;
+                        }
+                        let plain = s.replace("**", "").replace('*', "").replace('`', "");
+                        let one = match plain.find(". ") {
+                            Some(i) => plain[..=i].trim().to_string(),
+                            None => plain.trim().to_string(),
+                        };
+                        desc = one;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if name.trim().is_empty() {
+        name = deslug(&repo_leaf(url));
+    }
+    (name, desc)
+}
+
+fn dir_size_excluding_git(dir: &Path) -> u64 {
+    let mut total = 0;
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.file_name().map(|n| n == ".git").unwrap_or(false) {
+            continue;
+        }
+        if p.is_dir() {
+            total += dir_size_excluding_git(&p);
+        } else if let Ok(m) = e.metadata() {
+            total += m.len();
+        }
+    }
+    total
+}
+
+fn probe_temp_dir(url: &str) -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("taurus-special")
+        .join(slugify_id(url))
+}
+
+// Eerst lezen, dan pas iets vragen: klonen naar een wegwerpmap en daar kijken
+// wat het is. De wegwerpclone gaat meteen weer weg; uitrollen kloont opnieuw
+// naar de map die de gebruiker kiest.
+#[tauri::command(async)]
+fn git_probe(source: String) -> Result<SourceProbe, String> {
+    let url = normalize_source(&source)?;
+    let tmp = probe_temp_dir(&url);
+    let _ = std::fs::remove_dir_all(&tmp);
+    if let Some(parent) = tmp.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp_s = tmp.to_string_lossy().into_owned();
+    let (out, ok) = git_local(&["clone", "--quiet", &url, &tmp_s])?;
+    if !ok {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(format!("Ophalen mislukte: {}", out.trim()));
+    }
+
+    let mut p = SourceProbe {
+        url: url.clone(),
+        ..Default::default()
+    };
+    let g = |args: &[&str]| -> String {
+        git_local(args).map(|(s, ok)| if ok { s.trim().to_string() } else { String::new() }).unwrap_or_default()
+    };
+    p.branch = g(&["-C", &tmp_s, "rev-parse", "--abbrev-ref", "HEAD"]);
+    p.sha = g(&["-C", &tmp_s, "rev-parse", "HEAD"]);
+    p.date = g(&["-C", &tmp_s, "log", "-1", "--format=%cI"]);
+    p.size_kb = dir_size_excluding_git(&tmp) / 1024;
+
+    if let Ok(rd) = std::fs::read_dir(&tmp) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n == ".git" {
+                continue;
+            }
+            p.files.push(n);
+        }
+        p.files.sort();
+    }
+    let has = |n: &str| p.files.iter().any(|f| f.eq_ignore_ascii_case(n));
+    p.has_claude_md = has("CLAUDE.md");
+    p.shape = if has("SKILL.md") {
+        "skill".into()
+    } else if has("identity.md") || has("rules.md") {
+        "workspace".into()
+    } else {
+        "unknown".into()
+    };
+    let (name, desc) = read_repo_meta(&tmp, &url);
+    p.name = name;
+    p.description = desc;
+
+    let _ = std::fs::remove_dir_all(&tmp);
+    Ok(p)
+}
+
+#[derive(serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DeployReport {
+    dest: String,
+    branch: String,
+    sha: String,
+    // Alles wat er geschreven is, relatief aan `dest`.
+    paths: Vec<String>,
+    // "written" = Taurus schreef er een; "kept" = de repo had er al een.
+    claude_md: String,
+    skill_path: String,
+    notes: Vec<String>,
+}
+
+// De CLAUDE.md die Taurus schrijft als de repo er zelf geen heeft. Engels, want
+// elk bestand waar hij naar wijst is Engels, en hij reist mee in de git van de
+// gebruiker. ASCII-only: dit bestand gaat bij een remote host door een shell.
+fn generated_claude_md(
+    name: &str,
+    role: &str,
+    field: &str,
+    url: &str,
+    branch: &str,
+    sha: &str,
+    files: &[String],
+    host_note: &str,
+) -> String {
+    let short = if sha.len() > 7 { &sha[..7] } else { sha };
+    let mut s = format!("# {}\n\n", name);
+    if role.trim().is_empty() {
+        s.push_str(&format!(
+            "This folder is an ICM work process, deployed by Taurus from\n{} ({} @ {}).\n\nRead before you act:\n\n",
+            url, branch, short
+        ));
+    } else {
+        s.push_str(&format!(
+            "This is the workspace of the {} role, deployed by Taurus from\n{} ({} @ {}).\n\nEverything you need is here -- no installed skill is required:\n\n",
+            name, url, branch, short
+        ));
+    }
+    let line = |file: &str, what: &str, s: &mut String| {
+        if files.iter().any(|f| f.eq_ignore_ascii_case(file)) {
+            s.push_str(&format!("- {:<14} {}\n", file, what));
+        }
+    };
+    line("SKILL.md", "the method", &mut s);
+    line("identity.md", "who you are here", &mut s);
+    line("rules.md", "how you work", &mut s);
+    line("examples.md", "worked sessions", &mut s);
+    line("onboarding.md", "the first-session interview", &mut s);
+    line("references", "the reference material", &mut s);
+    line("reference", "the reference material", &mut s);
+    if !field.trim().is_empty() {
+        s.push_str(&format!(
+            "\nWork produced here goes in `{}`, one folder per assignment.\nRecord in each new one which version of this folder produced it.\n",
+            field.trim()
+        ));
+    }
+    if !host_note.trim().is_empty() {
+        s.push_str(&format!("\n{}\n", host_note.trim()));
+    }
+    s.push_str(
+        "\nWhat is already here was made under an earlier version and is not\nrevised. A newer version applies to what is asked next.\n\nThis file was generated by Taurus. The repository did not ship one.\nEdit it freely; Taurus will not rewrite it.\n",
+    );
+    s
+}
+
+// De map van de gebruiker in ~/.claude/skills/. Optioneel, en nooit een
+// voorwaarde: laag 1 (de werkplek) draagt het gewicht.
+fn skill_dest(role: &str) -> String {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    std::path::PathBuf::from(home)
+        .join(".claude")
+        .join("skills")
+        .join(format!("icm-{}", role.trim().to_lowercase()))
+        .to_string_lossy()
+        .into_owned()
+}
+
+// Klonen naar de map die de gebruiker koos, op de machine die die map bezit.
+//
+// Nooit samenvoegen: git weigert zelf een clone in een bestaande niet-lege map,
+// en dat is precies de bewaking die we willen -- hij werkt op elke machine
+// hetzelfde en is niet te omzeilen door een race tussen controle en clone.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+fn git_deploy(
+    source: String,
+    dest: String,
+    host_id: String,
+    role: String,
+    field: String,
+    as_skill: bool,
+) -> Result<DeployReport, String> {
+    let url = normalize_source(&source)?;
+    let dest = dest.trim().to_string();
+    if dest.is_empty() {
+        return Err("Geen doelmap opgegeven.".into());
+    }
+    let local = host_id.trim().is_empty();
+
+    if local {
+        let p = Path::new(&dest);
+        if p.exists() && std::fs::read_dir(p).map(|mut d| d.next().is_some()).unwrap_or(false) {
+            return Err(format!("Deze map bestaat al en is niet leeg: {}", dest));
+        }
+    }
+
+    let (out, ok) = git_on(&host_id, &["clone", "--quiet", &url, &dest])?;
+    if !ok {
+        return Err(format!("Uitrollen mislukte: {}", out.trim()));
+    }
+
+    let mut rep = DeployReport {
+        dest: dest.clone(),
+        ..Default::default()
+    };
+    let g = |args: &[&str]| -> String {
+        git_on(&host_id, args)
+            .map(|(s, ok)| if ok { s.trim().to_string() } else { String::new() })
+            .unwrap_or_default()
+    };
+    rep.branch = g(&["-C", &dest, "rev-parse", "--abbrev-ref", "HEAD"]);
+    rep.sha = g(&["-C", &dest, "rev-parse", "HEAD"]);
+
+    // Wat er nu staat, uit git zelf: dat werkt lokaal en op afstand hetzelfde,
+    // en het is precies de lijst die de clone heeft neergezet.
+    let listing = g(&["-C", &dest, "ls-files"]);
+    let mut files: Vec<String> = listing.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+    let roots: Vec<String> = files
+        .iter()
+        .map(|f| f.split('/').next().unwrap_or(f).to_string())
+        .collect();
+
+    // CLAUDE.md alleen schrijven als de repo er zelf geen heeft. Een van de
+    // bestaande repo's levert er wel een; die blijft ongemoeid.
+    let has_claude = files.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md"));
+    if has_claude {
+        rep.claude_md = "kept".into();
+    } else {
+        let (name, _) = if local {
+            read_repo_meta(Path::new(&dest), &url)
+        } else {
+            (deslug(&repo_leaf(&url)), String::new())
+        };
+        let body = generated_claude_md(&name, &role, &field, &url, &rep.branch, &rep.sha, &roots, "");
+        if local {
+            std::fs::write(Path::new(&dest).join("CLAUDE.md"), &body)
+                .map_err(|e| format!("CLAUDE.md schrijven mislukte: {}", e))?;
+            rep.claude_md = "written".into();
+            files.push("CLAUDE.md".into());
+        } else {
+            // Via base64, zodat er geen quote van de inhoud door een vreemde
+            // shell hoeft. NIET GETEST tegen een echte remote host.
+            match lookup_host(&host_id)? {
+                Some(h) => {
+                    let enc = b64(body.as_bytes());
+                    let cmd = if effective_os(&h) == "windows" {
+                        format!(
+                            "powershell -NoProfile -Command \"[IO.File]::WriteAllBytes('{}\\CLAUDE.md', [Convert]::FromBase64String('{}'))\"",
+                            dest.replace('\'', "''"),
+                            enc
+                        )
+                    } else {
+                        format!("printf %s '{}' | base64 -d > '{}/CLAUDE.md'", enc, dest)
+                    };
+                    let (o, ok) = ssh_run(&h, &cmd)?;
+                    if ok {
+                        rep.claude_md = "written".into();
+                        files.push("CLAUDE.md".into());
+                    } else {
+                        rep.claude_md = "failed".into();
+                        rep.notes.push(format!("CLAUDE.md schrijven op {} mislukte: {}", h.hostname, o.trim()));
+                    }
+                }
+                None => rep.claude_md = "failed".into(),
+            }
+        }
+    }
+
+    files.sort();
+    // Elk geschreven pad noemen. Bij een grote repo is de volledige lijst
+    // onleesbaar, dus dan het aantal erbij -- maar nooit stil afkappen.
+    const MAX: usize = 200;
+    if files.len() > MAX {
+        rep.notes.push(format!("{} bestanden geschreven; de eerste {} staan hieronder", files.len(), MAX));
+        files.truncate(MAX);
+    }
+    rep.paths = files;
+
+    // Laag 2: dezelfde repo ook in ~/.claude/skills/. Een toevoeging; als dit
+    // faalt is de werkplek nog steeds compleet, en dat zegt het rapport ook.
+    if as_skill && !role.trim().is_empty() {
+        let sp = skill_dest(&role);
+        let exists = if local { Path::new(&sp).exists() } else { false };
+        if exists {
+            rep.notes.push(format!("skill stond er al: {}", sp));
+            rep.skill_path = sp;
+        } else {
+            let (o, ok) = git_on(&host_id, &["clone", "--quiet", &url, &sp])?;
+            if ok {
+                rep.skill_path = sp;
+            } else {
+                rep.notes.push(format!("skill installeren mislukte ({}); de werkplek werkt zonder: {}", sp, o.trim()));
+            }
+        }
+    }
+
+    Ok(rep)
 }
 
 // ---------- machines: een machine is geen route (#124) ----------
@@ -5503,6 +6229,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_projects,
             save_projects,
+            get_roles,
+            save_roles,
+            git_available,
+            git_probe,
+            git_deploy,
             get_hosts,
             machines,
             remote_agents,
@@ -7296,5 +8027,203 @@ mod tests {
         );
         // Een agent zonder list-commando hoort netjes te falen i.p.v. te spawnen.
         assert!(list_agent_models("claude".to_string()).is_err());
+    }
+
+    // ---------- special agents (#155, #156) ----------
+
+    fn proj(id: &str, label: &str, path: &str) -> Project {
+        Project {
+            id: id.into(),
+            label: label.into(),
+            path: path.into(),
+            title: String::new(),
+            task: String::new(),
+            accent: String::new(),
+            mode: String::new(),
+            command: String::new(),
+            agent: String::new(),
+            model: String::new(),
+            host_id: String::new(),
+            origin: None,
+            role: String::new(),
+            parent: String::new(),
+        }
+    }
+
+    // De belangrijkste test van #155. Een echte projects.json bevat twee
+    // entries met hetzelfde id; de eerste houdt het zijne, de tweede wijkt uit,
+    // en er mag er GEEN verdwijnen. default_projects() geeft een lege Vec bij
+    // een parsefout, dus een mislukte migratie ziet er precies zo uit als "al je
+    // agents zijn weg" -- vandaar dat dit expliciet getest wordt.
+    #[test]
+    fn duplicate_ids_are_renamed_and_nothing_is_lost() {
+        let list = vec![
+            proj("astrid", "Porter", "C:\\claude\\porter"),
+            proj("astrid", "ASTRID", "C:\\claude\\projecten"),
+            proj("astrid", "Derde", "C:\\claude\\derde"),
+        ];
+        let (out, notes) = normalize_projects(list);
+        assert_eq!(out.len(), 3, "een agent kwijtgeraakt");
+        assert_eq!(out[0].id, "astrid", "de eerste houdt zijn id");
+        assert_eq!(out[1].id, "astrid-2");
+        assert_eq!(out[2].id, "astrid-3");
+        assert_eq!(notes.len(), 2);
+        assert_eq!(out.iter().map(|p| p.label.clone()).collect::<Vec<_>>(), vec!["Porter", "ASTRID", "Derde"]);
+    }
+
+    #[test]
+    fn an_empty_id_is_slugged_from_the_label() {
+        let (out, _) = normalize_projects(vec![proj("", "NEXUS AI dev", "C:\\x")]);
+        assert_eq!(out[0].id, "nexus-ai-dev");
+        let (out, _) = normalize_projects(vec![proj("", "!!!", "C:\\x")]);
+        assert_eq!(out[0].id, "project");
+    }
+
+    // Een bestaand bestand zonder de nieuwe velden moet ongewijzigd laden.
+    #[test]
+    fn an_old_projects_json_still_parses() {
+        let txt = r##"[{"id":"a","label":"A","path":"C:\\a","title":"","task":"","accent":"#fff","mode":"default","command":"","agent":"claude","model":"","host_id":""}]"##;
+        let list: Vec<Project> = serde_json::from_str(txt).expect("oude vorm parst niet meer");
+        assert_eq!(list.len(), 1);
+        assert!(list[0].origin.is_none());
+        assert!(list[0].role.is_empty());
+        assert!(list[0].parent.is_empty());
+        // En rondzingen mag geen velden bijverzinnen die er niet in horen.
+        let back = serde_json::to_string(&list).unwrap();
+        assert!(!back.contains("origin"), "origin hoort weggelaten te worden als hij leeg is");
+    }
+
+    #[test]
+    fn a_child_must_really_live_inside_its_host() {
+        let mut child = proj("diag", "Diagnose", "C:\\claude\\Ordersflow\\_diagnosis\\10mb");
+        child.parent = "flow".into();
+        let (out, _) = normalize_projects(vec![proj("flow", "Ordersflow", "C:\\claude\\Ordersflow"), child]);
+        assert_eq!(out[1].parent, "flow", "een echt kind hoort te blijven hangen");
+
+        // Zelfde namen, maar het pad ligt er niet onder.
+        let mut stray = proj("diag", "Diagnose", "C:\\ergens\\anders");
+        stray.parent = "flow".into();
+        let (out, notes) = normalize_projects(vec![proj("flow", "Ordersflow", "C:\\claude\\Ordersflow"), stray]);
+        assert_eq!(out[1].parent, "", "pad ligt er niet onder, dus losmaken");
+        assert!(notes.iter().any(|n| n.contains("pad")));
+    }
+
+    #[test]
+    fn parent_rules_reject_what_they_should() {
+        // Naar een gastheer die niet bestaat.
+        let mut orphan = proj("a", "A", "C:\\x\\a");
+        orphan.parent = "weg".into();
+        assert_eq!(normalize_projects(vec![orphan]).0[0].parent, "");
+
+        // Naar zichzelf.
+        let mut self_ref = proj("a", "A", "C:\\x\\a");
+        self_ref.parent = "a".into();
+        assert_eq!(normalize_projects(vec![self_ref]).0[0].parent, "");
+
+        // Twee niveaus diep: een kind van een kind mag niet.
+        let mut mid = proj("mid", "Mid", "C:\\x\\mid");
+        mid.parent = "top".into();
+        let mut leaf = proj("leaf", "Leaf", "C:\\x\\mid\\leaf");
+        leaf.parent = "mid".into();
+        let (out, _) = normalize_projects(vec![proj("top", "Top", "C:\\x"), mid, leaf]);
+        assert_eq!(out[1].parent, "top");
+        assert_eq!(out[2].parent, "", "een kind van een kind hoort losgemaakt te worden");
+
+        // Op een andere machine: dan is "ingebed" een woord zonder dekking.
+        let mut remote = proj("r", "R", "C:\\x\\r");
+        remote.parent = "top".into();
+        remote.host_id = "ursu".into();
+        let (out, _) = normalize_projects(vec![proj("top", "Top", "C:\\x"), remote]);
+        assert_eq!(out[1].parent, "");
+    }
+
+    // Meerdere instanties van dezelfde rol in hetzelfde werkproces is normaal
+    // (#159) en mag dus NIET weggeregeld worden.
+    #[test]
+    fn several_agents_of_the_same_role_under_one_host_are_fine() {
+        let host = proj("flow", "Ordersflow", "C:\\x\\flow");
+        let mut a = proj("coach-meetings", "Coach - meetings", "C:\\x\\flow\\_coaching\\meetings");
+        a.parent = "flow".into();
+        a.role = "coach".into();
+        let mut b = proj("coach-pm", "Coach - pm", "C:\\x\\flow\\_coaching\\projectmanagement");
+        b.parent = "flow".into();
+        b.role = "coach".into();
+        let (out, notes) = normalize_projects(vec![host, a, b]);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[1].parent, "flow");
+        assert_eq!(out[2].parent, "flow");
+        assert!(notes.is_empty(), "onverwachte reparaties: {:?}", notes);
+    }
+
+    #[test]
+    fn path_inside_is_not_fooled_by_a_shared_prefix() {
+        assert!(path_is_inside("C:\\a\\b", "C:\\a"));
+        assert!(path_is_inside("C:/a/b/c", "C:\\a"));
+        assert!(!path_is_inside("C:\\ab", "C:\\a"), "ab ligt niet in a");
+        assert!(!path_is_inside("C:\\a", "C:\\a"), "zichzelf is niet 'erin'");
+        assert!(!path_is_inside("C:\\a", ""));
+    }
+
+    // Geen bron = niet aan te zetten (#166). Ook niet met een handgeschreven
+    // roles.json, want deze regel staat in de backend.
+    #[test]
+    fn a_role_without_a_source_cannot_be_enabled() {
+        let roles = vec![
+            RoleInstall { role: "coach".into(), enabled: true, ..Default::default() },
+            RoleInstall { role: "architect".into(), source: "https://github.com/RinDig/icm-architect".into(), enabled: true, ..Default::default() },
+            // Dubbele regel voor dezelfde rol op dezelfde machine: de eerste wint.
+            RoleInstall { role: "architect".into(), source: "https://github.com/other/x".into(), enabled: true, ..Default::default() },
+            RoleInstall { role: "  ".into(), ..Default::default() },
+        ];
+        let out = normalize_roles(roles);
+        assert_eq!(out.len(), 2);
+        assert!(!out[0].enabled, "zonder bron hoort enabled uit te staan");
+        assert!(out[1].enabled);
+        assert!(out[1].source.contains("icm-architect"));
+    }
+
+    #[test]
+    fn sources_are_normalized_or_refused() {
+        assert_eq!(normalize_source("RinDig/icm-architect").unwrap(), "https://github.com/RinDig/icm-architect");
+        assert_eq!(normalize_source("https://github.com/a/b.git").unwrap(), "https://github.com/a/b");
+        assert_eq!(normalize_source(" https://github.com/a/b/ ").unwrap(), "https://github.com/a/b");
+        // Alleen https, alleen github: een willekeurig adres binnenhalen en er
+        // een agent in laten draaien is het gat dat we niet willen.
+        assert!(normalize_source("http://github.com/a/b").is_err());
+        assert!(normalize_source("https://evil.example/a/b").is_err());
+        assert!(normalize_source("https://github.com/a").is_err());
+        assert!(normalize_source("").is_err());
+    }
+
+    #[test]
+    fn deslug_makes_a_readable_name() {
+        assert_eq!(deslug("meeting-coach-miles"), "Meeting Coach Miles");
+        assert_eq!(deslug("icm_architect"), "Icm Architect");
+        assert_eq!(repo_leaf("https://github.com/a/porter-intake-operator"), "porter-intake-operator");
+    }
+
+    // De gegenereerde CLAUDE.md mag alleen bestanden noemen die er echt zijn,
+    // en moet zeggen dat er geen skill nodig is -- dat is de regel waar het hele
+    // ontwerp op leunt.
+    #[test]
+    fn the_generated_claude_md_only_names_files_that_exist() {
+        let files = vec!["identity.md".to_string(), "rules.md".to_string(), "reference".to_string()];
+        let md = generated_claude_md("Cartograaf", "cartographer", "mappings/", "https://github.com/a/b", "main", "b20fb45063a5", &files, "");
+        assert!(md.contains("identity.md"));
+        assert!(md.contains("rules.md"));
+        assert!(!md.contains("SKILL.md"), "noemt een bestand dat er niet is");
+        assert!(!md.contains("examples.md"));
+        assert!(md.contains("b20fb45"), "de korte sha hoort erin");
+        assert!(md.contains("mappings/"));
+        assert!(md.contains("no installed skill is required"));
+        assert!(md.is_ascii(), "gaat door een shell bij een remote host");
+    }
+
+    #[test]
+    fn a_specialist_without_a_role_gets_a_different_opening_line() {
+        let files = vec!["identity.md".to_string()];
+        let md = generated_claude_md("Astrid", "", "", "https://github.com/astetic-dev/astrid", "main", "7f3a91c", &files, "");
+        assert!(md.contains("This folder is an ICM work process"));
+        assert!(!md.contains("no installed skill is required"));
     }
 }
