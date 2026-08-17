@@ -204,6 +204,12 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .na-probe .na-pv { min-width: 0; overflow-wrap: anywhere; }
 .na-probe .na-plead { margin-bottom: 6px; }
 .na-probe .na-plead b { font-size: 13px; }
+/* Afsluitbevestiging (#168): per sessie een regel, titel links en waar hij
+   draait rechts, zodat de twee groepen op één blik te scannen zijn. */
+.exit-list { margin: 4px 0 12px; }
+.exit-row { display: flex; gap: 10px; align-items: baseline; padding: 3px 0 3px 14px; font-size: 12px; }
+.exit-row .exit-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exit-row .exit-where { color: var(--text-dim); font-size: 11px; }
 
 /* ---- Tabbalk ---- */
 .tabbar {

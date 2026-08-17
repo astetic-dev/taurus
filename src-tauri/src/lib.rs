@@ -2938,6 +2938,15 @@ struct AppState {
     // opsteekt wijst naar één agent, en twee handen tegelijk is geen vraag maar
     // ruis op het netwerk.
     asking: Mutex<Option<HelpRequest>>,
+    // Mag het venster dicht? Afsluiten vraagt eerst de UI om bevestiging (#168);
+    // deze vlag laat de TWEEDE CloseRequested -- die na "Afsluiten" -- er wel
+    // door. Zonder vlag zou de vraag zich eeuwig herhalen.
+    exit_ok: std::sync::atomic::AtomicBool,
+    // We hebben het gevraagd en wachten op antwoord. De UI zet dit meteen uit
+    // (`exit_ack`) als teken dat hij leeft; blijft het staan, dan sluit de
+    // wachthond het venster alsnog. Zie de wachthond hieronder voor waarom
+    // `emit` alleen niet genoeg is.
+    exit_pending: std::sync::atomic::AtomicBool,
 }
 
 // Start een claude-proces in een ConPTY en registreer de sessie onder `id`.
@@ -4268,6 +4277,41 @@ fn stop_session_command(host: &Host, session: &str) -> Result<String, String> {
 // Een sessie op een andere machine beëindigen. Zonder dit is een verweesde sessie --
 // eentje waarvan de agent weg is -- alleen op te ruimen door naar die machine toe te
 // lopen, terwijl Taurus hem wel toont en er een oude `--resume` in laat mislukken.
+// "Afsluiten" in de bevestiging (#168). Zet de vlag en vraag het venster opnieuw
+// te sluiten; dan loopt precies hetzelfde pad als altijd -- inclusief
+// kill_all_sessions -- in plaats van een tweede afsluitroute die naast de eerste
+// uit de pas kan gaan lopen.
+#[tauri::command]
+fn exit_now(app: AppHandle, window: tauri::Window) -> Result<(), String> {
+    use tauri::Manager;
+    let st = app.state::<AppState>();
+    st.exit_pending
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    st.exit_ok.store(true, std::sync::atomic::Ordering::SeqCst);
+    window.close().map_err(|e| e.to_string())
+}
+
+// "Ik leef en ik heb de vraag gezien." Zet de wachthond af, zodat een gebruiker
+// die de bevestiging laat staan niet na tien seconden overvallen wordt.
+#[tauri::command]
+fn exit_ack(app: AppHandle) {
+    use tauri::Manager;
+    app.state::<AppState>()
+        .exit_pending
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+// Een sessie stoppen die Taurus zelf startte. De muxnaam volgt uit (host,
+// werkmap) en die regel hoort in de backend te blijven staan -- de frontend moet
+// hem niet nabouwen, want dan lopen ze bij de eerste wijziging uit de pas.
+#[tauri::command(async)]
+fn stop_remote_session_at(host_id: String, path: String) -> Result<(), String> {
+    let host = lookup_host(&host_id)?
+        .ok_or_else(|| "Een sessie stoppen kan alleen op een andere machine.".to_string())?;
+    let name = mux_session_name(&host.id, &path);
+    stop_remote_session(host_id, name)
+}
+
 #[tauri::command]
 fn stop_remote_session(host_id: String, session: String) -> Result<(), String> {
     let host = lookup_host(&host_id)?
@@ -6353,6 +6397,8 @@ pub fn run() {
             ssh: std::sync::Arc::new(sshhost::HostState::default()),
             discovery: std::sync::Arc::new(discovery::Discovery::default()),
             asking: Mutex::new(None),
+            exit_ok: std::sync::atomic::AtomicBool::new(false),
+            exit_pending: std::sync::atomic::AtomicBool::new(false),
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -6410,9 +6456,40 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            use tauri::Manager;
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                kill_all_sessions(window.app_handle());
+            use std::sync::atomic::Ordering;
+            use tauri::{Emitter, Manager};
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let state = app.state::<AppState>();
+                // Nog niet bevestigd: vraag het de UI en houd het venster open.
+                if !state.exit_ok.load(Ordering::SeqCst)
+                    && window.emit("exit-requested", ()).is_ok()
+                {
+                    api.prevent_close();
+                    state.exit_pending.store(true, Ordering::SeqCst);
+
+                    // WACHTHOND. `emit` slaagt ook als er niemand luistert -- het
+                    // levert af bij de webview, niet bij een handler. Een frontend
+                    // die nog laadt of gecrasht is zou dus een venster achterlaten
+                    // dat niet meer dicht kan, en niet kunnen afsluiten is erger
+                    // dan niet gevraagd worden. De UI zet `exit_pending` meteen uit
+                    // (exit_ack) als teken dat hij leeft; blijft het staan, dan
+                    // sluiten we alsnog.
+                    let w = window.clone();
+                    let app2 = app.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(10));
+                        let st = app2.state::<AppState>();
+                        if st.exit_pending.load(Ordering::SeqCst)
+                            && !st.exit_ok.load(Ordering::SeqCst)
+                        {
+                            st.exit_ok.store(true, Ordering::SeqCst);
+                            let _ = w.close();
+                        }
+                    });
+                    return;
+                }
+                kill_all_sessions(app);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -6425,6 +6502,9 @@ pub fn run() {
             git_deploy,
             check_sources,
             update_workspace,
+            exit_now,
+            exit_ack,
+            stop_remote_session_at,
             get_hosts,
             machines,
             remote_agents,
