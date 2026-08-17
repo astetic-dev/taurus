@@ -4547,6 +4547,11 @@ let naDraft = null;
 // Staat het filterveld open? Los van "er staat iets in": met iets erin blijft het
 // staan, want anders verlies je je filter door de knop per ongeluk aan te tikken.
 let procFilterOpen = false;
+function toggleProcFilter() {
+  procFilterOpen = !procFilterOpen;
+  els.procFilter.classList.toggle("hidden", !procFilterOpen && !els.procFilter.value.trim());
+  if (procFilterOpen) els.procFilter.focus();
+}
 
 // Padvergelijking voor "staat hier al een agent". Windows is
 // hoofdletterongevoelig en mengt / en \, dus normaliseren voor we vergelijken.
@@ -5696,6 +5701,37 @@ async function refreshSttStatus() {
 // Een niet-afgevangen fout maakte hiervoor stilletjes knoppen dood: gooit iets in
 // het bedradingsblok, dan wordt alles daarna niet meer aangesloten en doet de helft
 // van de balk niets, zonder één melding. Nu zie je het.
+// De knoppen in de sectiekoppen via DELEGATIE, niet met een eigen listener per
+// knop in het bedradingsblok. Reden: ≡ deed niets terwijl ⇱ het wel deed en er geen
+// fout kwam -- de enige verklaring die overbleef was dat die ene regel in dat blok
+// niet werd uitgevoerd. Met delegatie op document-niveau, geregistreerd bij het
+// laden van de module, kan de volgorde in dat blok er niet meer aan komen.
+//
+// Eén plek, en elke knop die hier niet in staat valt op: dan gebeurt er niets EN
+// hoor je het.
+const SIDEBAR_ACTIONS = {
+  "assign-btn": () => openAssignments(),
+  "add-project-btn": () => openNewAgent(),
+  "add-process-btn": () => { openNewAgent(); selectNaKind("plain"); },
+  "attach-btn": () => openAttachModal(),
+  "hosts-btn": () => openHostModal(),
+  "proc-find": () => toggleProcFilter(),
+};
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[id]");
+  if (!btn) return;
+  const fn = SIDEBAR_ACTIONS[btn.id];
+  if (!fn) return;
+  e.preventDefault();
+  try {
+    fn();
+  } catch (err) {
+    // Nooit stil: een knop die niets doet is altijd de fout.
+    console.error(btn.id + " failed:", err);
+    toast("✗ " + btn.id + ": " + String((err && err.message) || err), "err");
+  }
+});
+
 window.addEventListener("error", (e) => {
   try { toast("✗ " + (e.message || "javascriptfout") + (e.filename ? ` (${String(e.lineno)})` : ""), "err"); } catch (_) {}
 });
@@ -5894,13 +5930,11 @@ window.addEventListener("DOMContentLoaded", () => {
     clearTimeout(mvPathTimer);
     mvPathTimer = setTimeout(refreshMoveSurvey, 600);
   });
-  document.querySelector("#hosts-btn").addEventListener("click", openHostModal);
   document.querySelector("#editor-hosts").addEventListener("click", openHostModal);
   document.querySelector("#host-add").addEventListener("click", openHostForm);
   document.querySelector("#hf-cancel").addEventListener("click", () => els.hfForm.classList.add("hidden"));
   document.querySelector("#hf-test").addEventListener("click", addAndTestHost);
   document.querySelector("#host-close").addEventListener("click", closeHostModal);
-  els.attachBtn.addEventListener("click", openAttachModal);
   els.atRefresh.addEventListener("click", () => { loadLocalHistory(); loadRemoteSessions(); });
   els.atCancel.addEventListener("click", () => els.attachModal.classList.add("hidden"));
   // Sleutelkiezer via het bestaande pick_file-command: de dialog-plugin is niet
@@ -5925,13 +5959,6 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   // De ＋ maakt een agent; beheren zit onder de voettekst (#157).
-  document.querySelector("#add-project-btn").addEventListener("click", openNewAgent);
-  // Zelfde scherm, maar meteen op "een map die je al hebt": vanuit de
-  // processenkop wil je een proces, niet eerst nog een soort kiezen.
-  document.querySelector("#add-process-btn").addEventListener("click", () => {
-    openNewAgent();
-    selectNaKind("plain");
-  });
   els.naHost.addEventListener("change", () => { naDraft.host_id = els.naHost.value; renderNewAgentHost(); naCheckPath(); });
   els.naBrowse.addEventListener("click", async () => {
     let dir = null;
@@ -6056,7 +6083,6 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#editor-save").addEventListener("click", saveEditor);
   document.querySelector("#editor-add").addEventListener("click", () => { editRows.push(blankRow()); renderEditor(); });
   document.querySelector("#manage-agents").addEventListener("click", () => openEditor(null));
-  document.querySelector("#assign-btn").addEventListener("click", openAssignments);
   // Inklappen per sectie, onthouden tussen starts: als je twintig processen hebt
   // wil je de agents kunnen wegklappen, en omgekeerd.
   const fold = (btn, box, key) => {
@@ -6071,11 +6097,6 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   fold(document.querySelector("#agents-fold"), els.agentList, "agentsFolded");
   fold(document.querySelector("#proc-fold"), els.procList, "procFolded");
-  document.querySelector("#proc-find").addEventListener("click", () => {
-    procFilterOpen = !procFilterOpen;
-    els.procFilter.classList.toggle("hidden", !procFilterOpen && !els.procFilter.value.trim());
-    if (procFilterOpen) els.procFilter.focus();
-  });
   els.procFilter.addEventListener("input", renderProjects);
   document.querySelector("#assign-close").addEventListener("click", () => els.assignModal.classList.add("hidden"));
   // Annuleren is niets doen: de backend heeft het sluiten al tegengehouden.
@@ -6111,6 +6132,14 @@ window.addEventListener("DOMContentLoaded", () => {
   // titel toe, en dan zou een testexemplaar er ongemarkeerd bij staan.
   markTestInstance();
   renderTabs();
+  // Zelftest: staan de knoppen en schermen die we verwachten er ook echt? Een
+  // ontbrekend element leverde hiervoor een knop op die niets deed, zonder één
+  // melding -- en dat kost een avond zoeken.
+  {
+    const need = [...Object.keys(SIDEBAR_ACTIONS), "assign-modal", "assign-body", "newagent-modal", "exit-modal", "update-modal", "agent-list", "process-list"];
+    const missing = need.filter((id) => !document.getElementById(id));
+    if (missing.length) toast("✗ ontbreekt in de UI: " + missing.join(", "), "err");
+  }
   // roles.json eerst: het Nieuwe-agent-scherm toont alleen rollen die je
   // gebruikt, en dat staat daar.
   loadRoles().then(loadProjects);
