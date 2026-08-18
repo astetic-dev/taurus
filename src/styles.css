@@ -80,6 +80,9 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .agent-list { flex: 0 1 auto; max-height: 34vh; }
 .project-list:empty { display: none; }
 .project-list.folded { display: none; }
+/* Ingeklapte dropzone: weg, maar hij komt terug zodra je met een bestand
+   aankomt -- anders is er niets om op te mikken. */
+.file-dropper.folded { display: none; }
 /* Filter op de processen (#42). Verschijnt op de ⌕ en blijft staan zolang er iets
    in staat -- anders verlies je je filter door hem per ongeluk dicht te klikken. */
 .proc-filter {

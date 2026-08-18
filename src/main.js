@@ -3,7 +3,7 @@ const { invoke } = window.__TAURI__.core;
 // buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
 // was twee avonden lang de onbekende. Zie je hier een ander nummer dan
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
-const UI_BUILD = "ui-2";
+const UI_BUILD = "ui-3";
 const { listen } = window.__TAURI__.event;
 
 /* ============ i18n ============ */
@@ -1033,7 +1033,7 @@ const DEFAULT_SETTINGS = {
   persistMode: "ask",
   persistSessions: true,
   // Ingeklapte secties in de balk.
-  agentsFolded: false, procFolded: false,
+  agentsFolded: false, procFolded: false, dropFolded: false,
   // Afsluiten vraagt om bevestiging zolang er iets draait (#168).
   confirmExit: true,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
@@ -5526,11 +5526,12 @@ function wireFileDropper() {
     zoneEls.forEach((el) => el.classList.remove("hot"));
   }
 
-  listen("tauri://drag-enter", (e) => highlight(modeAt(e.payload && e.payload.position)));
+  listen("tauri://drag-enter", (e) => { dropzoneWake(); highlight(modeAt(e.payload && e.payload.position)); });
   listen("tauri://drag-over", (e) => highlight(modeAt(e.payload && e.payload.position)));
-  listen("tauri://drag-leave", cool);
+  listen("tauri://drag-leave", () => { cool(); dropzoneSleep(false); });
   listen("tauri://drag-drop", async (e) => {
     cool();
+    dropzoneSleep(true);
     const mode = modeAt(e.payload && e.payload.position);
     if (!mode) return; // buiten de dropper: negeren
     const paths = (e.payload && e.payload.paths) || [];
@@ -5769,7 +5770,53 @@ async function refreshSttStatus() {
 //
 // Eén plek, en elke knop die hier niet in staat valt op: dan gebeurt er niets EN
 // hoor je het.
+// De inklapbare secties: knop-id -> welk blok en onder welke instelling het
+// onthouden wordt. Eén tabel, zodat er geen derde plek bijkomt waar dit half staat.
+const FOLDS = {
+  "agents-fold": { box: () => els.agentList, key: "agentsFolded" },
+  "proc-fold": { box: () => els.procList, key: "procFolded" },
+  "drop-fold": { box: () => els.dropper, key: "dropFolded" },
+};
+// Auto-uitgeklapt tijdens een sleep: dan hoort hij daarna weer dicht, tenzij je
+// echt iets hebt laten vallen -- dan wil je zien wat er landde.
+let dropAutoOpen = false;
+function applyFold(id) {
+  const f = FOLDS[id];
+  const box = f && f.box();
+  const btn = document.getElementById(id);
+  if (!box || !btn) return;
+  const shut = settings[f.key] === true;
+  box.classList.toggle("folded", shut);
+  btn.textContent = shut ? "+" : "\u2212";
+  btn.title = t(shut ? "fold_show" : "fold_hide");
+}
+function toggleFold(id) {
+  const f = FOLDS[id];
+  if (!f) return;
+  settings[f.key] = settings[f.key] !== true;
+  saveSettings();
+  applyFold(id);
+}
+// Iemand komt met een bestand aan: klap de dropzone open, want een ingeklapte
+// dropzone is geen doel. Alleen als hij dicht stond, en dan onthouden we dat.
+function dropzoneWake() {
+  if (settings.dropFolded !== true || dropAutoOpen) return;
+  dropAutoOpen = true;
+  els.dropper.classList.remove("folded");
+}
+// Slepen afgebroken zonder te droppen: terug zoals het stond. Wel gedropt, dan
+// blijft hij open -- je wilt zien wat er landde.
+function dropzoneSleep(dropped) {
+  if (!dropAutoOpen) return;
+  dropAutoOpen = false;
+  if (dropped) { settings.dropFolded = false; saveSettings(); applyFold("drop-fold"); return; }
+  els.dropper.classList.add("folded");
+}
+
 const SIDEBAR_ACTIONS = {
+  "agents-fold": () => toggleFold("agents-fold"),
+  "proc-fold": () => toggleFold("proc-fold"),
+  "drop-fold": () => toggleFold("drop-fold"),
   "assign-btn": () => openAssignments(),
   "add-project-btn": () => openNewAgent(),
   "add-process-btn": () => { openNewAgent(); selectNaKind("plain"); },
@@ -5804,6 +5851,7 @@ window.addEventListener("DOMContentLoaded", () => {
     agentList: document.querySelector("#agent-list"),
     procList: document.querySelector("#process-list"),
     procFilter: document.querySelector("#proc-filter"),
+    dropper: document.querySelector("#file-dropper"),
     tabbar: document.querySelector("#tabbar"),
     launchView: document.querySelector("#launch-view"),
     terminals: document.querySelector("#terminals"),
@@ -6145,18 +6193,7 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#manage-agents").addEventListener("click", () => openEditor(null));
   // Inklappen per sectie, onthouden tussen starts: als je twintig processen hebt
   // wil je de agents kunnen wegklappen, en omgekeerd.
-  const fold = (btn, box, key) => {
-    const apply = () => {
-      const shut = settings[key] === true;
-      box.classList.toggle("folded", shut);
-      btn.textContent = shut ? "+" : "−";
-      btn.title = t(shut ? "fold_show" : "fold_hide");
-    };
-    btn.addEventListener("click", () => { settings[key] = settings[key] !== true; saveSettings(); apply(); });
-    apply();
-  };
-  fold(document.querySelector("#agents-fold"), els.agentList, "agentsFolded");
-  fold(document.querySelector("#proc-fold"), els.procList, "procFolded");
+  for (const id of Object.keys(FOLDS)) applyFold(id);
   els.procFilter.addEventListener("input", renderProjects);
   document.querySelector("#assign-close").addEventListener("click", () => els.assignModal.classList.add("hidden"));
   // Annuleren is niets doen: de backend heeft het sluiten al tegengehouden.
