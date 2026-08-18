@@ -3,7 +3,7 @@ const { invoke } = window.__TAURI__.core;
 // buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
 // was twee avonden lang de onbekende. Zie je hier een ander nummer dan
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
-const UI_BUILD = "ui-1";
+const UI_BUILD = "ui-2";
 const { listen } = window.__TAURI__.event;
 
 /* ============ i18n ============ */
@@ -226,6 +226,7 @@ const I18N = {
     assign_failed: "kon niet gelezen worden: {err}",
     assign_go_role: "Ga naar deze agent", assign_go_btn: "ga naar",
     assign_open_folder: "Open deze map",
+    assign_more: "+ {n} ouder — staan in _assignments.md in die map",
     assign_reuse: "Zet deze opdracht terug in het taakveld", assign_reuse_btn: "opnieuw vragen",
     assign_in: "in {label}", assign_standing: "staand",
     assign_count: "{n}",
@@ -560,6 +561,7 @@ const I18N = {
     assign_failed: "could not be read: {err}",
     assign_go_role: "Go to this agent", assign_go_btn: "go to",
     assign_open_folder: "Open this folder",
+    assign_more: "+ {n} older — they are in _assignments.md in that folder",
     assign_reuse: "Put this assignment back in the task field", assign_reuse_btn: "ask again",
     assign_in: "in {label}", assign_standing: "standing",
     assign_count: "{n}",
@@ -4143,7 +4145,14 @@ async function renderAssignments() {
     }
     // Nieuwste bovenaan in het overzicht; in het bestand blijft het chronologisch,
     // want dat leest een mens van boven naar beneden mee met de map.
-    for (const a of [...items].reverse()) {
+    //
+    // En begrensd: een rol die je een jaar gebruikt heeft honderden opdrachten, en
+    // dan is dit geen overzicht meer maar een muur. Het bestand is de waarheid en
+    // dat staat één klik verderop (📂), dus hier alleen de laatste paar. Nooit
+    // stil afkappen: eronder staat hoeveel er niet in beeld zijn.
+    const CAP = 8;
+    const shown = items.slice(-CAP);
+    for (const a of [...shown].reverse()) {
       const row = document.createElement("div");
       row.className = "assign-item";
       row.innerHTML =
@@ -4160,6 +4169,14 @@ async function renderAssignments() {
         els.taskInput.focus();
       });
       box.appendChild(row);
+    }
+    if (items.length > CAP) {
+      const more = document.createElement("div");
+      more.className = "assign-item assign-more";
+      more.innerHTML =
+        `<span class="assign-when"></span>` +
+        `<span class="assign-task">${escapeHtml(t("assign_more").replace("{n}", items.length - CAP))}</span>`;
+      box.appendChild(more);
     }
   });
 

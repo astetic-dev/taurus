@@ -213,6 +213,7 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .assign-path { display: flex; align-items: center; gap: 6px; }
 .assign-item { align-items: center; }
 .assign-item .assign-task { flex: 1; }
+.assign-more .assign-task { color: var(--text-dim); font-size: 11px; font-style: italic; }
 .role-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
 .role-row .role-ico { width: 18px; flex: none; text-align: center; opacity: .85; }
 .role-row .role-name { width: 96px; flex: none; }
