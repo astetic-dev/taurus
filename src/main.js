@@ -3,7 +3,7 @@ const { invoke } = window.__TAURI__.core;
 // buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
 // was twee avonden lang de onbekende. Zie je hier een ander nummer dan
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
-const UI_BUILD = "ui-4";
+const UI_BUILD = "ui-5";
 const { listen } = window.__TAURI__.event;
 
 /* ============ i18n ============ */
@@ -6294,7 +6294,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const d = built ? new Date(built * 1000) : null;
     const p = (n) => String(n).padStart(2, "0");
     const stamp = d ? `${p(d.getDate())}-${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}` : "";
-    els.appVersion.textContent = (stamp ? `v${v} · ${stamp}` : "v" + v) + ` · ${UI_BUILD}`;
+    // Geen buildmoment betekent: dit is een release. Dan alleen het nummer -- de
+    // tijd en de ui-markering zijn er om te weten welke tussenbuild je voor je hebt.
+    els.appVersion.textContent = stamp ? `v${v} · ${stamp} · ${UI_BUILD}` : `v${v}`;
     els.appVersion.title = d ? t("build_of").replace("{when}", d.toLocaleString()) : "";
   });
 });
