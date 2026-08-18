@@ -3,7 +3,7 @@ const { invoke } = window.__TAURI__.core;
 // buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
 // was twee avonden lang de onbekende. Zie je hier een ander nummer dan
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
-const UI_BUILD = "ui-3";
+const UI_BUILD = "ui-4";
 const { listen } = window.__TAURI__.event;
 
 /* ============ i18n ============ */
@@ -208,6 +208,7 @@ const I18N = {
     up_dirty: "✗ Je hebt in deze map zelf iets gewijzigd. Bijwerken zou dat overschrijven, dus dat doet Taurus niet.",
     up_diverged: "✗ Deze map loopt uit de pas met de bron. Taurus werkt alleen bij als het een simpele vooruitspoeling is.",
     up_avail: "nieuwe versie beschikbaar",
+    up_found: "↑ {name}: er is een nieuwere versie van de bron — klik het pijltje op de kaart",
     // Instellingen -> Agents (#166)
     tab_agents: "Agents", grp_roles: "Rollen",
     roles_hint: "De rol is van Taurus, de invulling van de repo. Wissel de bron en je houdt dezelfde veldmap, dus je geschiedenis blijft op één plek.",
@@ -543,6 +544,7 @@ const I18N = {
     up_dirty: "✗ You changed something in this folder yourself. Updating would overwrite it, so Taurus does not.",
     up_diverged: "✗ This folder has diverged from its source. Taurus only updates when it is a plain fast-forward.",
     up_avail: "newer version available",
+    up_found: "↑ {name}: the source has a newer version — click the arrow on the card",
     // Settings -> Agents (#166)
     tab_agents: "Agents", grp_roles: "Roles",
     roles_hint: "The role belongs to Taurus, the implementation to the repository. Swap the source and you keep the same field folder, so your history stays in one place.",
@@ -1247,6 +1249,24 @@ async function checkSources() {
     sourceHeads = new Map(Object.entries(heads));
     renderProjects();
   } catch (_) { /* offline is een normale toestand */ }
+}
+
+// Eén bron nakijken in plaats van alle. Bedoeld voor het moment waarop het je
+// aangaat: je opent die agent. De check bij het opstarten blijft ook bestaan, maar
+// die mist alles wat er tijdens je werkdag gepusht wordt.
+//
+// Nooit blokkerend en nooit vóór het starten: de sessie gaat voor, de melding komt
+// erachteraan. Mislukt de check -- offline, repo weg -- dan gebeurt er niets.
+async function checkSourceOf(p) {
+  const src = p && p.origin && p.origin.source;
+  if (!src) return;
+  try {
+    const heads = await invoke("check_sources", { sources: [src] });
+    for (const [k, v] of Object.entries(heads)) sourceHeads.set(k, v);
+  } catch (_) { return; }
+  renderProjects();
+  const fresh = projects.find((x) => x.id === p.id) || p;
+  if (updateFor(fresh)) toast(t("up_found").replace("{name}", fresh.label), "ok");
 }
 
 let upTarget = null;
@@ -3270,6 +3290,9 @@ async function startSession() {
     if (selected.role && !hostId && task.trim()) {
       invoke("record_assignment", { path, task, when: assignStamp() }).catch(() => {});
     }
+    // En kijken of de bron van deze agent verder is dan wat hier staat. Nu, want
+    // dit is het moment waarop je er iets aan wilt doen.
+    checkSourceOf(selected);
     recordSession(session);
     showView(id);
     persistSessionsToDisk();
