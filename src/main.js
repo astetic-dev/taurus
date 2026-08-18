@@ -1,4 +1,9 @@
 const { invoke } = window.__TAURI__.core;
+// Vingerafdruk van DEZE main.js, zichtbaar rechtsboven achter de versie. De
+// buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
+// was twee avonden lang de onbekende. Zie je hier een ander nummer dan
+// verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
+const UI_BUILD = "ui-1";
 const { listen } = window.__TAURI__.event;
 
 /* ============ i18n ============ */
@@ -219,6 +224,9 @@ const I18N = {
     assign_no_roles: "Nog geen rollen uitgerold. Rol er een uit met ＋ en start hem met een taak.",
     assign_none_role: "nog niets gevraagd",
     assign_failed: "kon niet gelezen worden: {err}",
+    assign_go_role: "Ga naar deze agent", assign_go_btn: "ga naar",
+    assign_open_folder: "Open deze map",
+    assign_reuse: "Zet deze opdracht terug in het taakveld", assign_reuse_btn: "opnieuw vragen",
     assign_in: "in {label}", assign_standing: "staand",
     assign_count: "{n}",
     role_architect: "Architect", role_architect_q: "Ik wil een nieuw proces maken.",
@@ -550,6 +558,9 @@ const I18N = {
     assign_no_roles: "No roles deployed yet. Deploy one with ＋ and start it with a task.",
     assign_none_role: "nothing asked yet",
     assign_failed: "could not be read: {err}",
+    assign_go_role: "Go to this agent", assign_go_btn: "go to",
+    assign_open_folder: "Open this folder",
+    assign_reuse: "Put this assignment back in the task field", assign_reuse_btn: "ask again",
     assign_in: "in {label}", assign_standing: "standing",
     assign_count: "{n}",
     role_architect: "Architect", role_architect_q: "I want to build a new process.",
@@ -4082,11 +4093,33 @@ async function renderAssignments() {
       `<span class="role-ico" aria-hidden="true">${escapeHtml(role ? role.icon : "\u2b21")}</span>` +
       `<span>${escapeHtml(p.label)}</span>` +
       `<span class="assign-where">${escapeHtml(where)} \u00b7 ${items.length}</span>`;
+    // Echte knoppen, geen klikbare regels: dat er iets te doen valt moet je ZIEN.
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "assign-go";
+    go.textContent = t("assign_go_btn");
+    go.title = t("assign_go_role");
+    go.addEventListener("click", () => {
+      els.assignModal.classList.add("hidden");
+      selectById(p.id);
+    });
+    head.appendChild(go);
     // Het pad erbij: dan weet je waar `_assignments.md` staat en kun je er zelf in
     // kijken. Het overzicht is een gemak, het bestand is de waarheid.
     const path = document.createElement("div");
     path.className = "assign-path";
-    path.textContent = p.path;
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "assign-open";
+    openBtn.textContent = "\u{1F4C2}";
+    openBtn.title = t("assign_open_folder");
+    openBtn.addEventListener("click", () => {
+      invoke("open_folder", { path: p.path }).catch((e) => toast("\u2717 " + e, "err"));
+    });
+    const pathText = document.createElement("span");
+    pathText.textContent = p.path;
+    path.appendChild(openBtn);
+    path.appendChild(pathText);
     box.appendChild(head);
     box.appendChild(path);
 
@@ -4115,7 +4148,17 @@ async function renderAssignments() {
       row.className = "assign-item";
       row.innerHTML =
         `<span class="assign-when">${escapeHtml(a.when)}</span>` +
-        `<span class="assign-task">${escapeHtml(a.task)}</span>`;
+        `<span class="assign-task">${escapeHtml(a.task)}</span>` +
+        `<button class="assign-again" type="button">${escapeHtml(t("assign_reuse_btn"))}</button>`;
+      const again = row.querySelector(".assign-again");
+      again.title = t("assign_reuse");
+      again.addEventListener("click", () => {
+        els.assignModal.classList.add("hidden");
+        selectById(p.id);
+        // Wel invullen, niet starten: je ziet nog wat je gaat vragen.
+        els.taskInput.value = a.task;
+        els.taskInput.focus();
+      });
       box.appendChild(row);
     }
   });
@@ -6174,7 +6217,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const d = built ? new Date(built * 1000) : null;
     const p = (n) => String(n).padStart(2, "0");
     const stamp = d ? `${p(d.getDate())}-${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}` : "";
-    els.appVersion.textContent = stamp ? `v${v} · ${stamp}` : "v" + v;
+    els.appVersion.textContent = (stamp ? `v${v} · ${stamp}` : "v" + v) + ` · ${UI_BUILD}`;
     els.appVersion.title = d ? t("build_of").replace("{when}", d.toLocaleString()) : "";
   });
 });
