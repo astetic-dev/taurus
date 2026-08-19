@@ -1,8 +1,8 @@
 # Taurus — Agent Launcher
 
-[![Taurus — Agent Launcher (click to watch the features tour)](media/hero-features.png)](https://www.youtube.com/watch?v=TAyZlhlvigw)
+[![Taurus — Agent Launcher (click to watch the special agents film)](media/hero-special-agents.png)](https://youtu.be/18_NHe7I2oA)
 
-<sub>▶ Click the image to watch the **features tour** on YouTube.</sub>
+<sub>▶ Click the image to watch the **special agents** film on YouTube.</sub>
 
 A small Tauri desktop app that runs and manages multiple **Claude Code** agents as
 **terminal tabs in one window** — with voice, a file DROPZONE and an inline
