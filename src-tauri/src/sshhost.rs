@@ -1483,6 +1483,19 @@ pub fn start(app: AppHandle, state: Arc<HostState>, port: u16) -> Result<(), Str
     let (tx, rx) = std::sync::mpsc::channel();
     let app2 = app.clone();
     let state2 = state.clone();
+    // 0.0.0.0 en niet het adres van de vertrouwde adapter: BEKEND en bewust
+    // gelaten (#181). De poort gaat alleen open als er een vertrouwd netwerk is,
+    // maar hij luistert dan op alle interfaces -- op een laptop die tegelijk aan
+    // ethernet en aan een hotspot hangt dus ook op die hotspot. Niemand komt er
+    // ongevraagd in (een onbekende sleutel loopt langs de pairing-popup), maar de
+    // banner `SSH-2.0-Taurus_<versie>` gaat wel naar wie de poort kan bereiken.
+    //
+    // Waarom het geen eenregelige fix is: trusted_ipv4() geeft maar het EERSTE
+    // vertrouwde adres, dus met twee vertrouwde adapters is er een listener per
+    // adres nodig, en een DHCP-wissel verandert het adres onder een gebonden
+    // socket -- dan moet watch_network ook op adreswissel herbinden en niet
+    // alleen op vertrouwd/niet-vertrouwd. Op te pakken wanneer de listener om een
+    // andere reden toch open ligt.
     tauri::async_runtime::spawn(async move {
         let socket = match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
             Ok(s) => s,
