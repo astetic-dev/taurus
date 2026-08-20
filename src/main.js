@@ -1107,7 +1107,12 @@ function tidySelection(text) {
   while (lines.length && !lines[lines.length - 1]) lines.pop();
   if (!lines.length) return "";
   const indent = lines.reduce((m, l) => (l.trim() ? Math.min(m, l.match(/^ */)[0].length) : m), Infinity);
-  return (indent > 0 && indent < Infinity ? lines.map((l) => l.slice(indent)) : lines).join(eol);
+  const dedent = indent > 0 && indent < Infinity ? indent : 0;
+  const out = (dedent ? lines.map((l) => l.slice(dedent)) : lines).join(eol);
+  // Alleen maten in het log, nooit inhoud -- net als de rest van clipboard.log.
+  // Hiermee zie je bij een rare plakactie meteen of het opschonen iets deed.
+  if (out.length !== text.length) dbg(`trim ${text.length}->${out.length} regels=${lines.length} inspringing=${dedent}`);
+  return out;
 }
 function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
