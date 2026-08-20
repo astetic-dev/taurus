@@ -644,19 +644,44 @@ fn git_on(host_id: &str, args: &[&str]) -> Result<(String, bool), String> {
     }
     let host = lookup_host(host_id)?
         .ok_or_else(|| format!("Machine '{}' is niet bekend.", host_id))?;
-    // Argumenten quoten voor de remote shell. Paden bevatten spaties; de rest is
-    // van ons. LET OP: dit pad is NIET getest tegen een echte remote host.
-    let cmd = std::iter::once("git".to_string())
-        .chain(args.iter().map(|a| {
-            if a.contains(' ') {
-                format!("\"{}\"", a.replace('"', "\\\""))
-            } else {
-                a.to_string()
-            }
-        }))
-        .collect::<Vec<_>>()
-        .join(" ");
-    ssh_run(&host, &cmd)
+    ssh_run(&host, &remote_git_cmd(effective_os(&host), args))
+}
+
+// De git-regel voor de shell van de HOST. LET OP: dit pad is nog steeds niet
+// getest tegen een echte remote host.
+//
+// Dit quoot ALTIJD, niet alleen als er een spatie in zit. Dat laatste stond er
+// eerst, en dan is een pad of URL met `;`, `|`, `$(...)`, een backtick of `&`
+// geen argument meer maar een tweede commando op andermans machine. Geen
+// theorie: `dest` komt uit een tekstveld, en `normalize_source` laat
+// `https://github.com/a/b$(...)` er gewoon door -- geen spatie, dus geen quotes.
+// Een kaart die door een agent is aangemaakt levert diezelfde tekst aan.
+//
+// POSIX: de helper die er al is. Windows: als base64-payload voor PowerShell,
+// net als elke andere Windows-opdracht hier (zie de mkdir in scp_to_host). De
+// regel die de buitenste shell van sshd ziet bevat dan niets dan
+// [A-Za-z0-9+/=] en er is niets om uit te breken. cmd.exe zelf heeft geen
+// bruikbare manier om een dubbele quote in een waarde te escapen, dus daar
+// beginnen we niet aan.
+// `os` is de UITKOMST van effective_os: een WSL-route is een POSIX-shell, ook al
+// staat de machine als windows in hosts.json.
+fn remote_git_cmd(os: &str, args: &[&str]) -> String {
+    if os == "windows" {
+        // $LASTEXITCODE eerst op 127: bestaat git daar niet, dan schrijft
+        // PowerShell een fout en blijft de variabele staan waar hij stond. Zonder
+        // die 127 zou `exit $LASTEXITCODE` dan 0 teruggeven -- en dan meldt
+        // git_available dat git aanwezig is op een machine zonder git.
+        let ps = format!(
+            "$LASTEXITCODE = 127; git {}; exit $LASTEXITCODE",
+            args.iter().map(|a| ps_quote(a)).collect::<Vec<_>>().join(" ")
+        );
+        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
+    } else {
+        format!(
+            "git {}",
+            args.iter().map(|a| shell_quote_posix(a)).collect::<Vec<_>>().join(" ")
+        )
+    }
 }
 
 // Is git beschikbaar op de machine waar de map komt te staan? Zo niet, dan is
@@ -1106,13 +1131,26 @@ fn git_deploy(
                 Some(h) => {
                     let enc = b64(body.as_bytes());
                     let cmd = if effective_os(&h) == "windows" {
-                        format!(
-                            "powershell -NoProfile -Command \"[IO.File]::WriteAllBytes('{}\\CLAUDE.md', [Convert]::FromBase64String('{}'))\"",
-                            dest.replace('\'', "''"),
-                            enc
-                        )
+                        // Alles in de base64-payload, ook het PAD. Het zat eerst
+                        // in een `-Command "..."` en dan ligt er nog een laag
+                        // cmd.exe-parsing over: een map met een dubbele quote in
+                        // de naam sloot die string af. Nu ziet de buitenste shell
+                        // alleen base64.
+                        let ps = format!(
+                            "[IO.File]::WriteAllBytes((Join-Path {} 'CLAUDE.md'), [Convert]::FromBase64String({}))",
+                            ps_quote(&dest),
+                            ps_quote(&enc)
+                        );
+                        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
                     } else {
-                        format!("printf %s '{}' | base64 -d > '{}/CLAUDE.md'", enc, dest)
+                        // Het pad stond hier rauw tussen enkele quotes: een dest
+                        // met een quote erin brak eruit en de rest van de regel
+                        // werd een commando op de host.
+                        format!(
+                            "printf %s {} | base64 -d > {}",
+                            shell_quote_posix(&enc),
+                            shell_quote_posix(&format!("{}/CLAUDE.md", dest))
+                        )
                     };
                     let (o, ok) = ssh_run(&h, &cmd)?;
                     if ok {
@@ -6661,10 +6699,18 @@ fn ssh_peer_set(
             p.blocked = b;
             if b {
                 p.auto_allow = false;
+                p.auto_full = false;
             }
         }
         if let Some(a) = auto_allow {
             p.auto_allow = a;
+            // Het onthouden antwoord bewaart ook HOEVEEL macht er verleend was
+            // (#126). Neem je "niet meer vragen" weg, dan hoort die helft mee te
+            // verdwijnen -- anders staat er een macht klaar voor een vraag die
+            // weer gesteld gaat worden.
+            if !a {
+                p.auto_full = false;
+            }
         }
     }
     sshhost::write_peers(&peers)?;
@@ -8566,6 +8612,45 @@ mod tests {
         // Niets gevonden -> None (resolve_program valt dan terug op de kale naam).
         assert!(resolve_in_paths("bestaatniet", &paths).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Een pad of URL is een ARGUMENT, ook als er shell-tekens in staan. Er werd
+    // eerder alleen gequote bij een spatie, en dan werd `;` of `$(...)` een tweede
+    // commando op de host. Dit is de regressietest daarvoor.
+    #[test]
+    fn a_remote_git_arg_can_never_become_a_second_command() {
+        let cmd = remote_git_cmd(
+            "linux",
+            &["clone", "--quiet", "https://github.com/a/b$(id)", "/tmp/x;rm -rf ~"],
+        );
+        // Alles staat in enkele quotes, dus de shell ziet tekst en geen opdracht.
+        assert_eq!(
+            cmd,
+            r"git 'clone' '--quiet' 'https://github.com/a/b$(id)' '/tmp/x;rm -rf ~'",
+            "{cmd}"
+        );
+        // Een quote in de waarde sluit de string niet af.
+        assert_eq!(remote_git_cmd("linux", &["clone", "a'b"]), r"git 'clone' 'a'\''b'");
+
+        // Windows: wat de buitenste shell van sshd ziet is base64 en anders niets,
+        // dus er is geen & of | om iets aan vast te knopen.
+        let wcmd = remote_git_cmd("windows", &["clone", "https://github.com/a/b&calc"]);
+        let payload = wcmd
+            .strip_prefix("powershell -NoProfile -EncodedCommand ")
+            .unwrap_or_else(|| panic!("onverwachte vorm: {wcmd}"));
+        assert!(
+            payload.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='),
+            "payload moet kale base64 zijn: {payload}"
+        );
+        assert!(!wcmd.contains('&') && !wcmd.contains("calc"), "{wcmd}");
+
+        // En git dat niet bestaat mag geen 0 opleveren: dan zou git_available
+        // "aanwezig" melden op een machine zonder git.
+        let ps = String::from_utf16_lossy(
+            &b64_decode_for_test(payload).chunks_exact(2).map(|p| u16::from_le_bytes([p[0], p[1]])).collect::<Vec<_>>(),
+        );
+        assert!(ps.starts_with("$LASTEXITCODE = 127; git "), "{ps}");
+        assert!(ps.ends_with("; exit $LASTEXITCODE"), "{ps}");
     }
 
     #[test]

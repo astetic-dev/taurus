@@ -65,6 +65,14 @@ pub struct Peer {
     // niemand zit om op Allow te klikken.
     #[serde(default)]
     pub auto_allow: bool,
+    // En met hoeveel macht dat onthouden antwoord gegeven is (#126). Zonder dit
+    // veld werd "altijd toestaan, MET vol beheer" onthouden als een kale
+    // auto_allow: de eerste sessie kreeg vol beheer en elke volgende viel stil
+    // terug naar "agent, geen shell". Het vinkje deed dus niet wat het beloofde.
+    // Default false, dus een bestaande peers.json blijft gewoon lezen -- en valt
+    // naar de voorzichtige kant.
+    #[serde(default)]
+    pub auto_full: bool,
     #[serde(default)]
     pub added: String,
     #[serde(default)]
@@ -226,6 +234,29 @@ pub enum Decision {
 pub enum Power {
     Sandboxed,
     Full,
+}
+
+// Wat een ONTHOUDEN antwoord betekent bij de volgende verbinding. Apart en puur,
+// zodat het te testen is: dit is precies de plek waar "altijd toestaan, met vol
+// beheer" zijn tweede helft verloor.
+fn remembered(auto_allow: bool, auto_full: bool) -> Option<Decision> {
+    if !auto_allow {
+        return None;
+    }
+    Some(if auto_full {
+        Decision::AllowFull
+    } else {
+        Decision::Allow
+    })
+}
+
+// Hoe de macht in de popup en in het audit-spoor heet. Een tekst, want die twee
+// horen hetzelfde te zeggen.
+fn power_label(p: Power) -> &'static str {
+    match p {
+        Power::Full => "vol beheer",
+        Power::Sandboxed => "agent, geen shell",
+    }
 }
 
 impl Decision {
@@ -415,6 +446,7 @@ impl russh::server::Server for TaurusHost {
             user: String::new(),
             fingerprint: String::new(),
             auto_allow: false,
+            auto_full: false,
             ptys: Default::default(),
             offered: Default::default(),
             help_token: String::new(),
@@ -500,6 +532,7 @@ struct HostSession {
     user: String,
     fingerprint: String,
     auto_allow: bool,
+    auto_full: bool,
     ptys: Arc<StdMutex<HashMap<ChannelId, Arc<SessionIo>>>>,
     // Het token waarmee deze verbinding binnenkwam, als dat zo is (#125). Zolang
     // dit gezet is, is meelezen met de aangeboden sessie het enige wat mag.
@@ -702,6 +735,7 @@ impl HostSession {
             upsert_peer(&fp, |p| {
                 p.blocked = true;
                 p.auto_allow = false;
+                p.auto_full = false;
             });
         }
         // Alleen de weigering hier: de toestemming wordt geaudit door wie hem
@@ -713,8 +747,19 @@ impl HostSession {
     }
 
     async fn ask_session(&mut self, what: &str) -> Decision {
-        if self.auto_allow {
-            return Decision::Allow;
+        // "Niet meer vragen" haalt de POPUP weg, niet het SPOOR. Zonder deze regel
+        // stond er van een onthouden peer nergens vastgelegd WAT er startte en met
+        // welke macht, terwijl elke andere route (exec, sftp, auth) dat wel doet.
+        // Precies het soort stilte waar je later dwars door heen kijkt -- en het
+        // audit-spoor is het enige wat er dan nog is, want er was geen popup.
+        if let Some(d) = remembered(self.auto_allow, self.auto_full) {
+            audit(
+                &self.app,
+                "session-auto",
+                &self.peer_name(),
+                &format!("{what} [{}]", power_label(d.power())),
+            );
+            return d;
         }
         let d = self
             .state
@@ -733,14 +778,22 @@ impl HostSession {
         match d {
             _ if d.remembers() => {
                 let fp = self.fingerprint.clone();
-                upsert_peer(&fp, |p| p.auto_allow = true);
+                // AlwaysFull is "altijd toestaan" EN "vol beheer". Beide helften
+                // bewaren, anders geldt de tweede alleen deze ene keer.
+                let full = d == Decision::AlwaysFull;
+                upsert_peer(&fp, |p| {
+                    p.auto_allow = true;
+                    p.auto_full = full;
+                });
                 self.auto_allow = true;
+                self.auto_full = full;
             }
             Decision::Block => {
                 let fp = self.fingerprint.clone();
                 upsert_peer(&fp, |p| {
                     p.blocked = true;
                     p.auto_allow = false;
+                    p.auto_full = false;
                 });
             }
             _ => {}
@@ -761,13 +814,7 @@ impl HostSession {
             },
             &self.peer_name(),
             &if d.permits() {
-                format!(
-                    "{what} [{}]",
-                    match d.power() {
-                        Power::Full => "vol beheer",
-                        Power::Sandboxed => "agent, geen shell",
-                    }
-                )
+                format!("{what} [{}]", power_label(d.power()))
             } else {
                 what.to_string()
             },
@@ -1033,6 +1080,7 @@ impl Handler for HostSession {
                 return Ok(Auth::reject());
             }
             self.auto_allow = p.auto_allow;
+            self.auto_full = p.auto_full;
             upsert_peer(&fp, |x| {
                 x.last_seen = now_iso();
                 x.label = user.to_string();
@@ -1563,6 +1611,37 @@ mod tests {
         let exec = format!("{:?}", shell_command(Some("powershell -NoProfile -Enc AAA"), None));
         assert!(exec.contains("/C"), "{exec}");
         assert!(exec.contains("powershell"), "{exec}");
+    }
+
+    // "Altijd toestaan" onthoudt BEIDE helften van het antwoord. Zonder het
+    // auto_full-veld kreeg de eerste sessie vol beheer en viel elke volgende stil
+    // terug naar "agent, geen shell" -- een vinkje dat niet deed wat het beloofde.
+    #[test]
+    fn a_remembered_answer_keeps_its_power() {
+        // Niets onthouden = gewoon vragen.
+        assert_eq!(remembered(false, false), None);
+        assert_eq!(remembered(false, true), None);
+        // Onthouden zonder vinkje blijft ingeperkt...
+        assert_eq!(remembered(true, false).map(|d| d.power()), Some(Power::Sandboxed));
+        // ...en met vinkje blijft het vol beheer, ook de tweede keer.
+        assert_eq!(remembered(true, true).map(|d| d.power()), Some(Power::Full));
+        // En een onthouden antwoord is nog steeds een ja.
+        assert!(remembered(true, false).unwrap().permits());
+        assert!(remembered(true, true).unwrap().permits());
+    }
+
+    // Alleen deze twee antwoorden worden onthouden, en AlwaysFull is de enige die
+    // ook macht meeneemt. Valt er ooit een variant bij, dan hoort dit te breken.
+    #[test]
+    fn only_always_answers_are_remembered() {
+        for d in [Decision::Always, Decision::AlwaysFull] {
+            assert!(d.remembers(), "{d:?}");
+        }
+        for d in [Decision::Allow, Decision::AllowFull, Decision::Join, Decision::Deny, Decision::Block] {
+            assert!(!d.remembers(), "{d:?}");
+        }
+        assert_eq!(Decision::AlwaysFull.power(), Power::Full);
+        assert_eq!(Decision::Always.power(), Power::Sandboxed);
     }
 
     // #126: het vinkje is een TWEEDE as. Wie er binnen mag is de ene vraag, wat

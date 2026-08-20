@@ -289,6 +289,8 @@ const I18N = {
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
     restore_failed: "Hervatten mislukt voor:",
     copy_failed: "✗ Kopiëren naar klembord mislukt:",
+    save_sessions_failed: "✗ Openstaande sessies opslaan mislukt — na een herstart staan je tabs er niet meer:",
+    consent_reply_failed: "✗ Je antwoord kwam niet aan bij de wachtende verbinding:",
     err_need_project: "✗ Minstens één agent met naam én pad nodig.",
     dropper: "DROPZONE", dropper_hint: "Sleep bestand of map hierheen",
     dz_move: "Verplaats", dz_copy: "Kopieer", dz_prompt: "Alleen pad", dz_paste: "Plak object",
@@ -629,6 +631,8 @@ const I18N = {
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
     restore_failed: "Could not resume:",
     copy_failed: "✗ Copy to clipboard failed:",
+    save_sessions_failed: "✗ Could not save the open sessions — your tabs will not be there after a restart:",
+    consent_reply_failed: "✗ Your answer did not reach the waiting connection:",
     err_need_project: "✗ Need at least one agent with a name and a path.",
     dropper: "DROPZONE", dropper_hint: "Drag a file or folder here",
     dz_move: "Move", dz_copy: "Copy", dz_prompt: "Path only", dz_paste: "Paste object",
@@ -3386,7 +3390,7 @@ function persistSessionsToDisk() {
   // vraag dan wat er geweest is, en die tweede mag niet meegewist worden door de
   // eerste -- dat was precies hoe twee sessies na een herstart verdwenen.
   recordOpenSessions();
-  if (persistMode() === "clean") { invoke("save_sessions", { sessions: [] }).catch(() => {}); return; }
+  if (persistMode() === "clean") { invoke("save_sessions", { sessions: [] }).catch(saveSessionsFailed); return; }
   const list = [...sessions.values()]
     // Een aangehaakte sessie heeft geen uuid en geen commando dat Taurus kent;
     // hem hier opslaan zou bij de volgende start een resume proberen die nergens
@@ -3396,7 +3400,15 @@ function persistSessionsToDisk() {
     // en bij de volgende start bestaat de sessie van de collega niet meer.
     .filter((s) => !s.command && !s.attached && !s.mirror)
     .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "" }));
-  invoke("save_sessions", { sessions: list }).catch(() => {});
+  invoke("save_sessions", { sessions: list }).catch(saveSessionsFailed);
+}
+
+// Mislukt het opslaan, dan is dat niet zichtbaar tot je herstart en je tabs weg
+// zijn -- en dan is de oorzaak niet meer te vinden. Daarom hier wel een melding,
+// terwijl de meeste andere lege catches in dit bestand terecht stil zijn.
+function saveSessionsFailed(err) {
+  dbg(`save_sessions FAIL: ${err}`);
+  toast(`${t("save_sessions_failed")} ${err}`, "err");
 }
 
 // Bij opstarten: probeer elke opgeslagen sessie te hervatten met `--resume`, zonder
@@ -3625,7 +3637,13 @@ async function closeSession(id) {
   const s = sessions.get(id);
   if (!s) return;
   // Meekijken stoppen mag de sessie van de collega niet afbreken.
-  if (s.mirror) await invoke("ssh_mirror_detach", { id: s.mirror }).catch(() => {});
+  // Meekijken stoppen: ook de spiegel-registratie opruimen. Een achtergebleven
+  // regel is geen kwaad (de output-handler maakt gewoon een nieuwe tab als de
+  // oude niet meer bestaat), maar een Map die alleen groeit is niets waard.
+  if (s.mirror) {
+    await invoke("ssh_mirror_detach", { id: s.mirror }).catch(() => {});
+    mirrorTabs.delete(s.mirror);
+  }
   else await invoke("close_session", { id });
   s.term.dispose(); s.el.remove(); sessions.delete(id);
   persistSessionsToDisk();
@@ -4559,7 +4577,13 @@ function answerConsent(decision) {
   // Vol beheer is een tweede as: hij zegt niet WIE er binnen mag maar WAT die dan
   // krijgt. Meekijken heeft hem niet nodig -- daar is toezicht de controle (#126).
   if ((d === "allow" || d === "always") && els.consentFull.checked) d += "-full";
-  invoke("ssh_consent_reply", { id, decision: d }).catch(() => {});
+  // Je hebt geklikt, maar het antwoord moet er ook aankomen: stil falen betekent
+  // dat de ander blijft wachten tot de teller afloopt terwijl jij denkt dat het
+  // geregeld is. Bij een toestemmingsvraag is dat het verkeerde soort stilte.
+  invoke("ssh_consent_reply", { id, decision: d }).catch((err) => {
+    dbg(`consent reply FAIL: ${err}`);
+    toast(`${t("consent_reply_failed")} ${err}`, "err");
+  });
   closeConsent();
   if (d === "block" || d.startsWith("always")) refreshSshPeers();
 }
