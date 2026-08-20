@@ -1710,20 +1710,38 @@ fn remote_join(os: &str, dir: &str, name: &str) -> String {
     }
 }
 
+// De scp-server draait op Windows en kan niet in het ext4 van WSL schrijven; dat
+// zou via \\wsl.localhost\<distro>\... moeten en dat is een eigen puzzel. Liever
+// een duidelijke melding dan een bestand dat ergens anders landt dan de agent
+// verwacht. Een tekst, want zowel een drop als een plak loopt hierop stuk.
+const WSL_NO_FILES: &str = "Bestanden overzetten naar een agent in WSL kan nog niet. Zet het bestand met de hand neer, of gebruik een host zonder WSL-route.";
+
+// Wat een overdracht naar de host opleverde. `path` is wat de agent DAAR moet
+// openen; `src_removed`/`src_error` gaan over het origineel HIER. "Verplaats"
+// naar een andere machine mag dat pas weggooien als de kopie er echt staat, en
+// dat is iets anders dan een geslaagde overdracht -- vandaar apart.
+#[derive(serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SentFile {
+    path: String,
+    src_removed: bool,
+    src_error: String,
+}
+
 // De DROPZONE op een remote sessie: kopieer het bestand naar <werkmap>/input op
 // de host en geef het pad DAAR terug, zodat de prompt een pad krijgt dat de
-// agent ook echt kan openen.
+// agent ook echt kan openen. `remove_src` = de drop kwam op "Verplaats" terecht:
+// dan gaat het origineel hier weg, maar pas na een geslaagde overdracht.
 #[tauri::command(async)]
-fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<String, String> {
+fn scp_to_host(
+    host_id: String,
+    src: String,
+    remote_cwd: String,
+    remove_src: bool,
+) -> Result<SentFile, String> {
     let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
     if host.via == "wsl" {
-        // De scp-server draait op Windows en kan niet in het ext4 van WSL
-        // schrijven; dat zou via \\wsl.localhost\<distro>\... moeten en dat is
-        // een eigen puzzel. Liever een duidelijke melding dan een bestand dat
-        // ergens anders landt dan de agent verwacht.
-        return Err(
-            "Bestanden overzetten naar een agent in WSL kan nog niet. Zet het bestand met de hand neer, of gebruik een host zonder WSL-route.".into(),
-        );
+        return Err(WSL_NO_FILES.into());
     }
     let name = Path::new(&src)
         .file_name()
@@ -1788,7 +1806,29 @@ fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<Strin
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(format!("scp mislukte: {}", err.trim()));
     }
-    Ok(remote_join(&host.os, &remote_dir, &name))
+
+    // Nu -- en alleen nu -- mag het origineel hier weg. Lukt dat niet (bestand
+    // in gebruik, geen rechten), dan is de overdracht daarmee niet mislukt: het
+    // bestand staat op de host en de agent kan het openen. Dat verschil geven we
+    // apart terug, zodat de melding kan zeggen wat er wel en niet gebeurd is in
+    // plaats van een geslaagde kopie als fout te presenteren.
+    let mut sent = SentFile {
+        path: remote_join(&host.os, &remote_dir, &name),
+        ..Default::default()
+    };
+    if remove_src {
+        let p = Path::new(&src);
+        let rm = if p.is_dir() {
+            std::fs::remove_dir_all(p)
+        } else {
+            std::fs::remove_file(p)
+        };
+        match rm {
+            Ok(()) => sent.src_removed = true,
+            Err(e) => sent.src_error = e.to_string(),
+        }
+    }
+    Ok(sent)
 }
 
 // ---------- werkmap verplaatsen tussen machines (#102) ----------
@@ -4972,14 +5012,57 @@ fn clipboard_file_paths() -> Vec<String> {
     Vec::new()
 }
 
-// Sla de inhoud van het klembord op als bestand(en) in <cwd>\input en geef de
-// absolute paden terug. Volgorde: eerst gekopieerde BESTANDEN (Ctrl+C in
-// Verkenner -> die kopieren we in), dan een AFBEELDING (als PNG), dan TEKST
-// (.txt). Zo werkt "Plak object" ook voor een gekopieerd bestand -- niet alleen
-// voor tekst/afbeelding die nog geen bestand zijn.
+const CLIPBOARD_EMPTY: &str = "klembord bevat geen bestand, afbeelding of tekst";
+
+// Schrijf wat er op het klembord ligt en nog GEEN bestand is -- een afbeelding
+// (als PNG) of tekst (.txt) -- weg in `dir`. None = er ligt geen van beide.
+// Eigen functie omdat "Plak object" bij een remote sessie hetzelfde object nodig
+// heeft, maar in een tijdelijke map: van daar gaat het met scp naar de host.
+fn clipboard_object_to_dir(
+    app: &AppHandle,
+    dir: &Path,
+) -> Result<Option<std::path::PathBuf>, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    // Afbeelding -> PNG.
+    if let Ok(img) = app.clipboard().read_image() {
+        let (w, h) = (img.width(), img.height());
+        let rgba = img.rgba();
+        if w > 0 && h > 0 && rgba.len() as u32 == w * h * 4 {
+            let dest = unique_path(dir.join(pasted_name("png")));
+            let file = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut writer = enc.write_header().map_err(|e| e.to_string())?;
+            writer.write_image_data(rgba).map_err(|e| e.to_string())?;
+            return Ok(Some(dest));
+        }
+    }
+
+    // Tekst. Geen tekstformaat op het klembord is geen leesfout maar een leeg
+    // antwoord (arboard geeft dan ContentNotAvailable); de aanroeper maakt daar
+    // een leesbare melding van in plaats van een plugin-foutstring.
+    let text = match app.clipboard().read_text() {
+        Ok(t) => t,
+        Err(_) => return Ok(None),
+    };
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let dest = unique_path(dir.join(pasted_name("txt")));
+    std::fs::write(&dest, text).map_err(|e| e.to_string())?;
+    Ok(Some(dest))
+}
+
+// "Plak object" bij een sessie op DEZE computer: sla de inhoud van het klembord
+// op als bestand(en) in <cwd>\input en geef de absolute paden terug. Volgorde:
+// eerst gekopieerde BESTANDEN (Ctrl+C in Verkenner -> die kopieren we in), dan
+// een AFBEELDING (als PNG), dan TEKST (.txt). Zo werkt de knop ook voor een
+// gekopieerd bestand -- niet alleen voor tekst/afbeelding die nog geen bestand
+// zijn. De remote tegenhanger is save_clipboard_to_host.
 #[tauri::command]
 fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, String> {
-    use tauri_plugin_clipboard_manager::ClipboardExt;
     let input_dir = Path::new(&cwd).join("input");
     std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
 
@@ -5011,30 +5094,70 @@ fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, S
         }
     }
 
-    // 2) Afbeelding op het klembord -> PNG.
-    if let Ok(img) = app.clipboard().read_image() {
-        let (w, h) = (img.width(), img.height());
-        let rgba = img.rgba();
-        if w > 0 && h > 0 && rgba.len() as u32 == w * h * 4 {
-            let dest = unique_path(input_dir.join(pasted_name("png")));
-            let file = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
-            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
-            enc.set_color(png::ColorType::Rgba);
-            enc.set_depth(png::BitDepth::Eight);
-            let mut writer = enc.write_header().map_err(|e| e.to_string())?;
-            writer.write_image_data(rgba).map_err(|e| e.to_string())?;
-            return Ok(vec![dest.to_string_lossy().into_owned()]);
+    // 2) Afbeelding of tekst -> een nieuw bestand in de input-map.
+    match clipboard_object_to_dir(&app, &input_dir)? {
+        Some(dest) => Ok(vec![dest.to_string_lossy().into_owned()]),
+        None => Err(CLIPBOARD_EMPTY.to_string()),
+    }
+}
+
+// "Plak object" bij een sessie op een ANDERE machine. Het klembord is bytes in
+// het geheugen van deze computer, dus er moet eerst een bestand van komen
+// voordat scp er iets mee kan. Dat bestand komt in een tijdelijke map en gaat
+// daarna weer weg: de plek waar het hoort te staan is de input-map op de host,
+// en een tweede exemplaar hier zou de agent alleen op het verkeerde pad zetten.
+// Een gekopieerd BESTAND (CF_HDROP) bestaat al -- dat gaat rechtstreeks vanaf
+// zijn eigen plek, zonder tussenkopie en zonder dat er iets wordt weggegooid.
+// async: scp gaat over het netwerk en mag de UI-thread niet vasthouden. Het
+// klembord lezen kan daar: arboard opent het Windows-klembord met
+// OpenClipboard(NULL), en dat is niet aan een thread gebonden.
+#[tauri::command(async)]
+fn save_clipboard_to_host(
+    app: AppHandle,
+    host_id: String,
+    remote_cwd: String,
+) -> Result<Vec<String>, String> {
+    // Meteen melden i.p.v. eerst een tijdelijk bestand schrijven voor een
+    // overdracht die op deze route toch niet kan (zie WSL_NO_FILES).
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    if host.via == "wsl" {
+        return Err(WSL_NO_FILES.into());
+    }
+
+    // 1) Gekopieerde bestanden: rechtstreeks van hun eigen plek naar de host.
+    let files = clipboard_file_paths();
+    if !files.is_empty() {
+        let mut sent = Vec::new();
+        for f in files {
+            if !Path::new(&f).exists() {
+                continue;
+            }
+            sent.push(scp_to_host(host_id.clone(), f, remote_cwd.clone(), false)?.path);
+        }
+        if !sent.is_empty() {
+            return Ok(sent);
         }
     }
 
-    // 3) Tekst.
-    let text = app.clipboard().read_text().map_err(|e| e.to_string())?;
-    if text.is_empty() {
-        return Err("klembord bevat geen bestand, afbeelding of tekst".to_string());
-    }
-    let dest = unique_path(input_dir.join(pasted_name("txt")));
-    std::fs::write(&dest, text).map_err(|e| e.to_string())?;
-    Ok(vec![dest.to_string_lossy().into_owned()])
+    // 2) Afbeelding of tekst: eerst een tijdelijk bestand, dan naar de host, en
+    // dan hier weer weg. Het opruimen staat buiten het resultaat, zodat er ook
+    // niets in %TEMP% blijft slingeren als de overdracht faalt -- daar kan
+    // klembordinhoud in staan die niemand daar hoeft te vinden.
+    let tmp = std::env::temp_dir().join(format!("taurus-paste-{}", new_token()));
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let out = match clipboard_object_to_dir(&app, &tmp) {
+        Ok(Some(local)) => scp_to_host(
+            host_id,
+            local.to_string_lossy().into_owned(),
+            remote_cwd,
+            false,
+        )
+        .map(|s| vec![s.path]),
+        Ok(None) => Err(CLIPBOARD_EMPTY.to_string()),
+        Err(e) => Err(e),
+    };
+    let _ = std::fs::remove_dir_all(&tmp);
+    out
 }
 
 // Schrijf tekst naar het Windows-klembord via native code i.p.v. de WebView2
@@ -6709,6 +6832,7 @@ pub fn run() {
             open_folder,
             save_dropped_path,
             save_clipboard_to_input,
+            save_clipboard_to_host,
             copy_to_clipboard,
             branding,
             list_tts_voices,
