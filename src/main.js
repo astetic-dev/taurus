@@ -1088,6 +1088,41 @@ function copyToClipboard(text) {
       toast(t("copy_failed") + " " + e, "err");
     });
 }
+// Waarom we de selectie zelf uit de buffer opbouwen en niet blind vertrouwen op
+// term.getSelection(): Claude Code vult de regels van zijn promptkader op tot de
+// LAATSTE kolom, en dan zet xterm op de volgende rij de vlag isWrapped en plakt
+// beide rijen aan elkaar -- met de opvulling MIDDENIN de string, waar een trim
+// per regel niet bij komt. Dat was de laatste plek waar de vraagregel nog vol
+// spaties zat (#177).
+// Per rij trimmen en dan plakken haalt precies die opvulling weg. Zat er
+// opvulling aan het eind van een rij, dan lag de regelovergang op een spatie en
+// plakken we met een enkele spatie; stond de rij vol tekst tot de rand (een lang
+// pad of een URL), dan plakken we zonder -- daar hoort niets tussen.
+// Vangnet: wijkt onze versie in meer dan witruimte af van wat xterm zelf zegt
+// (kolomselectie met Alt ingedrukt, of coordinaten die net achterlopen), dan
+// gebruiken we xterm's string.
+function readSelection(term) {
+  const raw = term.getSelection();
+  const r = term.getSelectionPosition();
+  if (!raw || !r) return raw;
+  const rows = [];
+  let padded = false;
+  for (let y = r.start.y; y <= r.end.y; y++) {
+    const line = term.buffer.active.getLine(y);
+    if (!line) continue;
+    const from = y === r.start.y ? r.start.x : 0;
+    const to = y === r.end.y ? r.end.x : undefined;
+    // Harde spatie (0xa0) wordt een gewone spatie, net als in xterm zelf.
+    const text = line.translateToString(true, from, to).replace(/\u00a0/g, " ");
+    const cut = text.replace(/ +$/, "");
+    if (line.isWrapped && rows.length) rows[rows.length - 1] += (padded ? " " : "") + cut;
+    else rows.push(cut);
+    padded = cut.length !== text.length;
+  }
+  const rebuilt = rows.join(raw.includes("\r\n") ? "\r\n" : "\n");
+  const bare = (s) => s.replace(/\s+/g, "");
+  return bare(rebuilt) === bare(raw) ? rebuilt : raw;
+}
 // Een selectie uit de terminal is geen platte tekst maar een stuk raster. xterm
 // knipt alleen NOOIT-BESCHREVEN cellen weg (translateToString(trimRight) stopt
 // bij getTrimmedLength), en Claude Code verft zijn regels vol met ECHTE spaties.
@@ -3192,12 +3227,12 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   // (streaming/prompt) de selectie net wist, kopieren we de vastgelegde tekst.
   let selTimer = null;
   term.onSelectionChange(() => {
-    const sel = term.getSelection();
+    const sel = readSelection(term);
     if (sel) session.lastSel = sel;
     if (!settings.copyOnSelect) return;
     if (selTimer) clearTimeout(selTimer);
     selTimer = setTimeout(() => {
-      const s = term.getSelection() || session.lastSel;
+      const s = readSelection(term) || session.lastSel;
       if (s) copyToClipboard(tidySelection(s));
     }, 120);
   });
@@ -4287,7 +4322,7 @@ function openTabMenu(x, y, id) {
   });
   m.querySelector('[data-act="speak"]').addEventListener("click", () => {
     closeTabMenu();
-    const sel = s.term.getSelection();
+    const sel = readSelection(s.term);
     if (sel) speak(tidySelection(sel), true); // force: uitspreken is hier expliciet gevraagd
   });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
@@ -5467,7 +5502,7 @@ document.addEventListener("keydown", (e) => {
     const s = sessions.get(current);
     // Val terug op de vastgelegde selectie als getSelection() leeg is (een
     // herteken kan 'm net gewist hebben).
-    if (s) { const sel = s.term.getSelection() || s.lastSel; if (sel) { copyToClipboard(tidySelection(sel)); e.preventDefault(); } }
+    if (s) { const sel = readSelection(s.term) || s.lastSel; if (sel) { copyToClipboard(tidySelection(sel)); e.preventDefault(); } }
     return;
   }
   if (settings.ctrlShiftCV && ctrl && e.shiftKey && (e.key === "V" || e.key === "v")) {
