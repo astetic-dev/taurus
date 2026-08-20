@@ -36,6 +36,9 @@ hound = "3.5"
 # niet overal met bzip2 gebouwd (zlib-only bsdtar hangt/faalt er stil op).
 tar = "0.4"
 bzip2 = "0.4"
+# Een map naar een remote sessie gaat als een .tar.gz (zie targz_dir): gzip hoort
+# daarbij. Zat al in de tree via russh; dit maakt de afhankelijkheid expliciet.
+flate2 = "1"
 # SHA-256-verificatie van gedownloade STT-archieven (de engine is een exe die
 # we uitvoeren; zonder checksum is een kwaadaardige registry-URL directe RCE).
 sha2 = "0.10"

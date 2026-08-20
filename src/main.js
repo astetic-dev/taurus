@@ -135,7 +135,11 @@ const I18N = {
     dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
     dropper_sending: "Bestand overzetten naar de host…",
     dropper_sent: "Op de host gezet",
-    dropper_paste_local_only: "Plakken uit het klembord werkt alleen bij een sessie op deze computer.",
+    dropper_moved: "Op de host gezet, hier verwijderd",
+    dropper_src_kept: "Staat op de host, maar het origineel kon hier niet weg:",
+    dropper_unpacked: "Map uitgepakt op de host",
+    dropper_unpacked_moved: "Map uitgepakt op de host, hier verwijderd",
+    dropper_unpack_failed: "Archief staat op de host, maar uitpakken lukte daar niet:",
     launch_command: "Commando-override", command_ph: "leeg = start de gekozen agent",
     command_hint: "Draait dit programma zoals het er staat, in plaats van de agent.",
     command_warn: "⚠ Agent-vlaggen gelden niet: model, modus en taak worden niet meegestuurd.",
@@ -471,7 +475,11 @@ const I18N = {
     dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
     dropper_sending: "Copying file to the host…",
     dropper_sent: "Placed on the host",
-    dropper_paste_local_only: "Pasting from the clipboard only works for a session on this computer.",
+    dropper_moved: "Placed on the host, removed here",
+    dropper_src_kept: "Placed on the host, but could not remove the original here:",
+    dropper_unpacked: "Folder unpacked on the host",
+    dropper_unpacked_moved: "Folder unpacked on the host, removed here",
+    dropper_unpack_failed: "The archive is on the host, but could not be unpacked there:",
     launch_command: "Command override", command_ph: "empty = start the selected agent",
     command_hint: "Runs this program as-is, instead of the agent.",
     command_warn: "⚠ Agent flags do not apply: model, mode and task are not passed.",
@@ -5474,23 +5482,43 @@ function updateDropperForSession() {
   els.fileDropper.title = activeSessionIsRemote() ? t("dropper_remote_hint") : "";
 }
 
-// Eén bestand naar de host, ongeacht welke zone je raakte: "verplaatsen" zou
-// betekenen dat we het lokale origineel na een netwerkoverdracht weggooien, en
-// dat is een beslissing die je zelf hoort te nemen, niet een sleepgebaar.
-async function dropToRemote(src) {
+// Eén bestand of map naar de host. Een map gaat verpakt als .tar.gz en wordt
+// daar uitgepakt (zie targz_dir in Rust); wat terugkomt is het pad van de map
+// zelf, of van het archief als het uitpakken daar niet lukte.
+// Op "Verplaats" gooit Rust het lokale origineel weg zodra de kopie er staat --
+// de zone waar je op mikt IS die beslissing. Lukt dat weggooien niet, dan is de
+// overdracht toch geslaagd: het pad gaat gewoon de prompt in, met een melding
+// erbij dat het origineel hier is blijven staan.
+// "Alleen pad" kopieert net als "Kopieer": een pad op deze computer kan de agent
+// op de host niet openen, dus daar helpt niemand mee.
+async function dropToRemote(src, mode) {
   const s = sessions.get(current);
   if (!s || !s.hostId) return false;
   toast(t("dropper_sending"), "");
   try {
-    const dest = await invoke("scp_to_host", { hostId: s.hostId, src, remoteCwd: s.path });
-    insertPathIntoTerminal(dest, true);
-    addDropperEntry(dest);
-    toast(t("dropper_sent"), "ok");
+    const r = await invoke("scp_to_host", {
+      hostId: s.hostId, src, remoteCwd: s.path, removeSrc: mode === "move",
+    });
+    insertPathIntoTerminal(r.path, true);
+    addDropperEntry(r.path);
+    if (r.unpackError) toast("✗ " + t("dropper_unpack_failed") + " " + r.unpackError, "err");
+    else if (r.srcError) toast("✗ " + t("dropper_src_kept") + " " + r.srcError, "err");
+    else if (r.wasDir) toast(r.srcRemoved ? t("dropper_unpacked_moved") : t("dropper_unpacked"), "ok");
+    else toast(r.srcRemoved ? t("dropper_moved") : t("dropper_sent"), "ok");
   } catch (err) {
     dbg(`scp FAIL: ${err}`);
     toast(t("dropper_save_failed") + " " + err, "err");
   }
   return true;
+}
+
+// De focus hoort in de terminal te liggen, niet op het knopje waarmee je net iets
+// in de prompt zette. Een klik laat een <button> in de webview namelijk de focus
+// houden, en dan voert de volgende Enter of spatie dezelfde knop nog eens uit --
+// bij "Plak object" komt er zo ongevraagd een tweede bestand bij.
+function focusTerminal() {
+  const s = sessions.get(current);
+  if (s) s.term.focus();
 }
 
 // Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
@@ -5501,6 +5529,7 @@ function insertPathIntoTerminal(absPath, silent) {
   if (!s) { if (!silent) toast(t("dropper_no_session"), "err"); return; }
   const arg = /\s/.test(absPath) ? `"${absPath}"` : absPath;
   invoke("write_session", { id: s.id, data: arg + " " });
+  s.term.focus(); // het pad staat in de prompt; daar hoort de focus ook
 }
 
 // Voeg een net geplaatst bestand toe aan het overzicht -- ALLEEN wat jij deze sessie
@@ -5562,7 +5591,7 @@ function wireFileDropper() {
     const cwd = dropperCwd();
     if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
     if (activeSessionIsRemote()) {
-      for (const src of paths) await dropToRemote(src);
+      for (const src of paths) await dropToRemote(src, mode);
       return;
     }
     for (const src of paths) {
@@ -5584,17 +5613,30 @@ function wireFileDropper() {
   });
 
   els.dropperPaste.addEventListener("click", async () => {
-    // Klembord-plakken schrijft eerst lokaal (save_clipboard_to_input) en zou
-    // dan nog overgezet moeten worden; die tweetrapsvorm bestaat nog niet.
-    if (activeSessionIsRemote()) { toast(t("dropper_paste_local_only"), "err"); return; }
-    const cwd = dropperCwd();
-    if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    // Wat er ook gebeurt: de focus gaat terug naar de terminal (zie
+    // focusTerminal), ook als er niets te plakken valt -- anders blijft de knop
+    // scherp staan voor de eerstvolgende Enter.
     try {
+      const cwd = dropperCwd();
+      if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+      const s = sessions.get(current);
+      if (s && s.hostId) {
+        // Remote: het klembord is hier, de input-map staat daar. Rust maakt er
+        // een tijdelijk bestand van, zet dat met scp op de host en ruimt het
+        // hier weer op; wat terugkomt is het pad OP DE HOST.
+        toast(t("dropper_sending"), "");
+        const sent = await invoke("save_clipboard_to_host", { hostId: s.hostId, remoteCwd: s.path });
+        for (const p of sent) { insertPathIntoTerminal(p, true); addDropperEntry(p); }
+        toast(t("dropper_sent"), "ok");
+        return;
+      }
       const paths = await invoke("save_clipboard_to_input", { cwd });
       for (const p of paths) { insertPathIntoTerminal(p, true); addDropperEntry(p); }
     } catch (err) {
       dbg(`paste-object FAIL: ${err}`);
       toast(t("dropper_paste_failed") + " " + err, "err");
+    } finally {
+      focusTerminal();
     }
   });
 }

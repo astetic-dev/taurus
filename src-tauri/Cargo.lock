@@ -5499,6 +5499,7 @@ version = "0.7.0"
 dependencies = [
  "bzip2",
  "cpal",
+ "flate2",
  "hound",
  "mdns-sd",
  "png 0.17.16",

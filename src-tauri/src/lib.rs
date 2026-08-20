@@ -1710,22 +1710,147 @@ fn remote_join(os: &str, dir: &str, name: &str) -> String {
     }
 }
 
+// De scp-server draait op Windows en kan niet in het ext4 van WSL schrijven; dat
+// zou via \\wsl.localhost\<distro>\... moeten en dat is een eigen puzzel. Liever
+// een duidelijke melding dan een bestand dat ergens anders landt dan de agent
+// verwacht. Een tekst, want zowel een drop als een plak loopt hierop stuk.
+const WSL_NO_FILES: &str = "Bestanden overzetten naar een agent in WSL kan nog niet. Zet het bestand met de hand neer, of gebruik een host zonder WSL-route.";
+
+// Wat een overdracht naar de host opleverde. `path` is wat de agent DAAR moet
+// openen; `src_removed`/`src_error` gaan over het origineel HIER. "Verplaats"
+// naar een andere machine mag dat pas weggooien als de kopie er echt staat, en
+// dat is iets anders dan een geslaagde overdracht -- vandaar apart.
+#[derive(serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SentFile {
+    path: String,
+    src_removed: bool,
+    src_error: String,
+    // Een MAP ging verpakt over. unpacked = de host heeft hem uitgepakt en
+    // `path` wijst naar de map; anders wijst `path` naar het archief dat daar
+    // is blijven staan en zegt unpack_error waarom het niet openging.
+    was_dir: bool,
+    unpacked: bool,
+    unpack_error: String,
+}
+
+// Een map gaat als EEN bestand naar de host: een .tar.gz die daar wordt
+// uitgepakt. scp kan wel -r (push_workspace doet dat), maar dat is een
+// SFTP-heenreis per bestand; een map met honderden kleine bestanden kruipt zo
+// over een trage lijn. Een gecomprimeerde stroom is sneller en levert aan de
+// andere kant dezelfde mapstructuur op.
+//
+// .tar.gz en niet .zip: op de host moet iets het archief kunnen openen zonder
+// dat daar eerst iets geinstalleerd wordt. `tar -xzf` kan dat op Linux (tar en
+// gzip zijn er altijd) EN op Windows (bsdtar staat sinds Win10 1803 in
+// System32; die is zlib-only gebouwd, dus gzip kan hij wel -- bzip2 niet, zie
+// extract_tar_bz2). `unzip` is op een kale Linux juist vaak afwezig.
+fn targz_dir(src: &Path, dest: &Path) -> Result<(), String> {
+    let name = src
+        .file_name()
+        .ok_or_else(|| format!("map heeft geen naam: {}", src.display()))?
+        .to_string_lossy()
+        .into_owned();
+    let file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+    let enc = flate2::write::GzEncoder::new(
+        std::io::BufWriter::new(file),
+        flate2::Compression::default(),
+    );
+    let mut builder = tar::Builder::new(enc);
+    builder.append_dir_all(&name, src).map_err(|e| e.to_string())?;
+    // Alle drie de lagen afsluiten: de tar-staart, de gzip-staart en de buffer.
+    // Laat je de laatste aan Drop over, dan gaat een schrijffout stil verloren
+    // en merkt de host het pas bij uitpakken -- na de hele overdracht.
+    let mut w = builder
+        .into_inner()
+        .map_err(|e| e.to_string())?
+        .finish()
+        .map_err(|e| e.to_string())?;
+    w.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// De scp zelf: een pad (bestand of archief) naar <remote_dir>/ op de host.
+// Gebruikt dezelfde opties als het verplaatsen van een werkmap (#102), zodat er
+// niet twee plekken zijn waar poort, sleutel en host-key-beleid staan.
+fn scp_put(host: &Host, local: &Path, remote_dir: &str) -> Result<(), String> {
+    let mut args = scp_base_args(host)?;
+    args.push(local.to_string_lossy().into_owned());
+    let target_dir = if host.os == "windows" {
+        // De Windows-kant wil forward slashes achter de dubbele punt.
+        remote_dir.replace('\\', "/")
+    } else {
+        remote_dir.to_string()
+    };
+    // NIET quoten achter de dubbele punt. Sinds OpenSSH 9 draait scp standaard
+    // over SFTP, en dan is het pad een letterlijke string in plaats van iets dat
+    // een remote shell nog parseert: quotes komen er dan als tekens aan en scp
+    // meldt `dest open "'C:/...'": No such file or directory`. Zonder quotes
+    // werkt een pad met spaties gewoon -- getest tegen een map "my input".
+    args.push(format!(
+        "{}:{}/",
+        host_target(host),
+        target_dir.trim_end_matches('/')
+    ));
+
+    let out = quiet_command(&scp_program())
+        .args(&args)
+        .output()
+        .map_err(|e| format!("scp starten mislukte: {}", e))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("scp mislukte: {}", err.trim()));
+    }
+    Ok(())
+}
+
+// Het archief op de host uitpakken en daarna weggooien. Lukt het uitpakken
+// niet, dan blijft het archief juist staan: het is daar het enige exemplaar, en
+// de aanroeper kan dan tenminste dat pad in de prompt zetten in plaats van naar
+// een map te wijzen die niet bestaat.
+fn unpack_on_host(host: &Host, archive: &str, dir: &str) -> Result<(), String> {
+    let cmd = if host.os == "windows" {
+        // Windows PowerShell 5.1-syntax en ASCII: dit draait in de shell van de
+        // host, niet hier. Het archief gaat alleen weg als tar klaar was.
+        let ps = format!(
+            "tar -xzf {} -C {}; if ($LASTEXITCODE -ne 0) {{ exit 1 }}; Remove-Item -LiteralPath {} -Force",
+            ps_quote(archive),
+            ps_quote(dir),
+            ps_quote(archive)
+        );
+        format!("powershell -NoProfile -EncodedCommand {}", b64(&utf16le(&ps)))
+    } else {
+        format!(
+            "tar -xzf {} -C {} && rm -f {}",
+            shell_quote_posix(archive),
+            shell_quote_posix(dir),
+            shell_quote_posix(archive)
+        )
+    };
+    let (out, ok) = ssh_run(host, &cmd)?;
+    if !ok {
+        return Err(format!("uitpakken op de host mislukte:\n{}", out.trim()));
+    }
+    Ok(())
+}
+
 // De DROPZONE op een remote sessie: kopieer het bestand naar <werkmap>/input op
 // de host en geef het pad DAAR terug, zodat de prompt een pad krijgt dat de
-// agent ook echt kan openen.
+// agent ook echt kan openen. `remove_src` = de drop kwam op "Verplaats" terecht:
+// dan gaat het origineel hier weg, maar pas na een geslaagde overdracht.
 #[tauri::command(async)]
-fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<String, String> {
+fn scp_to_host(
+    host_id: String,
+    src: String,
+    remote_cwd: String,
+    remove_src: bool,
+) -> Result<SentFile, String> {
     let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
     if host.via == "wsl" {
-        // De scp-server draait op Windows en kan niet in het ext4 van WSL
-        // schrijven; dat zou via \\wsl.localhost\<distro>\... moeten en dat is
-        // een eigen puzzel. Liever een duidelijke melding dan een bestand dat
-        // ergens anders landt dan de agent verwacht.
-        return Err(
-            "Bestanden overzetten naar een agent in WSL kan nog niet. Zet het bestand met de hand neer, of gebruik een host zonder WSL-route.".into(),
-        );
+        return Err(WSL_NO_FILES.into());
     }
-    let name = Path::new(&src)
+    let src_path = Path::new(&src);
+    let name = src_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or_else(|| format!("geen bestandsnaam in {}", src))?;
@@ -1746,49 +1871,59 @@ fn scp_to_host(host_id: String, src: String, remote_cwd: String) -> Result<Strin
         return Err(format!("kon {} niet aanmaken op de host:\n{}", remote_dir, out.trim()));
     }
 
-    // scp gebruikt -P voor de poort waar ssh -p gebruikt; met -p zou scp de
-    // tijdstempels willen behouden en zwijgend op de standaardpoort verbinden.
-    let mut args: Vec<String> = Vec::new();
-    if host.port != 22 {
-        args.push("-P".into());
-        args.push(host.port.to_string());
-    }
-    if let KeySource::Path(k) = resolve_key(&host)? {
-        args.push("-i".into());
-        args.push(k);
-    }
-    args.push("-o".into());
-    args.push("StrictHostKeyChecking=accept-new".into());
-    args.push("-o".into());
-    args.push("BatchMode=yes".into());
-    args.push(src.clone());
-    // NIET quoten achter de dubbele punt. Sinds OpenSSH 9 draait scp standaard
-    // over SFTP, en dan is het pad een letterlijke string in plaats van iets dat
-    // een remote shell nog parseert: quotes komen er dan als tekens aan en scp
-    // meldt `dest open "'C:/...'": No such file or directory`. Zonder quotes
-    // werkt een pad met spaties gewoon -- getest tegen een map "my input".
-    let target_dir = if host.os == "windows" {
-        // De Windows-kant wil forward slashes achter de dubbele punt.
-        remote_dir.replace('\\', "/")
-    } else {
-        remote_dir.clone()
-    };
-    let user_at = if host.user.trim().is_empty() {
-        host.hostname.trim().to_string()
-    } else {
-        format!("{}@{}", host.user.trim(), host.hostname.trim())
-    };
-    args.push(format!("{}:{}/", user_at, target_dir.trim_end_matches('/')));
+    // Een MAP gaat verpakt (zie targz_dir): een tijdelijke .tar.gz hiernaast,
+    // die naar de host, en daar uitpakken. Een bestand gaat zoals het is.
+    let is_dir = src_path.is_dir();
+    let mut sent = SentFile { was_dir: is_dir, ..Default::default() };
+    if is_dir {
+        let tmp = std::env::temp_dir().join(format!("taurus-pack-{}", new_token()));
+        std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+        let archive_name = format!("{}.tar.gz", name);
+        let archive = tmp.join(&archive_name);
+        // Inpakken en versturen in een adem, maar het opruimen erbuiten: het
+        // archief is hier alleen vervoersverpakking en moet ook weg als er
+        // halverwege iets misgaat.
+        let r = targz_dir(src_path, &archive).and_then(|()| scp_put(&host, &archive, &remote_dir));
+        let _ = std::fs::remove_dir_all(&tmp);
+        r?;
 
-    let out = quiet_command(&scp_program())
-        .args(&args)
-        .output()
-        .map_err(|e| format!("scp starten mislukte: {}", e))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        return Err(format!("scp mislukte: {}", err.trim()));
+        let remote_archive = remote_join(&host.os, &remote_dir, &archive_name);
+        match unpack_on_host(&host, &remote_archive, &remote_dir) {
+            Ok(()) => {
+                sent.unpacked = true;
+                sent.path = remote_join(&host.os, &remote_dir, &name);
+            }
+            // Het archief staat er nog: wijs daarnaar, dan is het tenminste te
+            // vinden en met de hand uit te pakken.
+            Err(e) => {
+                sent.unpack_error = e;
+                sent.path = remote_archive;
+            }
+        }
+    } else {
+        scp_put(&host, src_path, &remote_dir)?;
+        sent.path = remote_join(&host.os, &remote_dir, &name);
     }
-    Ok(remote_join(&host.os, &remote_dir, &name))
+
+    // Nu -- en alleen nu -- mag het origineel hier weg. Bij een map alleen als
+    // hij daar ook echt uitgepakt is: een archief dat niet openging is geen
+    // bruikbare kopie. Lukt het weggooien niet (bestand in gebruik, geen
+    // rechten), dan is de overdracht daarmee niet mislukt -- het staat op de
+    // host en de agent kan het openen. Dat verschil geven we apart terug, zodat
+    // de melding kan zeggen wat er wel en niet gebeurd is in plaats van een
+    // geslaagde kopie als fout te presenteren.
+    if remove_src && (!is_dir || sent.unpacked) {
+        let rm = if is_dir {
+            std::fs::remove_dir_all(src_path)
+        } else {
+            std::fs::remove_file(src_path)
+        };
+        match rm {
+            Ok(()) => sent.src_removed = true,
+            Err(e) => sent.src_error = e.to_string(),
+        }
+    }
+    Ok(sent)
 }
 
 // ---------- werkmap verplaatsen tussen machines (#102) ----------
@@ -4842,6 +4977,16 @@ fn unique_path(dest: std::path::PathBuf) -> std::path::PathBuf {
     }
 }
 
+// Naam voor een geplakt klembord-object. "pasted (3).txt" naast "pasted (4).txt"
+// zegt niets: welke van de twee zat er nou in die prompt? Een kort willekeurig
+// kenmerk maakt elke plak op zichzelf herkenbaar -- in de dropper-lijst, in de
+// prompt en in de input-map. unique_path blijft eromheen staan voor het
+// (astronomisch kleine) geval dat dezelfde naam twee keer valt.
+fn pasted_name(ext: &str) -> String {
+    let id: String = new_token().chars().take(6).collect();
+    format!("pasted-{}.{}", id, ext)
+}
+
 // Ligt de (nog niet bestaande) bestemming BINNEN de bron? Dan zou
 // copy_recursive de map in zichzelf blijven kopieren tot de schijf vol is
 // (bv. de werkmap zelf op de dropzone slepen: dest = <src>\input\<naam>).
@@ -4962,14 +5107,57 @@ fn clipboard_file_paths() -> Vec<String> {
     Vec::new()
 }
 
-// Sla de inhoud van het klembord op als bestand(en) in <cwd>\input en geef de
-// absolute paden terug. Volgorde: eerst gekopieerde BESTANDEN (Ctrl+C in
-// Verkenner -> die kopieren we in), dan een AFBEELDING (als PNG), dan TEKST
-// (.txt). Zo werkt "Plak object" ook voor een gekopieerd bestand -- niet alleen
-// voor tekst/afbeelding die nog geen bestand zijn.
+const CLIPBOARD_EMPTY: &str = "klembord bevat geen bestand, afbeelding of tekst";
+
+// Schrijf wat er op het klembord ligt en nog GEEN bestand is -- een afbeelding
+// (als PNG) of tekst (.txt) -- weg in `dir`. None = er ligt geen van beide.
+// Eigen functie omdat "Plak object" bij een remote sessie hetzelfde object nodig
+// heeft, maar in een tijdelijke map: van daar gaat het met scp naar de host.
+fn clipboard_object_to_dir(
+    app: &AppHandle,
+    dir: &Path,
+) -> Result<Option<std::path::PathBuf>, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    // Afbeelding -> PNG.
+    if let Ok(img) = app.clipboard().read_image() {
+        let (w, h) = (img.width(), img.height());
+        let rgba = img.rgba();
+        if w > 0 && h > 0 && rgba.len() as u32 == w * h * 4 {
+            let dest = unique_path(dir.join(pasted_name("png")));
+            let file = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut writer = enc.write_header().map_err(|e| e.to_string())?;
+            writer.write_image_data(rgba).map_err(|e| e.to_string())?;
+            return Ok(Some(dest));
+        }
+    }
+
+    // Tekst. Geen tekstformaat op het klembord is geen leesfout maar een leeg
+    // antwoord (arboard geeft dan ContentNotAvailable); de aanroeper maakt daar
+    // een leesbare melding van in plaats van een plugin-foutstring.
+    let text = match app.clipboard().read_text() {
+        Ok(t) => t,
+        Err(_) => return Ok(None),
+    };
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let dest = unique_path(dir.join(pasted_name("txt")));
+    std::fs::write(&dest, text).map_err(|e| e.to_string())?;
+    Ok(Some(dest))
+}
+
+// "Plak object" bij een sessie op DEZE computer: sla de inhoud van het klembord
+// op als bestand(en) in <cwd>\input en geef de absolute paden terug. Volgorde:
+// eerst gekopieerde BESTANDEN (Ctrl+C in Verkenner -> die kopieren we in), dan
+// een AFBEELDING (als PNG), dan TEKST (.txt). Zo werkt de knop ook voor een
+// gekopieerd bestand -- niet alleen voor tekst/afbeelding die nog geen bestand
+// zijn. De remote tegenhanger is save_clipboard_to_host.
 #[tauri::command]
 fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, String> {
-    use tauri_plugin_clipboard_manager::ClipboardExt;
     let input_dir = Path::new(&cwd).join("input");
     std::fs::create_dir_all(&input_dir).map_err(|e| e.to_string())?;
 
@@ -5001,30 +5189,70 @@ fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, S
         }
     }
 
-    // 2) Afbeelding op het klembord -> PNG.
-    if let Ok(img) = app.clipboard().read_image() {
-        let (w, h) = (img.width(), img.height());
-        let rgba = img.rgba();
-        if w > 0 && h > 0 && rgba.len() as u32 == w * h * 4 {
-            let dest = unique_path(input_dir.join("pasted.png"));
-            let file = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
-            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
-            enc.set_color(png::ColorType::Rgba);
-            enc.set_depth(png::BitDepth::Eight);
-            let mut writer = enc.write_header().map_err(|e| e.to_string())?;
-            writer.write_image_data(rgba).map_err(|e| e.to_string())?;
-            return Ok(vec![dest.to_string_lossy().into_owned()]);
+    // 2) Afbeelding of tekst -> een nieuw bestand in de input-map.
+    match clipboard_object_to_dir(&app, &input_dir)? {
+        Some(dest) => Ok(vec![dest.to_string_lossy().into_owned()]),
+        None => Err(CLIPBOARD_EMPTY.to_string()),
+    }
+}
+
+// "Plak object" bij een sessie op een ANDERE machine. Het klembord is bytes in
+// het geheugen van deze computer, dus er moet eerst een bestand van komen
+// voordat scp er iets mee kan. Dat bestand komt in een tijdelijke map en gaat
+// daarna weer weg: de plek waar het hoort te staan is de input-map op de host,
+// en een tweede exemplaar hier zou de agent alleen op het verkeerde pad zetten.
+// Een gekopieerd BESTAND (CF_HDROP) bestaat al -- dat gaat rechtstreeks vanaf
+// zijn eigen plek, zonder tussenkopie en zonder dat er iets wordt weggegooid.
+// async: scp gaat over het netwerk en mag de UI-thread niet vasthouden. Het
+// klembord lezen kan daar: arboard opent het Windows-klembord met
+// OpenClipboard(NULL), en dat is niet aan een thread gebonden.
+#[tauri::command(async)]
+fn save_clipboard_to_host(
+    app: AppHandle,
+    host_id: String,
+    remote_cwd: String,
+) -> Result<Vec<String>, String> {
+    // Meteen melden i.p.v. eerst een tijdelijk bestand schrijven voor een
+    // overdracht die op deze route toch niet kan (zie WSL_NO_FILES).
+    let host = lookup_host(&host_id)?.ok_or_else(|| format!("onbekende host: {}", host_id))?;
+    if host.via == "wsl" {
+        return Err(WSL_NO_FILES.into());
+    }
+
+    // 1) Gekopieerde bestanden: rechtstreeks van hun eigen plek naar de host.
+    let files = clipboard_file_paths();
+    if !files.is_empty() {
+        let mut sent = Vec::new();
+        for f in files {
+            if !Path::new(&f).exists() {
+                continue;
+            }
+            sent.push(scp_to_host(host_id.clone(), f, remote_cwd.clone(), false)?.path);
+        }
+        if !sent.is_empty() {
+            return Ok(sent);
         }
     }
 
-    // 3) Tekst.
-    let text = app.clipboard().read_text().map_err(|e| e.to_string())?;
-    if text.is_empty() {
-        return Err("klembord bevat geen bestand, afbeelding of tekst".to_string());
-    }
-    let dest = unique_path(input_dir.join("pasted.txt"));
-    std::fs::write(&dest, text).map_err(|e| e.to_string())?;
-    Ok(vec![dest.to_string_lossy().into_owned()])
+    // 2) Afbeelding of tekst: eerst een tijdelijk bestand, dan naar de host, en
+    // dan hier weer weg. Het opruimen staat buiten het resultaat, zodat er ook
+    // niets in %TEMP% blijft slingeren als de overdracht faalt -- daar kan
+    // klembordinhoud in staan die niemand daar hoeft te vinden.
+    let tmp = std::env::temp_dir().join(format!("taurus-paste-{}", new_token()));
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let out = match clipboard_object_to_dir(&app, &tmp) {
+        Ok(Some(local)) => scp_to_host(
+            host_id,
+            local.to_string_lossy().into_owned(),
+            remote_cwd,
+            false,
+        )
+        .map(|s| vec![s.path]),
+        Ok(None) => Err(CLIPBOARD_EMPTY.to_string()),
+        Err(e) => Err(e),
+    };
+    let _ = std::fs::remove_dir_all(&tmp);
+    out
 }
 
 // Schrijf tekst naar het Windows-klembord via native code i.p.v. de WebView2
@@ -6699,6 +6927,7 @@ pub fn run() {
             open_folder,
             save_dropped_path,
             save_clipboard_to_input,
+            save_clipboard_to_host,
             copy_to_clipboard,
             branding,
             list_tts_voices,
@@ -8350,6 +8579,64 @@ mod tests {
         std::fs::write(dir.join("x (2).txt"), "b").unwrap();
         assert_eq!(unique_path(f.clone()), dir.join("x (3).txt"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Een map naar een remote sessie gaat als .tar.gz over en wordt daar met
+    // `tar -xzf -C <input>` uitgepakt. Dat komt alleen goed als de mapnaam de
+    // BOVENSTE laag in het archief is; zonder die laag zou de inhoud los in de
+    // input-map belanden. Ook een controle dat het gzip-deel echt is afgesloten:
+    // pakken we het hier terug uit, dan kan de host dat ook.
+    #[test]
+    fn targz_dir_puts_the_folder_name_on_top() {
+        let root = std::env::temp_dir().join(format!("taurus-test-pack-{}", std::process::id()));
+        let src = root.join("mijn map");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join("a.txt"), "een").unwrap();
+        std::fs::write(src.join("sub").join("b.txt"), "twee").unwrap();
+        let archive = root.join("pak.tar.gz");
+        targz_dir(&src, &archive).unwrap();
+
+        let f = std::fs::File::open(&archive).unwrap();
+        let dec = flate2::read::GzDecoder::new(std::io::BufReader::new(f));
+        let names: Vec<String> = tar::Archive::new(dec)
+            .entries()
+            .unwrap()
+            .map(|e| e.unwrap().path().unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert!(names.iter().any(|n| n == "mijn map/a.txt"), "{:?}", names);
+        assert!(names.iter().any(|n| n == "mijn map/sub/b.txt"), "{:?}", names);
+
+        // En dan de vraag die er op de host toe doet: kan de SYSTEEM-tar dit
+        // lezen? Dat is wat er daar uitpakt -- bsdtar op Windows, GNU tar op
+        // Linux. Kan die het hier niet, dan kan hij het daar ook niet. Staat er
+        // geen tar op deze machine, dan zegt deze controle niets en slaan we hem
+        // over; de uitpaktest hierboven staat op eigen benen.
+        // Op Windows expliciet de tar UIT SYSTEM32: dat is de bsdtar die op een
+        // Windows-host uitpakt. Een GNU tar die via Git op het PATH staat zou
+        // hier iets anders meten dan wat daar draait.
+        let tar_exe = match std::env::var("SystemRoot") {
+            Ok(r) => Path::new(&r).join("System32").join("tar.exe"),
+            Err(_) => std::path::PathBuf::from("tar"),
+        };
+        if let Ok(o) = std::process::Command::new(&tar_exe).arg("-tzf").arg(&archive).output() {
+            assert!(
+                o.status.success(),
+                "systeem-tar kon het archief niet lezen: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
+            let listed = String::from_utf8_lossy(&o.stdout).replace('\\', "/");
+            assert!(listed.contains("mijn map/sub/b.txt"), "{}", listed);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pasted_name_differs_per_call() {
+        let a = pasted_name("txt");
+        let b = pasted_name("txt");
+        assert_ne!(a, b);
+        assert!(a.starts_with("pasted-"), "{}", a);
+        assert_eq!(a.len(), "pasted-".len() + 6 + ".txt".len());
     }
 
     #[test]
