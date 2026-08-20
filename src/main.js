@@ -5493,6 +5493,15 @@ async function dropToRemote(src) {
   return true;
 }
 
+// De focus hoort in de terminal te liggen, niet op het knopje waarmee je net iets
+// in de prompt zette. Een klik laat een <button> in de webview namelijk de focus
+// houden, en dan voert de volgende Enter of spatie dezelfde knop nog eens uit --
+// bij "Plak object" komt er zo ongevraagd een tweede bestand bij.
+function focusTerminal() {
+  const s = sessions.get(current);
+  if (s) s.term.focus();
+}
+
 // Schrijf een absoluut pad in de actieve terminal (met quotes bij spaties, gevolgd
 // door een spatie zodat je meteen door kunt typen). `silent` = geen melding als er
 // geen actieve terminal is (voor auto-invoegen bij een drop op het startscherm).
@@ -5501,6 +5510,7 @@ function insertPathIntoTerminal(absPath, silent) {
   if (!s) { if (!silent) toast(t("dropper_no_session"), "err"); return; }
   const arg = /\s/.test(absPath) ? `"${absPath}"` : absPath;
   invoke("write_session", { id: s.id, data: arg + " " });
+  s.term.focus(); // het pad staat in de prompt; daar hoort de focus ook
 }
 
 // Voeg een net geplaatst bestand toe aan het overzicht -- ALLEEN wat jij deze sessie
@@ -5586,15 +5596,20 @@ function wireFileDropper() {
   els.dropperPaste.addEventListener("click", async () => {
     // Klembord-plakken schrijft eerst lokaal (save_clipboard_to_input) en zou
     // dan nog overgezet moeten worden; die tweetrapsvorm bestaat nog niet.
-    if (activeSessionIsRemote()) { toast(t("dropper_paste_local_only"), "err"); return; }
-    const cwd = dropperCwd();
-    if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
+    // Wat er ook gebeurt: de focus gaat terug naar de terminal (zie
+    // focusTerminal), ook als er niets te plakken valt -- anders blijft de knop
+    // scherp staan voor de eerstvolgende Enter.
     try {
+      if (activeSessionIsRemote()) { toast(t("dropper_paste_local_only"), "err"); return; }
+      const cwd = dropperCwd();
+      if (!cwd) { toast(t("dropper_need_project"), "err"); return; }
       const paths = await invoke("save_clipboard_to_input", { cwd });
       for (const p of paths) { insertPathIntoTerminal(p, true); addDropperEntry(p); }
     } catch (err) {
       dbg(`paste-object FAIL: ${err}`);
       toast(t("dropper_paste_failed") + " " + err, "err");
+    } finally {
+      focusTerminal();
     }
   });
 }

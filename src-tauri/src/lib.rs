@@ -4842,6 +4842,16 @@ fn unique_path(dest: std::path::PathBuf) -> std::path::PathBuf {
     }
 }
 
+// Naam voor een geplakt klembord-object. "pasted (3).txt" naast "pasted (4).txt"
+// zegt niets: welke van de twee zat er nou in die prompt? Een kort willekeurig
+// kenmerk maakt elke plak op zichzelf herkenbaar -- in de dropper-lijst, in de
+// prompt en in de input-map. unique_path blijft eromheen staan voor het
+// (astronomisch kleine) geval dat dezelfde naam twee keer valt.
+fn pasted_name(ext: &str) -> String {
+    let id: String = new_token().chars().take(6).collect();
+    format!("pasted-{}.{}", id, ext)
+}
+
 // Ligt de (nog niet bestaande) bestemming BINNEN de bron? Dan zou
 // copy_recursive de map in zichzelf blijven kopieren tot de schijf vol is
 // (bv. de werkmap zelf op de dropzone slepen: dest = <src>\input\<naam>).
@@ -5006,7 +5016,7 @@ fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, S
         let (w, h) = (img.width(), img.height());
         let rgba = img.rgba();
         if w > 0 && h > 0 && rgba.len() as u32 == w * h * 4 {
-            let dest = unique_path(input_dir.join("pasted.png"));
+            let dest = unique_path(input_dir.join(pasted_name("png")));
             let file = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
             let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
             enc.set_color(png::ColorType::Rgba);
@@ -5022,7 +5032,7 @@ fn save_clipboard_to_input(app: AppHandle, cwd: String) -> Result<Vec<String>, S
     if text.is_empty() {
         return Err("klembord bevat geen bestand, afbeelding of tekst".to_string());
     }
-    let dest = unique_path(input_dir.join("pasted.txt"));
+    let dest = unique_path(input_dir.join(pasted_name("txt")));
     std::fs::write(&dest, text).map_err(|e| e.to_string())?;
     Ok(vec![dest.to_string_lossy().into_owned()])
 }
@@ -8350,6 +8360,15 @@ mod tests {
         std::fs::write(dir.join("x (2).txt"), "b").unwrap();
         assert_eq!(unique_path(f.clone()), dir.join("x (3).txt"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pasted_name_differs_per_call() {
+        let a = pasted_name("txt");
+        let b = pasted_name("txt");
+        assert_ne!(a, b);
+        assert!(a.starts_with("pasted-"), "{}", a);
+        assert_eq!(a.len(), "pasted-".len() + 6 + ".txt".len());
     }
 
     #[test]
