@@ -456,6 +456,22 @@
             <div class="e-field"><span class="e-cap" data-i18n="cap_host">Machine</span>
               <select id="na-host"></select></div>
           </div>
+          <!-- Een werkproces mag ook van GitHub komen (#186). Leeg = de oude weg:
+               je wijst een map aan die er al staat. Met een bron haalt Taurus het
+               op en houdt hij de versie bij, net als bij een rol -- maar zonder
+               het slot: een proces dat niet als ICM-werkproces te herkennen is
+               krijgt een waarschuwing en geen weigering. -->
+          <div class="e-field"><span class="e-cap" data-i18n="na_psource">Bron (optioneel)</span>
+            <div class="e-pathrow">
+              <input id="na-psource" type="text" autocomplete="off" data-i18n-ph="na_psource_ph" />
+              <button id="na-pread" class="btn-ghost" data-i18n="na_read">Lezen</button>
+            </div>
+            <div id="na-pnote" class="hint" data-i18n="na_psource_hint">Leeg = je wijst hieronder een map aan die er al is.</div></div>
+          <!-- Waar dit draait (#188). Een werkproces kan een ONDERDEEL zijn van een
+               groter proces: vier fasen, en fase 3 start iets eigen. Dan hoort die
+               kaart onder zijn gastheer te staan en niet los in de lijst. -->
+          <div class="e-field"><span class="e-cap" data-i18n="na_pwhere">Waar draait dit?</span>
+            <select id="na-pwhere"></select></div>
           <div class="e-field">
             <span class="e-cap" id="na-pathcap" data-i18n="cap_workdir">Werkmap</span>
             <div class="e-pathrow">
@@ -485,7 +501,7 @@
         </div>
         <div class="modal-actions">
           <button id="na-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
-          <button id="na-save" class="btn-primary" data-i18n="new_agent_create">Maak agent</button>
+          <button id="na-save" class="btn-primary" data-i18n="new_agent_create">Maak</button>
         </div>
         <div id="na-status" class="status-msg"></div>
       </div>

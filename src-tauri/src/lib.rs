@@ -53,6 +53,14 @@ struct Project {
     // staat op zichzelf.
     #[serde(default)]
     parent: String,
+    // "agent" of "process" -- in welke lijst deze kaart hoort. Stond er eerst
+    // niet: de zijbalk leidde het af uit `role || origin`, en dat hield precies
+    // zolang alleen rollen en specialisten een bron hadden. Sinds een PROCES ook
+    // van GitHub kan komen (#186) klopt die afleiding niet meer -- zo'n proces
+    // verhuisde naar de agents. Leeg = een kaart van voor dit veld; dan geldt de
+    // oude afleiding nog, zodat bestaande projects.json niets verschuift.
+    #[serde(default)]
+    kind: String,
 }
 
 // Herkomst van een gekloonde map. Alleen wat we nodig hebben om te weten of hij
@@ -707,6 +715,25 @@ fn icm_shape(files: &[String]) -> &'static str {
     }
 }
 
+// Waaraan je een werkproces HERKENT. Ruimer dan icm_shape, en met een ander doel:
+// icm_shape beslist of een ROL-uitrol door mag gaan en is gemeten over de dertien
+// repo's die dat aangaat -- daar is een streng bewijs op zijn plek. Dit is voor de
+// waarschuwing bij een PROCES, en die blokkeert niets. Dan hoort een CLAUDE.md of
+// een agent.md ook te tellen: een werkproces dat alleen daarmee komt is nog steeds
+// een werkproces, en de gebruiker mag zelf beslissen of hij het wil.
+const ICM_MARKERS: [&str; 4] = ["CLAUDE.md", "SKILL.md", "agent.md", "identity.md"];
+
+// Welke van die markers NIET in de wortel staan. Alle vier ontbreken = niets
+// herkend; dan is de waarschuwing op zijn plaats. Teruggeven in plaats van zelf
+// een tekst maken, zodat de UI hem in de taal van de gebruiker kan zetten.
+fn icm_missing_markers(files: &[String]) -> Vec<String> {
+    ICM_MARKERS
+        .iter()
+        .filter(|m| !files.iter().any(|f| f.eq_ignore_ascii_case(m)))
+        .map(|m| (*m).to_string())
+        .collect()
+}
+
 #[derive(serde::Serialize, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 struct SourceProbe {
@@ -722,6 +749,10 @@ struct SourceProbe {
     has_claude_md: bool,
     // De wortelbestanden die ertoe doen, zodat de UI kan tonen wat er ligt.
     files: Vec<String>,
+    // Welke ICM-markers ontbreken (zie ICM_MARKERS). Leeg betekent niet "goed" en
+    // vol betekent niet "fout" -- het is wat de UI nodig heeft om te waarschuwen
+    // zonder te weigeren.
+    missing: Vec<String>,
 }
 
 // Naam en omschrijving uit de gekloonde map halen. Volgorde: taurus.json (als
@@ -834,7 +865,12 @@ fn probe_temp_dir(url: &str) -> std::path::PathBuf {
 // wat het is. De wegwerpclone gaat meteen weer weg; uitrollen kloont opnieuw
 // naar de map die de gebruiker kiest.
 #[tauri::command(async)]
-fn git_probe(source: String) -> Result<SourceProbe, String> {
+// `strict` (afwezig = ja) beslist of een bron die niet als ICM-werkproces te
+// herkennen is geweigerd wordt. Voor een ROL blijft dat zo: die wordt in een veld
+// gezet waar de methode iets betekent. Een PROCES mag je overal vandaan halen --
+// daar is dezelfde bevinding een waarschuwing en geen slot.
+fn git_probe(source: String, strict: Option<bool>) -> Result<SourceProbe, String> {
+    let strict = strict.unwrap_or(true);
     // Lokale bron: geen clone, geen netwerk, gewoon kijken wat er ligt.
     if let Some(dir) = local_source(&source) {
         let mut p = SourceProbe {
@@ -853,7 +889,8 @@ fn git_probe(source: String) -> Result<SourceProbe, String> {
         }
         p.has_claude_md = p.files.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md"));
         p.shape = icm_shape(&p.files).into();
-        if p.shape == "unknown" {
+        p.missing = icm_missing_markers(&p.files);
+        if strict && p.shape == "unknown" {
             return Err(format!(
                 "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
                 p.files.join(", ")
@@ -901,6 +938,7 @@ fn git_probe(source: String) -> Result<SourceProbe, String> {
     }
     p.has_claude_md = p.files.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md"));
     p.shape = icm_shape(&p.files).into();
+    p.missing = icm_missing_markers(&p.files);
     let (name, desc) = read_repo_meta(&tmp, &url);
     p.name = name;
     p.description = desc;
@@ -912,7 +950,7 @@ fn git_probe(source: String) -> Result<SourceProbe, String> {
     // Een weigering die alleen nee zegt leert je niets; met de wortellijst zie je
     // of je het verkeerde adres plakte of de verkeerde branch pakte. Dit gebeurt
     // in de wegwerpmap, dus het kost je niets dan het wachten.
-    if p.shape == "unknown" {
+    if strict && p.shape == "unknown" {
         return Err(format!(
             "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
             if files_seen.is_empty() { "niets".into() } else { files_seen }
@@ -1021,7 +1059,11 @@ fn git_deploy(
     // CLAUDE.md die wij schrijven met die naam begint: kiest iemand "Sofie", dan
     // hoort daar niet de naam van de bron te staan.
     name: Option<String>,
+    // Zie git_probe: een rol wordt geweigerd, een proces gewaarschuwd. Afwezig =
+    // streng, zodat een andere aanroeper de regel niet per ongeluk kwijt is.
+    strict: Option<bool>,
 ) -> Result<DeployReport, String> {
+    let strict = strict.unwrap_or(true);
     let gekozen = name
         .as_deref()
         .map(str::trim)
@@ -1053,10 +1095,19 @@ fn git_deploy(
             .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
             .unwrap_or_default();
         if icm_shape(&roots) == "unknown" {
-            let _ = std::fs::remove_dir_all(Path::new(&dest));
-            return Err(format!(
-                "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
-                roots.join(", ")
+            if strict {
+                let _ = std::fs::remove_dir_all(Path::new(&dest));
+                return Err(format!(
+                    "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
+                    roots.join(", ")
+                ));
+            }
+            // Niet streng: de kopie blijft staan en het rapport zegt wat er niet
+            // gevonden is. De gebruiker koos deze bron; dit is een bevinding, geen
+            // veto.
+            rep.notes.push(format!(
+                "geen ICM-markering gevonden ({})",
+                icm_missing_markers(&roots).join(", ")
             ));
         }
         if roots.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md")) {
@@ -1107,14 +1158,21 @@ fn git_deploy(
     // aanroepbaar en dan zou de regel te omzeilen zijn. De clone staat er al, dus
     // opruimen en dan pas weigeren -- niets achterlaten wat de gebruiker niet vroeg.
     if icm_shape(&roots) == "unknown" {
-        if local {
-            let _ = std::fs::remove_dir_all(Path::new(&dest));
-        } else {
-            rep.notes.push(format!("de clone staat nog op {}", dest));
+        if strict {
+            if local {
+                let _ = std::fs::remove_dir_all(Path::new(&dest));
+            } else {
+                rep.notes.push(format!("de clone staat nog op {}", dest));
+            }
+            return Err(format!(
+                "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
+                roots.join(", ")
+            ));
         }
-        return Err(format!(
-            "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
-            roots.join(", ")
+        // Niet streng: de clone blijft, met de bevinding in het rapport.
+        rep.notes.push(format!(
+            "geen ICM-markering gevonden ({})",
+            icm_missing_markers(&roots).join(", ")
         ));
     }
 
@@ -9098,6 +9156,9 @@ mod tests {
             origin: None,
             role: String::new(),
             parent: String::new(),
+            // Leeg: de tests dekken juist de kaarten van VOOR dit veld, waar de
+            // zijbalk het nog uit role/origin afleidt.
+            kind: String::new(),
         }
     }
 
@@ -9327,7 +9388,7 @@ mod tests {
     #[test]
     #[ignore]
     fn probing_the_real_architect_repo_reads_what_is_there() {
-        let p = git_probe("RinDig/icm-architect".to_string()).expect("probe mislukt");
+        let p = git_probe("RinDig/icm-architect".to_string(), None).expect("probe mislukt");
         assert_eq!(p.url, "https://github.com/RinDig/icm-architect");
         assert_eq!(p.shape, "skill", "SKILL.md in de wortel = skill-vorm");
         assert!(!p.has_claude_md, "deze repo levert er geen; Taurus schrijft er dan een");
@@ -9349,6 +9410,7 @@ mod tests {
             "blueprints/".into(),
             false,
             None,
+            None,
         )
         .unwrap_err();
         assert!(err.contains("niet leeg"), "onverwachte fout: {}", err);
@@ -9360,14 +9422,14 @@ mod tests {
     #[ignore]
     fn a_repo_that_is_not_an_icm_workspace_is_refused() {
         // Een werkmap-rol: identity.md, en die levert zelf een CLAUDE.md mee.
-        let mimir = git_probe("astetic-dev/mimir".to_string()).expect("mimir hoort door te komen");
+        let mimir = git_probe("astetic-dev/mimir".to_string(), None).expect("mimir hoort door te komen");
         assert_eq!(mimir.shape, "workspace");
         assert!(mimir.has_claude_md, "mimir levert zelf een CLAUDE.md; die blijft ongemoeid");
 
         // Eén die het niet is -- Taurus zelf. De melding moet zeggen wat er mist
         // EN wat er wel staat, want anders weet je niet of je het verkeerde adres
         // plakte of de verkeerde branch pakte.
-        let err = git_probe("astetic-dev/taurus".to_string()).unwrap_err();
+        let err = git_probe("astetic-dev/taurus".to_string(), None).unwrap_err();
         assert!(err.contains("identity.md"), "moet zeggen wat er mist: {}", err);
         assert!(err.contains("SKILL.md"), "moet zeggen wat er mist: {}", err);
         assert!(err.contains("src-tauri"), "moet zeggen wat er wel staat: {}", err);
@@ -9392,6 +9454,8 @@ mod tests {
             // Een gekozen naam hoort bovenaan die CLAUDE.md te staan, niet de naam
             // die de bron zelf meebrengt.
             Some("Sofie".into()),
+            // Streng: een ROL-uitrol blijft weigeren wat geen werkproces is.
+            None,
         )
         .expect("deploy mislukt");
         assert_eq!(rep.claude_md, "written");
@@ -9412,6 +9476,7 @@ mod tests {
             "architect".into(),
             "blueprints/".into(),
             false,
+            None,
             None,
         );
         assert!(again.is_err());
