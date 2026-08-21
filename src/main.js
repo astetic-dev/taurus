@@ -176,7 +176,7 @@ const I18N = {
     cancel: "Annuleer", save: "Opslaan",
     manage_projects: "Processen beheren…", add_agent: "＋ Agent toevoegen",
     // Nieuwe agent (#157) en bewerken/verwijderen (#158)
-    new_agent_title: "Nieuwe agent", new_agent_create: "Maak agent",
+    new_agent_title: "Nieuwe agent", new_agent_create: "Maak",
     // De zeven ICM-rollen (#159)
     na_kind: "Wat voor agent?", na_process: "Nieuw proces",
     na_kind_plain: "Map die je al hebt",
@@ -527,7 +527,7 @@ const I18N = {
     cancel: "Cancel", save: "Save",
     manage_projects: "Manage processes…", add_agent: "＋ Add agent",
     // New agent (#157) and edit/delete (#158)
-    new_agent_title: "New agent", new_agent_create: "Create agent",
+    new_agent_title: "New agent", new_agent_create: "Create",
     // The seven ICM roles (#159)
     na_kind: "What kind of agent?", na_process: "New process",
     na_kind_plain: "A folder you have",
