@@ -5169,7 +5169,21 @@ async function naDeploy() {
   if (fresh) selectById(fresh.id);
 }
 
-function openNewAgent() {
+// `kind` = waar het scherm op openstaat. De ＋ bij AGENTS hoort een agent te
+// tonen, niet een proces: het scherm doet beide, dus welke van de twee je ziet
+// hoort te volgen uit welke ＋ je indrukte. Zonder dit stond er "Nieuw proces" in
+// beeld en moest je eerst een tegel aanklikken om te zien waar je was.
+//
+// Welke agent er dan voorstaat: de eerste rol die AAN staat. Dat is normaal de
+// architect (hij staat vooraan in ROLES), maar zet je die uit dan is voorstaan wat
+// er niet is een lege keuze. Staat er geen enkele rol aan, dan blijft "vrij ICM-
+// adres" over -- dat werkt altijd.
+function firstAgentKind() {
+  const on = enabledRoles();
+  return on.length ? on[0].id : "free";
+}
+
+function openNewAgent(kind) {
   naDraft = blankRow();
   els.naLabel.value = "";
   els.naPath.value = "";
@@ -5188,9 +5202,12 @@ function openNewAgent() {
   naSay(els.naNote, "", "");
   renderNewAgentHost();
   renderNewAgentAgent();
-  selectNaKind("plain");
+  // Eerst tonen, dan kiezen. selectNaKind zet de focus in het veld dat bij de
+  // keuze hoort (de knopnaam bij een proces, de bron bij een agent), en focus()
+  // op iets in een verborgen venster doet niets -- daarom stond die van het proces
+  // hier nog een tweede keer. Nu geldt het voor beide soorten.
   els.newagentModal.classList.remove("hidden");
-  els.naLabel.focus();
+  selectNaKind(kind || "plain");
 }
 
 function naSay(el, text, cls) {
@@ -6098,8 +6115,9 @@ const SIDEBAR_ACTIONS = {
   "proc-fold": () => toggleFold("proc-fold"),
   "drop-fold": () => toggleFold("drop-fold"),
   "assign-btn": () => openAssignments(),
-  "add-project-btn": () => openNewAgent(),
-  "add-process-btn": () => { openNewAgent(); selectNaKind("plain"); },
+  // De ＋ boven AGENTS opent op een agent, de ＋ boven PROCESSEN op een proces.
+  "add-project-btn": () => openNewAgent(firstAgentKind()),
+  "add-process-btn": () => openNewAgent("plain"),
   "attach-btn": () => openAttachModal(),
   "hosts-btn": () => openHostModal(),
   "proc-find": () => toggleProcFilter(),
