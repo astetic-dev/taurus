@@ -3377,6 +3377,10 @@ function recordSession(s) {
       accent: s.accent || "#7c9cff", mode: s.mode || "default",
       agent: s.agent || "claude", model: s.model || "",
       hostId: s.hostId || "", projectId: s.projectId || "",
+      // Bij welke mux-sessie deze tab hoorde. Hierdoor kan het processenscherm
+      // straks de echte titel tonen in plaats van de mapnaam -- ook als deze tab
+      // dicht is en de agent op de host doorloopt.
+      muxName: s.muxName || "",
       created: 0, lastSeen: 0, wasOpen: true,
     },
   }).catch(() => {});
