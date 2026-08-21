@@ -165,6 +165,7 @@ const I18N = {
     ph_path_remote: "bijv. C:\\Users\\arjen\\project of /home/arjen/project",
     grp_comfort: "Terminal-comfort", comfort_hint: "(per voorkeur aan/uit)",
     c_copy: "Selectie kopieert automatisch", c_paste: "Rechtermuisklik plakt", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
+    c_trimsel: "Selectie opschonen bij kopiëren",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
     c_tabs: "Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude-status op de tab (✶ Orbiting…)",
     c_groups: "Tabs uit dezelfde map bundelen vanaf", c_groups_unit: "tabs",
@@ -283,6 +284,7 @@ const I18N = {
     help_html_full: "Toont de HTML-preview op het volledige venster en verbergt de terminal zolang de preview open is.",
     help_fullpaths: "Vraagt Claude volledige bestandspaden te printen, zodat ze klikbaar worden.\nVoorbeeld: C:\\project\\index.html i.p.v. alleen index.html.",
     help_copyselect: "Zodra je tekst in de terminal selecteert, gaat die automatisch naar het klembord - geen Ctrl+C nodig.",
+    help_trimsel: "Een terminal vult elke regel op tot de volle breedte, en Claude laat zijn tekst twee spaties inspringen. Aan: je klembord krijgt de tekst zonder die opvulling en zonder de gedeelde inspringing - de onderlinge indentatie van code blijft staan. Uit: je krijgt precies de rechthoek die je selecteerde.",
     help_pasteright: "Een rechtermuisklik in de terminal plakt de klembordinhoud.",
     help_agentmouse: "Wie krijgt de muis in de terminal?\nUit: slepen selecteert tekst lokaal, rechtsklik plakt.\nAan: de agent (bijv. een TUI-menu) ontvangt klikken en scrollen. Geldt voor nieuwe sessies.",
     help_ctrlshift: "Ctrl+Shift+C kopieert en Ctrl+Shift+V plakt in de terminal. De Shift-variant houdt gewone Ctrl+C vrij om een programma te onderbreken.",
@@ -516,6 +518,7 @@ const I18N = {
     ph_path_remote: "e.g. C:\\Users\\arjen\\project or /home/arjen/project",
     grp_comfort: "Terminal comfort", comfort_hint: "(toggle to taste)",
     c_copy: "Selection copies automatically", c_paste: "Right-click pastes", c_ctrl: "Ctrl+Shift+C / Ctrl+Shift+V",
+    c_trimsel: "Tidy up a copied selection",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
     c_tabs: "Tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude status on the tab (✶ Orbiting…)",
     c_groups: "Group tabs from the same folder from", c_groups_unit: "tabs",
@@ -634,6 +637,7 @@ const I18N = {
     help_html_full: "Shows the HTML preview full-window, hiding the terminal while the preview is open.",
     help_fullpaths: "Asks Claude to print full file paths so they become clickable.\nExample: C:\\project\\index.html instead of just index.html.",
     help_copyselect: "As soon as you select text in the terminal it goes to the clipboard automatically - no Ctrl+C needed.",
+    help_trimsel: "A terminal pads every line out to its full width, and Claude indents its text by two spaces. On: the clipboard gets the text without that padding and without the shared indent - relative indentation inside code stays. Off: you get exactly the rectangle you selected.",
     help_pasteright: "A right-click in the terminal pastes the clipboard contents.",
     help_agentmouse: "Who gets the mouse in the terminal?\nOff: dragging selects text locally, right-click pastes.\nOn: the agent (e.g. a TUI menu) receives clicks and scrolling. Applies to new sessions.",
     help_ctrlshift: "Ctrl+Shift+C copies and Ctrl+Shift+V pastes in the terminal. The Shift variant keeps plain Ctrl+C free to interrupt a program.",
@@ -1055,6 +1059,8 @@ const DEFAULT_SETTINGS = {
   fontSize: 13, scrollback: 8000, cursorBlink: true,
   htmlView: "split",
   copyOnSelect: true, pasteOnRightClick: true, ctrlShiftCV: true,
+  // Een kopie levert de TEKST, niet de rechthoek waar hij in stond (#177).
+  trimSelection: true,
   webLinks: true, search: true, tabShortcuts: true, tabStatus: true,
   // Tabs bundelen zodra het er te veel worden (#90). Onder de drempel verandert
   // er niets; daarboven vouwen sessies uit dezelfde bron samen.
@@ -1103,6 +1109,67 @@ function copyToClipboard(text) {
       console.error("clipboard copy failed:", e);
       toast(t("copy_failed") + " " + e, "err");
     });
+}
+// Waarom we de selectie zelf uit de buffer opbouwen en niet blind vertrouwen op
+// term.getSelection(): Claude Code vult de regels van zijn promptkader op tot de
+// LAATSTE kolom, en dan zet xterm op de volgende rij de vlag isWrapped en plakt
+// beide rijen aan elkaar -- met de opvulling MIDDENIN de string, waar een trim
+// per regel niet bij komt. Dat was de laatste plek waar de vraagregel nog vol
+// spaties zat (#177).
+// Per rij trimmen en dan plakken haalt precies die opvulling weg. Zat er
+// opvulling aan het eind van een rij, dan lag de regelovergang op een spatie en
+// plakken we met een enkele spatie; stond de rij vol tekst tot de rand (een lang
+// pad of een URL), dan plakken we zonder -- daar hoort niets tussen.
+// Vangnet: wijkt onze versie in meer dan witruimte af van wat xterm zelf zegt
+// (kolomselectie met Alt ingedrukt, of coordinaten die net achterlopen), dan
+// gebruiken we xterm's string.
+function readSelection(term) {
+  const raw = term.getSelection();
+  const r = term.getSelectionPosition();
+  if (!raw || !r) return raw;
+  const rows = [];
+  let padded = false;
+  for (let y = r.start.y; y <= r.end.y; y++) {
+    const line = term.buffer.active.getLine(y);
+    if (!line) continue;
+    const from = y === r.start.y ? r.start.x : 0;
+    const to = y === r.end.y ? r.end.x : undefined;
+    // Harde spatie (0xa0) wordt een gewone spatie, net als in xterm zelf.
+    const text = line.translateToString(true, from, to).replace(/\u00a0/g, " ");
+    const cut = text.replace(/ +$/, "");
+    if (line.isWrapped && rows.length) rows[rows.length - 1] += (padded ? " " : "") + cut;
+    else rows.push(cut);
+    padded = cut.length !== text.length;
+  }
+  const rebuilt = rows.join(raw.includes("\r\n") ? "\r\n" : "\n");
+  const bare = (s) => s.replace(/\s+/g, "");
+  return bare(rebuilt) === bare(raw) ? rebuilt : raw;
+}
+// Een selectie uit de terminal is geen platte tekst maar een stuk raster. xterm
+// knipt alleen NOOIT-BESCHREVEN cellen weg (translateToString(trimRight) stopt
+// bij getTrimmedLength), en Claude Code verft zijn regels vol met ECHTE spaties.
+// Wat je plakt sleept daarom de hele regelbreedte mee, plus de twee spaties waar
+// Claude zijn tekst mee laat inspringen -- en dat breekt aan de ontvangende kant
+// regelmatig iets. xterm heeft er geen optie voor, dus we ruimen op aan onze
+// kant, op de string die getSelection() teruggeeft (#177).
+// De GEMEENSCHAPPELIJKE inspringing gaat eraf, niet elke leidende spatie: zo
+// verdwijnen Claude's twee spaties, terwijl een gekopieerd codeblok zijn
+// onderlinge indentatie houdt.
+function tidySelection(text) {
+  if (!text || !settings.trimSelection) return text;
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/).map((l) => l.replace(/[ \t]+$/, ""));
+  // Een stukje te ver doorslepen mag geen lege regels aan kop of staart opleveren.
+  while (lines.length && !lines[0]) lines.shift();
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  if (!lines.length) return "";
+  const indent = lines.reduce((m, l) => (l.trim() ? Math.min(m, l.match(/^ */)[0].length) : m), Infinity);
+  const dedent = indent > 0 && indent < Infinity ? indent : 0;
+  const out = (dedent ? lines.map((l) => l.slice(dedent)) : lines).join(eol);
+  // Alleen maten in het log, nooit inhoud -- net als de rest van clipboard.log.
+  // Hiermee zie je bij een rare plakactie meteen of het opschonen iets deed.
+  if (out.length !== text.length) dbg(`trim ${text.length}->${out.length} regels=${lines.length} inspringing=${dedent}`);
+  return out;
 }
 function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
@@ -3192,13 +3259,13 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   // (streaming/prompt) de selectie net wist, kopieren we de vastgelegde tekst.
   let selTimer = null;
   term.onSelectionChange(() => {
-    const sel = term.getSelection();
+    const sel = readSelection(term);
     if (sel) session.lastSel = sel;
     if (!settings.copyOnSelect) return;
     if (selTimer) clearTimeout(selTimer);
     selTimer = setTimeout(() => {
-      const s = term.getSelection() || session.lastSel;
-      if (s) copyToClipboard(s);
+      const s = readSelection(term) || session.lastSel;
+      if (s) copyToClipboard(tidySelection(s));
     }, 120);
   });
   termPane.addEventListener("mousedown", (e) => { if (e.button === 0) session.lastSel = ""; });
@@ -4329,8 +4396,8 @@ function openTabMenu(x, y, id) {
   });
   m.querySelector('[data-act="speak"]').addEventListener("click", () => {
     closeTabMenu();
-    const sel = s.term.getSelection();
-    if (sel) speak(sel, true); // force: uitspreken is hier expliciet gevraagd
+    const sel = readSelection(s.term);
+    if (sel) speak(tidySelection(sel), true); // force: uitspreken is hier expliciet gevraagd
   });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
   // Verplaatsen werkt op de AGENT achter deze tab; de sessie zelf verhuist niet
@@ -4407,6 +4474,7 @@ function openSettings() {
   els.htmlSplit.checked = settings.htmlView === "split";
   els.htmlFull.checked = settings.htmlView === "full";
   els.setCopy.checked = settings.copyOnSelect;
+  els.setTrimSel.checked = settings.trimSelection;
   els.setPaste.checked = settings.pasteOnRightClick;
   els.setAgentMouse.checked = settings.agentMouse;
   els.setCtrl.checked = settings.ctrlShiftCV;
@@ -4658,6 +4726,7 @@ function saveSettingsFromForm() {
   settings.cursorBlink = els.setCursor.checked;
   settings.htmlView = els.htmlFull.checked ? "full" : "split";
   settings.copyOnSelect = els.setCopy.checked;
+  settings.trimSelection = els.setTrimSel.checked;
   settings.pasteOnRightClick = els.setPaste.checked;
   settings.agentMouse = els.setAgentMouse.checked;
   settings.ctrlShiftCV = els.setCtrl.checked;
@@ -5665,7 +5734,7 @@ document.addEventListener("keydown", (e) => {
     const s = sessions.get(current);
     // Val terug op de vastgelegde selectie als getSelection() leeg is (een
     // herteken kan 'm net gewist hebben).
-    if (s) { const sel = s.term.getSelection() || s.lastSel; if (sel) { copyToClipboard(sel); e.preventDefault(); } }
+    if (s) { const sel = readSelection(s.term) || s.lastSel; if (sel) { copyToClipboard(tidySelection(sel)); e.preventDefault(); } }
     return;
   }
   if (settings.ctrlShiftCV && ctrl && e.shiftKey && (e.key === "V" || e.key === "v")) {
@@ -6173,6 +6242,7 @@ window.addEventListener("DOMContentLoaded", () => {
     htmlSplit: document.querySelector("#set-html-split"),
     htmlFull: document.querySelector("#set-html-full"),
     setCopy: document.querySelector("#set-copyselect"),
+    setTrimSel: document.querySelector("#set-trimsel"),
     setPaste: document.querySelector("#set-pasteright"),
     setAgentMouse: document.querySelector("#set-agentmouse"),
     setCtrl: document.querySelector("#set-ctrlshift"),
