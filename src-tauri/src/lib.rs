@@ -2492,6 +2492,12 @@ struct PersistedSession {
     // eenmalig als losse sessies terug.
     #[serde(default)]
     project_id: String,
+    // De mux-sessie op de host waar deze tab aan hing. Nodig sinds een nieuwe
+    // sessie een eigen naam krijgt: zonder dit veld zou hervatten na een
+    // herstart de afgeleide naam pakken en dus bij een ANDERE agent aanhaken (of
+    // een nieuwe starten). Leeg = lokaal, of een sessie van voor dit veld.
+    #[serde(default)]
+    mux_name: String,
 }
 
 fn sessions_path() -> std::path::PathBuf {
@@ -2560,6 +2566,12 @@ struct HistoryEntry {
     // opstarten voorgevinkt staat -- niet of hij bewaard blijft.
     #[serde(default)]
     was_open: bool,
+    // Bij welke mux-sessie op de host hoorde deze tab. De host weet geen titels --
+    // `herdr ls` geeft naam, map en status -- dus dit is de enige plek waar
+    // "sessie X heet Review" bewaard blijft nadat de tab hier dicht is. En dat is
+    // precies het moment waarop je het processenscherm nodig hebt.
+    #[serde(default)]
+    mux_name: String,
 }
 
 fn history_path() -> std::path::PathBuf {
@@ -3658,34 +3670,81 @@ fn fnv1a(s: &str) -> u32 {
 // als scheidingstekens in target-namen. Het pad wordt afgekapt maar krijgt een
 // hash van het VOLLEDIGE pad mee, zodat twee lange paden met hetzelfde begin
 // niet stil op dezelfde sessie uitkomen.
-fn mux_session_name(host_id: &str, project_path: &str) -> String {
-    fn slug(s: &str, max: usize) -> String {
-        let mut out = String::new();
-        let mut last_dash = true; // voorkomt een leidend streepje
-        for c in s.chars() {
-            let c = c.to_ascii_lowercase();
-            if c.is_ascii_alphanumeric() {
-                out.push(c);
-                last_dash = false;
-            } else if !last_dash {
-                out.push('-');
-                last_dash = true;
-            }
-            if out.len() >= max {
-                break;
-            }
+// Alleen [a-z0-9-] overhouden: tmux gebruikt '.' en ':' in target-namen, en de
+// naam reist door een shell op de host. Accenten en hoofdletters gaan eraf --
+// daarom is de naam een aanduiding en niet de titel zelf.
+fn mux_slug(s: &str, max: usize) -> String {
+    let mut out = String::new();
+    let mut last_dash = true; // voorkomt een leidend streepje
+    for c in s.chars() {
+        let c = c.to_ascii_lowercase();
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
         }
-        while out.ends_with('-') {
-            out.pop();
+        if out.len() >= max {
+            break;
         }
-        out
     }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+fn mux_session_name(host_id: &str, project_path: &str) -> String {
     format!(
         "taurus-{}-{}-{:08x}",
-        slug(host_id, 16),
-        slug(project_path, 24),
+        mux_slug(host_id, 16),
+        mux_slug(project_path, 24),
         fnv1a(project_path)
     )
+}
+
+// Welke mux-sessie een start moet gebruiken.
+//
+// `Fresh` hoort bij "nieuwe sessie": die mag NOOIT stil aanhaken bij wat er in
+// die map al draait. Dat deed hij wel, want de naam was per (host, map) altijd
+// dezelfde en zowel `tmux new-session -A` als het herdr-script doet
+// attach-or-create -- dus een tweede nieuwe sessie in dezelfde map landde in de
+// eerste. Aanhaken is een eigen handeling, met een eigen knop op het
+// processenscherm.
+//
+// `Existing` hoort bij hervatten: de tab weet welke sessie de zijne was en zegt
+// het erbij. Leeg daarbinnen betekent "van vóór dit veld" -- dan valt hij terug
+// op de oude afgeleide naam, zodat een sessions.json van gisteren nog aanhaakt
+// bij de agent die dáár nog loopt.
+#[derive(Clone, Copy)]
+enum MuxTarget<'a> {
+    // De tabtitel gaat mee: drie sessies in dezelfde map zijn anders alleen aan
+    // een willekeurig kenmerk te onderscheiden, en `herdr ls` op de host laat dan
+    // drie identieke regels zien.
+    Fresh(&'a str),
+    Existing(&'a str),
+}
+
+impl<'a> MuxTarget<'a> {
+    fn resolve(self, host_id: &str, path: &str) -> String {
+        match self {
+            MuxTarget::Fresh(title) => {
+                // De afgeleide naam blijft het begin: die is leesbaar en te
+                // greppen op de host. Daarachter de titel (waar het over gaat) en
+                // een kort kenmerk, zodat twee sessies met dezelfde titel -- of
+                // zonder titel -- nog steeds elk hun eigen sessie zijn.
+                let id: String = new_token().chars().take(4).collect();
+                let basis = mux_session_name(host_id, path);
+                match mux_slug(title, 16) {
+                    t if t.is_empty() => format!("{}-{}", basis, id),
+                    t => format!("{}-{}-{}", basis, t, id),
+                }
+            }
+            MuxTarget::Existing(name) if !name.trim().is_empty() => name.trim().to_string(),
+            MuxTarget::Existing(_) => mux_session_name(host_id, path),
+        }
+    }
 }
 
 // Herdr kent geen attach-or-create in een commando zoals `tmux new -A -s`:
@@ -4490,6 +4549,33 @@ fn peer_sessions_command(host: &Host) -> Option<String> {
     ))
 }
 
+// De host stuurt geen titels mee, dus komt de betekenis van hier: de tabs die
+// deze Taurus ooit startte staan met hun muxnaam in de geschiedenis. Dat geeft de
+// ECHTE titel terug -- met hoofdletters en accenten, anders dan de slug in de
+// naam -- ook voor een sessie waarvan de tab hier al dicht is.
+//
+// Wat we niet kennen (een sessie van een andere machine, of van voor mux_name)
+// houdt de mapnaam die collect_agents eraan gaf. Dat is geen fout maar het beste
+// wat er dan te zeggen valt.
+fn titles_by_mux_name() -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for e in read_history() {
+        if !e.mux_name.trim().is_empty() && !e.title.trim().is_empty() {
+            out.insert(e.mux_name.trim().to_string(), e.title.trim().to_string());
+        }
+    }
+    out
+}
+
+// Los van het ophalen, zodat het te testen is zonder host en zonder bestand.
+fn apply_known_titles(view: &mut MachineAgents, titles: &HashMap<String, String>) {
+    for a in view.agents.iter_mut() {
+        if let Some(t) = titles.get(a.session.trim()) {
+            a.title = t.clone();
+        }
+    }
+}
+
 #[tauri::command]
 fn remote_agents(host_id: String) -> Result<MachineAgents, String> {
     let host = lookup_host(&host_id)?
@@ -4498,7 +4584,9 @@ fn remote_agents(host_id: String) -> Result<MachineAgents, String> {
     let peer = peer_sessions_command(&host)
         .and_then(|cmd| ssh_run(&host, &cmd).ok())
         .map(|(out, _)| out);
-    Ok(collect_agents(sessions, peer.as_deref()))
+    let mut view = collect_agents(sessions, peer.as_deref());
+    apply_known_titles(&mut view, &titles_by_mux_name());
+    Ok(view)
 }
 
 // Het commando dat een sessie op de andere machine beëindigt (#124). Apart van de
@@ -4659,17 +4747,21 @@ fn ssh_program() -> String {
     "ssh.exe".into()
 }
 
-// (programma, argumenten) voor een remote sessie.
+// (programma, argumenten, muxsessienaam) voor een remote sessie. De naam gaat
+// mee terug omdat de tab hem moet bewaren: stoppen en later hervatten mogen niet
+// afhangen van het opnieuw uitrekenen van een naam die niet meer uit (host, map)
+// volgt.
 fn wrap_remote(
     host: &Host,
     cwd: &str,
     program: String,
     args: Vec<String>,
-) -> Result<(String, Vec<String>), String> {
+    mux: MuxTarget,
+) -> Result<(String, Vec<String>, String), String> {
     if host.hostname.trim().is_empty() {
         return Err("host heeft geen hostname".into());
     }
-    let session = mux_session_name(&host.id, cwd);
+    let session = mux.resolve(&host.id, cwd);
     let payload = build_remote_payload_via(
         &host.mux,
         effective_os(host),
@@ -4680,7 +4772,14 @@ fn wrap_remote(
         &args,
     )?;
 
-    ssh_interactive(host, payload)
+    let (program, args) = ssh_interactive(host, payload)?;
+    // Zonder multiplexer is er niets om later terug te vinden: de agent hangt aan
+    // deze ssh-verbinding en gaat ermee weg. Dan hoort er ook geen naam bewaard te
+    // worden, anders probeert het afsluiten straks een sessie te stoppen die daar
+    // niet bestaat. Een wegwerpsessie (#124) valt hier ook onder: die krijgt
+    // mux "none".
+    let holds = matches!(host.mux.as_str(), "herdr" | "tmux" | "psmux" | "taurus-agent");
+    Ok((program, args, if holds { session } else { String::new() }))
 }
 
 // De ssh-aanroep om een payload met een pty op de host te draaien. Gedeeld door
@@ -4735,7 +4834,11 @@ fn create_session(
     // shell of in een mislukte `claude --resume`. Wat weg mag zijn, moet ook echt
     // verdwijnen als je de tab sluit.
     ephemeral: Option<bool>,
-) -> Result<(), String> {
+    // Geeft de naam van de mux-sessie terug die dit opleverde; leeg bij een
+    // lokale sessie. De tab bewaart die naam, zodat stoppen en later hervatten
+    // deze sessie aanspreken en niet een naam die uit (host, map) is
+    // teruggerekend -- die volgt er sinds MuxTarget::Fresh niet meer uit.
+) -> Result<String, String> {
     // De host moet BEKEND zijn voordat het commando gebouwd wordt: remote levert
     // een andere programmanaam op dan lokaal.
     let host = lookup_host(&host_id)?.map(|h| without_persistence(h, ephemeral.unwrap_or(false)));
@@ -4756,8 +4859,13 @@ fn create_session(
             host.as_ref().map(|h| effective_os(h)),
         )
     };
-    let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
-    start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)
+    // Fresh: een nieuwe sessie is een NIEUWE sessie, ook in een map waar er al
+    // een agent draait. Aanhaken bij wat er loopt is een eigen handeling, met een
+    // eigen knop op het processenscherm.
+    let (program, args, cwd, session) =
+        apply_host(host.as_ref(), &path, program, args, MuxTarget::Fresh(&title))?;
+    start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)?;
+    Ok(session)
 }
 
 // Een wegwerpsessie krijgt een host-kopie zonder persistentie: dan maakt de andere
@@ -4793,9 +4901,11 @@ fn apply_host(
     path: &str,
     program: String,
     args: Vec<String>,
-) -> Result<(String, Vec<String>, String), String> {
+    mux: MuxTarget,
+) -> Result<(String, Vec<String>, String, String), String> {
     let host = match host {
-        None => return Ok((program, args, path.to_string())),
+        // Lokaal is er geen mux-sessie; die naam blijft leeg.
+        None => return Ok((program, args, path.to_string(), String::new())),
         Some(h) => h,
     };
     let remote_cwd = if path.trim().is_empty() {
@@ -4809,8 +4919,8 @@ fn apply_host(
             host.nickname
         ));
     }
-    let (program, args) = wrap_remote(host, &remote_cwd, program, args)?;
-    Ok((program, args, local_cwd_for_remote()))
+    let (program, args, session) = wrap_remote(host, &remote_cwd, program, args, mux)?;
+    Ok((program, args, local_cwd_for_remote(), session))
 }
 
 // Herstart een sessie: stop het huidige claude-proces en hervat hetzelfde gesprek
@@ -4832,6 +4942,9 @@ fn restart_session(
     host_id: String,
     cols: u16,
     rows: u16,
+    // De mux-sessie die bij deze tab hoort. Afwezig of leeg = een tab van voor
+    // dit veld; dan geldt de oude afgeleide naam.
+    mux_name: Option<String>,
 ) -> Result<(), String> {
     {
         if let Some(mut s) = state.sessions.lock().unwrap().remove(&id) {
@@ -4856,9 +4969,13 @@ fn restart_session(
     };
     // Remote herstart: het kappen hierboven doodt alleen de lokale ssh.exe. Draait
     // er een multiplexer op de host, dan leeft de agent daar gewoon door en haakt
-    // `new-session -A` er weer aan -- dan is dit een heraanhaak-actie in plaats van
-    // een herstart. Bestaat de sessie niet meer, dan start hij vers met --resume.
-    let (program, args, cwd) = apply_host(host.as_ref(), &path, program, args)?;
+    // hij weer aan zijn EIGEN sessie -- dan is dit een heraanhaak-actie in plaats
+    // van een herstart. Bestaat die sessie niet meer, dan start hij vers met
+    // --resume. Welke sessie dat is zegt de tab erbij; is dat veld leeg (een tab
+    // van voor mux_name), dan geldt de oude afgeleide naam.
+    let naam = mux_name.unwrap_or_default();
+    let (program, args, cwd, _) =
+        apply_host(host.as_ref(), &path, program, args, MuxTarget::Existing(&naam))?;
     start_pty(&app, &state.sessions, id, gen, program, &cwd, args, cols, rows)
 }
 
@@ -7033,7 +7150,7 @@ mod tests {
         h.mux = "tmux".into();
         assert_eq!(effective_os(&h), "linux", "binnen WSL is alles Linux");
 
-        let (_, args) = wrap_remote(&h, "/home/arjen/proj", "claude".into(), vec!["-n".into()]).unwrap();
+        let (_, args, _) = wrap_remote(&h, "/home/arjen/proj", "claude".into(), vec!["-n".into()], MuxTarget::Existing("")).unwrap();
         let payload = args.last().unwrap();
         assert!(payload.starts_with("wsl -e sh -c \""));
         // Alles tussen de dubbele quotes moet shell-neutraal zijn: de echte
@@ -8164,7 +8281,7 @@ mod tests {
 
     #[test]
     fn wrap_remote_builds_the_ssh_argument_list() {
-        let (prog, args) = wrap_remote(&test_host(), "/home/a/p", "claude".into(), vec![]).unwrap();
+        let (prog, args, _) = wrap_remote(&test_host(), "/home/a/p", "claude".into(), vec![], MuxTarget::Existing("")).unwrap();
         assert!(prog.to_lowercase().ends_with("ssh.exe"), "onverwacht programma: {}", prog);
         assert_eq!(args[0], "-t", "zonder pty tekent de agent-TUI niet");
         // Standaardpoort hoort niet als -p mee.
@@ -8186,7 +8303,7 @@ mod tests {
     fn wrap_remote_adds_the_port_only_when_it_is_not_the_default() {
         let mut h = test_host();
         h.port = 2222;
-        let (_, args) = wrap_remote(&h, "/p", "claude".into(), vec![]).unwrap();
+        let (_, args, _) = wrap_remote(&h, "/p", "claude".into(), vec![], MuxTarget::Existing("")).unwrap();
         let i = args.iter().position(|a| a == "-p").expect("-p verwacht");
         assert_eq!(args[i + 1], "2222");
     }
@@ -8195,7 +8312,7 @@ mod tests {
     fn wrap_remote_omits_the_user_when_the_host_has_none() {
         let mut h = test_host();
         h.user = String::new();
-        let (_, args) = wrap_remote(&h, "/p", "claude".into(), vec![]).unwrap();
+        let (_, args, _) = wrap_remote(&h, "/p", "claude".into(), vec![], MuxTarget::Existing("")).unwrap();
         assert_eq!(args[args.len() - 2], "support01");
     }
 
@@ -8203,7 +8320,7 @@ mod tests {
     fn wrap_remote_refuses_a_host_without_a_hostname() {
         let mut h = test_host();
         h.hostname = "  ".into();
-        assert!(wrap_remote(&h, "/p", "claude".into(), vec![]).is_err());
+        assert!(wrap_remote(&h, "/p", "claude".into(), vec![], MuxTarget::Existing("")).is_err());
     }
 
     #[test]
@@ -8243,11 +8360,143 @@ mod tests {
 
     #[test]
     fn apply_host_leaves_a_local_launch_untouched() {
-        let (p, a, cwd) =
-            apply_host(None, r"C:\proj", "claude".into(), vec!["-n".into()]).unwrap();
+        let (p, a, cwd, mux) = apply_host(
+            None,
+            r"C:\proj",
+            "claude".into(),
+            vec!["-n".into()],
+            MuxTarget::Fresh(""),
+        )
+        .unwrap();
         assert_eq!(p, "claude");
         assert_eq!(a, vec!["-n".to_string()]);
         assert_eq!(cwd, r"C:\proj", "lokale werkmap mag niet verschuiven");
+        assert_eq!(mux, "", "lokaal is er geen mux-sessie om te bewaren");
+    }
+
+    // De bug: "nieuwe sessie" pikte in een map waar al een agent draaide die
+    // bestaande sessie op, want de naam volgde uit (host, map) en de payload doet
+    // attach-or-create. Twee keer nieuw hoort twee sessies te geven.
+    #[test]
+    fn a_new_remote_session_never_lands_in_a_running_one() {
+        let een = MuxTarget::Fresh("").resolve("ursu", r"C:\Users\arjen");
+        let twee = MuxTarget::Fresh("").resolve("ursu", r"C:\Users\arjen");
+        assert_ne!(een, twee, "twee keer nieuw is twee sessies");
+
+        // Maar wel herkenbaar: de afgeleide naam blijft het begin, zodat je op de
+        // host nog kunt zien welke machine en welke map het is.
+        let basis = mux_session_name("ursu", r"C:\Users\arjen");
+        assert!(een.starts_with(&basis), "{een}");
+        assert!(twee.starts_with(&basis), "{twee}");
+        // En tmux-veilig: alleen [a-z0-9-].
+        assert!(
+            een.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "{een}"
+        );
+    }
+
+    // Een host zonder multiplexer houdt niets vast, dus is er geen naam om te
+    // bewaren. Zou hij er wel een teruggeven, dan probeert het afsluiten een
+    // sessie te stoppen die daar nooit bestond.
+    #[test]
+    fn a_host_without_a_mux_reports_no_session_name() {
+        let mut h = test_host();
+        h.mux = "none".into();
+        let (_, _, naam) =
+            wrap_remote(&h, "/home/a/p", "claude".into(), vec![], MuxTarget::Fresh("")).unwrap();
+        assert_eq!(naam, "");
+
+        // Met een multiplexer wél, en dan is het de verse naam.
+        h.mux = "tmux".into();
+        let (_, _, naam) =
+            wrap_remote(&h, "/home/a/p", "claude".into(), vec![], MuxTarget::Fresh("")).unwrap();
+        assert!(naam.starts_with(&mux_session_name(&h.id, "/home/a/p")), "{naam}");
+    }
+
+    // Drie sessies in dezelfde map moeten van elkaar te onderscheiden zijn, en de
+    // enige plek waar dat kan is de naam: de host stuurt geen titels mee.
+    #[test]
+    fn a_fresh_name_carries_the_tab_title() {
+        let basis = mux_session_name("ursu", r"C:\Users\arjen\ontwikkelmap");
+        let review = MuxTarget::Fresh("Review").resolve("ursu", r"C:\Users\arjen\ontwikkelmap");
+        let bouw = MuxTarget::Fresh("Bouw & test").resolve("ursu", r"C:\Users\arjen\ontwikkelmap");
+
+        assert!(review.starts_with(&format!("{basis}-review-")), "{review}");
+        // Accenten, spaties en tekens waar een shell iets mee doet gaan eraf.
+        assert!(bouw.starts_with(&format!("{basis}-bouw-test-")), "{bouw}");
+        assert!(
+            bouw.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+            "{bouw}"
+        );
+
+        // Zelfde titel, tweemaal gestart: nog steeds twee sessies.
+        let ook = MuxTarget::Fresh("Review").resolve("ursu", r"C:\Users\arjen\ontwikkelmap");
+        assert_ne!(review, ook);
+
+        // Geen titel: geen dubbel streepje en geen staart zonder inhoud.
+        let leeg = MuxTarget::Fresh("   ").resolve("ursu", r"C:\Users\arjen\ontwikkelmap");
+        assert!(leeg.starts_with(&format!("{basis}-")), "{leeg}");
+        assert!(!leeg.contains("--"), "{leeg}");
+
+        // En binnen de grens die valid_session_name stelt.
+        let lang = MuxTarget::Fresh("een behoorlijk lange tabtitel die niemand kort houdt")
+            .resolve("ursu", r"X:\AI\afdelingen\deployment\devops\projecten\iets-heel-diep");
+        assert!(valid_session_name(&lang), "{lang} ({} tekens)", lang.len());
+    }
+
+    // Het scherm leent de echte titel uit de geschiedenis: met hoofdletters, waar
+    // de naam alleen een slug heeft. Wat niet bekend is houdt de mapnaam.
+    #[test]
+    fn the_processes_screen_borrows_titles_it_knows() {
+        let mut view = collect_agents(
+            vec![
+                RemoteSession {
+                    name: "taurus-ursu-ontwikkelmap-1f2e3d4c-review-ab12".into(),
+                    cwd: r"C:\Users\arjen\ontwikkelmap".into(),
+                    agent: "claude".into(),
+                    ..Default::default()
+                },
+                RemoteSession {
+                    name: "iets-van-een-andere-machine".into(),
+                    cwd: r"C:\Users\arjen\ontwikkelmap".into(),
+                    agent: "claude".into(),
+                    ..Default::default()
+                },
+            ],
+            None,
+        );
+        // Zonder kennis: beide regels heten naar de map, en dat is precies de
+        // klacht waar dit voor is.
+        assert_eq!(view.agents[0].title, "ontwikkelmap");
+        assert_eq!(view.agents[1].title, "ontwikkelmap");
+
+        let mut titels = HashMap::new();
+        titels.insert(
+            "taurus-ursu-ontwikkelmap-1f2e3d4c-review-ab12".to_string(),
+            "Review van de PR".to_string(),
+        );
+        apply_known_titles(&mut view, &titels);
+        assert_eq!(view.agents[0].title, "Review van de PR");
+        assert_eq!(view.agents[1].title, "ontwikkelmap", "onbekend blijft de map");
+    }
+
+    // Hervatten is het spiegelbeeld: de tab zegt WELKE sessie de zijne was, en die
+    // naam gaat er onveranderd in. Een tab van voor dit veld heeft niets te zeggen
+    // en valt terug op de oude afgeleide naam -- anders zou een herstart naast de
+    // nog lopende agent een tweede starten.
+    #[test]
+    fn a_resumed_tab_reattaches_to_its_own_session() {
+        let eigen = "taurus-ursu-c-users-arjen-1f2e3d4c-ab12cd";
+        assert_eq!(MuxTarget::Existing(eigen).resolve("ursu", r"C:\Users\arjen"), eigen);
+        assert_eq!(
+            MuxTarget::Existing("").resolve("ursu", r"C:\Users\arjen"),
+            mux_session_name("ursu", r"C:\Users\arjen")
+        );
+        assert_eq!(
+            MuxTarget::Existing("   ").resolve("ursu", r"C:\Users\arjen"),
+            mux_session_name("ursu", r"C:\Users\arjen"),
+            "witruimte is geen naam"
+        );
     }
 
     #[test]
@@ -8368,7 +8617,7 @@ mod tests {
             false,
             Some(host.os.as_str()),
         );
-        let (prog, a) = wrap_remote(&host, &cwd, program, args).expect("wrap_remote");
+        let (prog, a, _) = wrap_remote(&host, &cwd, program, args, MuxTarget::Existing("")).expect("wrap_remote");
         println!("PROGRAM: {}", prog);
         for (i, x) in a.iter().enumerate() {
             println!("ARG[{}]: {}", i, x);

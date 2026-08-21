@@ -3293,7 +3293,11 @@ async function startSession() {
   const projectId = selected.id || "";
   const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId });
   try {
-    await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows });
+    // De backend bepaalt de naam van de mux-sessie en geeft hem terug; die bewaren
+    // we bij de tab. Een nieuwe sessie krijgt een EIGEN naam (ook in een map waar
+    // al een agent draait), dus stoppen en hervatten mogen die naam niet meer uit
+    // (host, map) terugrekenen.
+    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows })) || "";
     // Wat je een rol opdraagt hoort bewaard te blijven: het antwoord komt in zijn
     // werkplek, en zonder dit was de vraag weg zodra de tab sloot. Alleen voor de
     // rollen, alleen lokaal (een remote map schrijven is een ander verhaal), en
@@ -3373,6 +3377,10 @@ function recordSession(s) {
       accent: s.accent || "#7c9cff", mode: s.mode || "default",
       agent: s.agent || "claude", model: s.model || "",
       hostId: s.hostId || "", projectId: s.projectId || "",
+      // Bij welke mux-sessie deze tab hoorde. Hierdoor kan het processenscherm
+      // straks de echte titel tonen in plaats van de mapnaam -- ook als deze tab
+      // dicht is en de agent op de host doorloopt.
+      muxName: s.muxName || "",
       created: 0, lastSeen: 0, wasOpen: true,
     },
   }).catch(() => {});
@@ -3399,7 +3407,7 @@ function persistSessionsToDisk() {
     // Een spiegel-tab (JOIN) hoort er ook niet in: die heeft geen eigen proces
     // en bij de volgende start bestaat de sessie van de collega niet meer.
     .filter((s) => !s.command && !s.attached && !s.mirror)
-    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "" }));
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "", mux_name: s.muxName || "" }));
   invoke("save_sessions", { sessions: list }).catch(saveSessionsFailed);
 }
 
@@ -3464,6 +3472,9 @@ async function restoreSessions(metas) {
       // sessies in een bak belanden in plaats van bij hun eigen agent (#90).
       projectId: meta.project_id || "",
     });
+    // Welke mux-sessie op de host bij deze tab hoorde. Moet er staan VOOR de
+    // restart hieronder, want die stuurt hem mee.
+    session.muxName = meta.mux_name || "";
     session.el.classList.add("hidden");
     session.term.write(`\x1b[2m[${t("restarting")} ${uuid.slice(0, 8)}…]\x1b[0m\r\n`);
     try {
@@ -3472,6 +3483,10 @@ async function restoreSessions(metas) {
         mode: session.mode, fullPaths: settings.fullPaths, command: "",
         agent: session.agent, model: resolveModelArg(session.agent, session.model),
         hostId: session.hostId || "",
+        // Welke mux-sessie hier bij hoorde. Leeg (een tab van voor dit veld) laat
+        // de backend terugvallen op de oude afgeleide naam, zodat een agent die
+        // daar nog loopt alsnog wordt teruggevonden.
+        muxName: session.muxName || "",
         cols: session.term.cols, rows: session.term.rows,
       });
       // Hervat = door Taurus gestart, dus hij hoort in de geschiedenis. Zonder dit
@@ -4022,7 +4037,7 @@ async function restartSession(id) {
   s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
   if (current !== id) showView(id); else renderTabs();
   try {
-    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), hostId: s.hostId || "", cols: s.term.cols, rows: s.term.rows });
+    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), hostId: s.hostId || "", muxName: s.muxName || "", cols: s.term.cols, rows: s.term.rows });
   } catch (e) { s.term.write(`\r\n\x1b[31m[${t("restart_failed")}: ${e}]\x1b[0m\r\n`); }
 }
 
