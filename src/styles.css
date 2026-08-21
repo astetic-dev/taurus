@@ -448,6 +448,10 @@ select:-webkit-autofill {
 .e-task { min-height: 88px; resize: vertical; font-family: inherit; }
 .e-taskfield { grid-column: 1 / -1; }
 .hint { font-size: 11px; color: var(--text-dim); margin-top: 5px; }
+/* Een hint kan ook een bevinding zijn: een bron die geen werkproces lijkt
+   (waarschuwing, blokkeert niets) of een leesfout. Zelfde plek, andere kleur. */
+.hint.warn { color: var(--signal-warn); }
+.hint.err { color: var(--signal-bad); }
 
 .launch-btn {
   background: var(--accent);

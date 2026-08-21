@@ -190,6 +190,11 @@ const I18N = {
     na_embedded_in: "In: {label}",
     na_subject: "Waar gaat dit over? (één woord)", na_subject_ph: "bijv. meetings — leeg mag",
     na_name: "Naam", na_name_ph: "leeg = de naam uit de bron",
+    na_psource: "Bron (optioneel)", na_psource_ph: "GitHub-adres, of leeg laten",
+    na_psource_hint: "Leeg = je wijst hieronder een map aan die er al is. Vul je een GitHub-adres in, dan haalt Taurus het werkproces op en houdt hij de versie bij.",
+    na_pfound: "{name} · {branch} @ {sha} · {kb} KB — komt in de werkmap hieronder",
+    na_pwarn: "⚠ Geen {files} in de wortel: dit lijkt geen ICM-werkproces. Je kunt het gewoon ophalen — dit is een waarschuwing, geen blokkade.",
+    na_pdeploying: "Werkproces ophalen…",
     na_name_hint: "Zo heet deze agent — op de knop, en in de CLAUDE.md die Taurus schrijft. Leeg = de naam die de bron zelf meegeeft.",
     na_source: "Bron", na_source_ph: "https://github.com/eigenaar/repo",
     na_read: "Lezen", na_reading: "Ophalen en lezen…",
@@ -534,6 +539,11 @@ const I18N = {
     na_embedded_in: "In: {label}",
     na_subject: "What is this about? (one word)", na_subject_ph: "e.g. meetings — may be empty",
     na_name: "Name", na_name_ph: "empty = the name from the source",
+    na_psource: "Source (optional)", na_psource_ph: "GitHub address, or leave empty",
+    na_psource_hint: "Empty = you point at a folder that already exists below. Give a GitHub address and Taurus fetches the work process and watches its version.",
+    na_pfound: "{name} · {branch} @ {sha} · {kb} KB — lands in the working folder below",
+    na_pwarn: "⚠ No {files} in the root: this does not look like an ICM work process. You can still fetch it — this is a warning, not a block.",
+    na_pdeploying: "Fetching the work process…",
     na_name_hint: "What this agent is called — on the button, and in the CLAUDE.md Taurus writes. Empty = the name the source brings itself.",
     na_source: "Source", na_source_ph: "https://github.com/owner/repo",
     na_read: "Read", na_reading: "Fetching and reading…",
@@ -4987,6 +4997,45 @@ function naName() {
   return els.naName ? els.naName.value.trim() : "";
 }
 
+// De bron van een PROCES lezen. Zelfde probe als bij een rol, maar zonder slot:
+// `strict: false` laat een bron die niet als ICM-werkproces te herkennen is
+// gewoon door, met in het rapport wat er niet gevonden is. Die bevinding komt
+// hier als waarschuwing te staan -- zichtbaar vóór het opslaan, want daarna is
+// het al gekloond.
+let naProcProbe = null;
+async function naReadProcessSource() {
+  const source = els.naPsource.value.trim();
+  naProcProbe = null;
+  if (!source) { els.naPnote.textContent = t("na_psource_hint"); els.naPnote.className = "hint"; return; }
+  els.naPnote.textContent = t("na_reading");
+  els.naPnote.className = "hint";
+  let p = null;
+  try {
+    p = await invoke("git_probe", { source, strict: false });
+  } catch (e) {
+    els.naPnote.textContent = "✗ " + e;
+    els.naPnote.className = "hint err";
+    return;
+  }
+  naProcProbe = p;
+  // Alle markers weg = niets herkend. Staat er één, dan is het genoeg en zwijgen
+  // we: klagen dat een werkmap geen SKILL.md heeft is ruis, want dat hoort bij
+  // een skill en niet bij een werkproces.
+  const niets = (p.missing || []).length >= 4;
+  els.naPnote.textContent = niets
+    ? t("na_pwarn").replace("{files}", (p.missing || []).join(", "))
+    : t("na_pfound")
+        .replace("{name}", p.name || "?")
+        .replace("{branch}", p.branch || "?")
+        .replace("{sha}", (p.sha || "").slice(0, 7))
+        .replace("{kb}", p.sizeKb);
+  els.naPnote.className = niets ? "hint warn" : "hint";
+  // Een voorstel voor waar het komt, alleen als je nog niets koos.
+  if (!els.naPath.value.trim() && p.name) {
+    els.naPath.value = joinPath(defaultAgentParent(), slugify(p.name));
+  }
+}
+
 async function naDeploy() {
   if (!naProbe) { naSay(els.naStatus, t("na_need_read"), "err"); return; }
   const role = roleById(naKind);
@@ -5068,6 +5117,10 @@ function openNewAgent() {
   naDraft = blankRow();
   els.naLabel.value = "";
   els.naPath.value = "";
+  els.naPsource.value = "";
+  naProcProbe = null;
+  els.naPnote.textContent = t("na_psource_hint");
+  els.naPnote.className = "hint";
   els.naTitle.value = "";
   els.naTask.value = "";
   els.naModel.value = "";
@@ -5138,6 +5191,39 @@ async function saveNewAgent() {
   const clash = projects.find((p) => (p.host_id || "") === host && samePath(p.path, path));
   if (clash) { naSay(els.naStatus, t("na_dup_path").replace("{label}", clash.label), "err"); return; }
 
+  // Is er een bron gelezen, dan hoort die er eerst te STAAN. Een kaart naar een
+  // map die nog niet bestaat is een knop die niets doet.
+  let origin = null;
+  if (naProcProbe) {
+    naSay(els.naStatus, t("na_pdeploying"), "");
+    els.naSave.disabled = true;
+    let rep = null;
+    try {
+      rep = await invoke("git_deploy", {
+        source: naProcProbe.url,
+        dest: path,
+        hostId: host,
+        // Geen rol en geen veld: een proces staat waar jij het zet.
+        role: "",
+        field: "",
+        asSkill: false,
+        name: label,
+        // Waarschuwen, niet weigeren -- zie naReadProcessSource.
+        strict: false,
+      });
+    } catch (e) {
+      els.naSave.disabled = false;
+      naSay(els.naStatus, "✗ " + e, "err");
+      return;
+    }
+    els.naSave.disabled = false;
+    // Hiermee erft deze kaart de versiebewaking die de rollen al hadden: bij het
+    // opstarten wordt de bron nagekeken, en is er iets nieuwer dan vraagt Taurus
+    // of je wilt bijwerken -- met "laat maar" per versie.
+    origin = { source: naProcProbe.url, branch: rep.branch, sha: rep.sha, installed: new Date().toISOString() };
+    if (rep.notes && rep.notes.length) toast(rep.notes.join(" · "), "");
+  }
+
   const chosen = els.naAgent.value;
   const override = chosen === AGENT_COMMAND;
   const made = {
@@ -5146,6 +5232,7 @@ async function saveNewAgent() {
     label,
     path,
     host_id: host,
+    origin,
     title: els.naTitle.value.trim(),
     task: els.naTask.value.trim(),
     agent: override ? (naDraft.agent || "claude") : chosen,
@@ -6129,6 +6216,8 @@ window.addEventListener("DOMContentLoaded", () => {
     naWhere: document.querySelector("#na-where"),
     naSubject: document.querySelector("#na-subject"),
     naName: document.querySelector("#na-name"),
+    naPsource: document.querySelector("#na-psource"),
+    naPnote: document.querySelector("#na-pnote"),
     naSource: document.querySelector("#na-source"),
     naProbe: document.querySelector("#na-probe"),
     naDestField: document.querySelector("#na-destfield"),
@@ -6230,6 +6319,7 @@ window.addEventListener("DOMContentLoaded", () => {
   els.naCancel.addEventListener("click", () => els.newagentModal.classList.add("hidden"));
   els.naSave.addEventListener("click", () => (naKind === "plain" ? saveNewAgent() : naDeploy()));
   document.querySelector("#na-read").addEventListener("click", naReadSource);
+  document.querySelector("#na-pread").addEventListener("click", naReadProcessSource);
   els.upGo.addEventListener("click", doUpdate);
   document.querySelector("#up-skip").addEventListener("click", skipUpdate);
   // Van plek of onderwerp wisselen verandert het pad, dus meteen bijwerken --

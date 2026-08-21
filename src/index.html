@@ -456,6 +456,17 @@
             <div class="e-field"><span class="e-cap" data-i18n="cap_host">Machine</span>
               <select id="na-host"></select></div>
           </div>
+          <!-- Een werkproces mag ook van GitHub komen (#186). Leeg = de oude weg:
+               je wijst een map aan die er al staat. Met een bron haalt Taurus het
+               op en houdt hij de versie bij, net als bij een rol -- maar zonder
+               het slot: een proces dat niet als ICM-werkproces te herkennen is
+               krijgt een waarschuwing en geen weigering. -->
+          <div class="e-field"><span class="e-cap" data-i18n="na_psource">Bron (optioneel)</span>
+            <div class="e-pathrow">
+              <input id="na-psource" type="text" autocomplete="off" data-i18n-ph="na_psource_ph" />
+              <button id="na-pread" class="btn-ghost" data-i18n="na_read">Lezen</button>
+            </div>
+            <div id="na-pnote" class="hint" data-i18n="na_psource_hint">Leeg = je wijst hieronder een map aan die er al is.</div></div>
           <div class="e-field">
             <span class="e-cap" id="na-pathcap" data-i18n="cap_workdir">Werkmap</span>
             <div class="e-pathrow">
