@@ -1016,7 +1016,17 @@ fn git_deploy(
     role: String,
     field: String,
     as_skill: bool,
+    // Hoe deze agent gaat heten, gekozen in het scherm. Leeg of afwezig = de bron
+    // mag het zeggen (taurus.json, of anders de reponaam). Het staat hier omdat de
+    // CLAUDE.md die wij schrijven met die naam begint: kiest iemand "Sofie", dan
+    // hoort daar niet de naam van de bron te staan.
+    name: Option<String>,
 ) -> Result<DeployReport, String> {
+    let gekozen = name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let url = normalize_source(&source)?;
     let dest = dest.trim().to_string();
     if dest.is_empty() {
@@ -1052,8 +1062,9 @@ fn git_deploy(
         if roots.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md")) {
             rep.claude_md = "kept".into();
         } else {
-            let (name, _) = read_repo_meta(Path::new(&dest), &dest);
-            let body = generated_claude_md(&name, &role, &field, &src_dir.to_string_lossy(), "", "", &roots, "");
+            let (bron, _) = read_repo_meta(Path::new(&dest), &dest);
+            let naam = gekozen.clone().unwrap_or(bron);
+            let body = generated_claude_md(&naam, &role, &field, &src_dir.to_string_lossy(), "", "", &roots, "");
             std::fs::write(Path::new(&dest).join("CLAUDE.md"), &body)
                 .map_err(|e| format!("CLAUDE.md schrijven mislukte: {}", e))?;
             rep.claude_md = "written".into();
@@ -1113,12 +1124,15 @@ fn git_deploy(
     if has_claude {
         rep.claude_md = "kept".into();
     } else {
-        let (name, _) = if local {
+        let (bron, _) = if local {
             read_repo_meta(Path::new(&dest), &url)
         } else {
+            // De clone staat op de host; hier is niets te lezen. Zonder gekozen
+            // naam blijft alleen de reponaam over.
             (deslug(&repo_leaf(&url)), String::new())
         };
-        let body = generated_claude_md(&name, &role, &field, &url, &rep.branch, &rep.sha, &roots, "");
+        let naam = gekozen.clone().unwrap_or(bron);
+        let body = generated_claude_md(&naam, &role, &field, &url, &rep.branch, &rep.sha, &roots, "");
         if local {
             std::fs::write(Path::new(&dest).join("CLAUDE.md"), &body)
                 .map_err(|e| format!("CLAUDE.md schrijven mislukte: {}", e))?;
@@ -9334,6 +9348,7 @@ mod tests {
             "architect".into(),
             "blueprints/".into(),
             false,
+            None,
         )
         .unwrap_err();
         assert!(err.contains("niet leeg"), "onverwachte fout: {}", err);
@@ -9374,6 +9389,9 @@ mod tests {
             "architect".into(),
             "blueprints/".into(),
             false,
+            // Een gekozen naam hoort bovenaan die CLAUDE.md te staan, niet de naam
+            // die de bron zelf meebrengt.
+            Some("Sofie".into()),
         )
         .expect("deploy mislukt");
         assert_eq!(rep.claude_md, "written");
@@ -9381,6 +9399,8 @@ mod tests {
         assert!(rep.paths.iter().any(|p| p == "SKILL.md"));
         assert!(!rep.sha.is_empty());
         let md = std::fs::read_to_string(dest.join("CLAUDE.md")).unwrap();
+        // De naam uit het scherm, niet die van de bron.
+        assert!(md.starts_with("# Sofie"), "{}", md.lines().next().unwrap_or(""));
         assert!(md.contains("SKILL.md"));
         assert!(md.contains("blueprints/"));
         assert!(md.contains("no installed skill is required"));
@@ -9392,6 +9412,7 @@ mod tests {
             "architect".into(),
             "blueprints/".into(),
             false,
+            None,
         );
         assert!(again.is_err());
         let _ = std::fs::remove_dir_all(&dest);
