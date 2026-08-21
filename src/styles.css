@@ -125,7 +125,8 @@ button, input, select, textarea { font-family: var(--ui-font); }
 .project-card:hover .pc-actions { display: flex; }
 .pc-actions button {
   background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-dim);
-  border-radius: 5px; padding: 1px 6px; font-size: 11px; line-height: 1.5; cursor: pointer;
+  border-radius: 5px; padding: 3px 9px; font-size: 12px; line-height: 1.5; cursor: pointer;
+  min-width: 26px;
 }
 .pc-actions .pc-edit:hover { color: var(--accent); border-color: var(--accent); }
 .pc-actions .pc-del:hover { color: var(--red); border-color: var(--red); }
@@ -133,16 +134,28 @@ button, input, select, textarea { font-family: var(--ui-font); }
    mag opvallen -- maar rustig: het is geen waarschuwing, het is een aanbod. */
 .pc-actions .pc-up { color: var(--signal-ok, var(--green)); }
 .pc-actions .pc-up:hover { border-color: var(--signal-ok, var(--green)); }
+/* De vraag mag krimpen, de knoppen niet: op een smalle zijbalk duwde een lange
+   vraag ("Verwijderen? -- met 2 ingebed") de Ja/Nee buiten de kaart, en dan leek
+   het alsof er niets gebeurde. */
 .pc-confirm {
   display: none; position: absolute; inset: 0;
   align-items: center; justify-content: center; gap: 8px;
+  padding: 0 8px;
   background: var(--bg-card); border-radius: 8px; font-size: 12px; color: var(--text);
 }
+.pc-confirm > span {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pc-confirm button { flex: 0 0 auto; }
 .project-card.confirming .pc-confirm { display: flex; }
 .project-card.confirming .pc-actions { display: none; }
 .pc-confirm button { border-radius: 5px; padding: 3px 12px; cursor: pointer; border: 1px solid var(--border); font-size: 12px; }
 .pc-confirm .pc-yes { background: var(--red); color: #fff; border-color: var(--red); }
 .pc-confirm .pc-no { background: transparent; color: var(--text-dim); }
+/* Verwijderen in het kaartmenu: rood, en onderaan zodat je er niet per
+   ongeluk op mikt. */
+.ctx-menu .ctx-danger { color: var(--red); }
 
 .reload-btn {
   margin-top: 10px;

@@ -467,6 +467,11 @@
               <button id="na-pread" class="btn-ghost" data-i18n="na_read">Lezen</button>
             </div>
             <div id="na-pnote" class="hint" data-i18n="na_psource_hint">Leeg = je wijst hieronder een map aan die er al is.</div></div>
+          <!-- Waar dit draait (#188). Een werkproces kan een ONDERDEEL zijn van een
+               groter proces: vier fasen, en fase 3 start iets eigen. Dan hoort die
+               kaart onder zijn gastheer te staan en niet los in de lijst. -->
+          <div class="e-field"><span class="e-cap" data-i18n="na_pwhere">Waar draait dit?</span>
+            <select id="na-pwhere"></select></div>
           <div class="e-field">
             <span class="e-cap" id="na-pathcap" data-i18n="cap_workdir">Werkmap</span>
             <div class="e-pathrow">

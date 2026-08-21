@@ -195,6 +195,8 @@ const I18N = {
     na_pfound: "{name} · {branch} @ {sha} · {kb} KB — komt in de werkmap hieronder",
     na_pwarn: "⚠ Geen {files} in de wortel: dit lijkt geen ICM-werkproces. Je kunt het gewoon ophalen — dit is een waarschuwing, geen blokkade.",
     na_pdeploying: "Werkproces ophalen…",
+    na_pwhere: "Waar draait dit?", na_pstanding: "Op zichzelf",
+    na_pinside: "Onderdeel van {label}",
     na_name_hint: "Zo heet deze agent — op de knop, en in de CLAUDE.md die Taurus schrijft. Leeg = de naam die de bron zelf meegeeft.",
     na_source: "Bron", na_source_ph: "https://github.com/eigenaar/repo",
     na_read: "Lezen", na_reading: "Ophalen en lezen…",
@@ -544,6 +546,8 @@ const I18N = {
     na_pfound: "{name} · {branch} @ {sha} · {kb} KB — lands in the working folder below",
     na_pwarn: "⚠ No {files} in the root: this does not look like an ICM work process. You can still fetch it — this is a warning, not a block.",
     na_pdeploying: "Fetching the work process…",
+    na_pwhere: "Where does it run?", na_pstanding: "On its own",
+    na_pinside: "Part of {label}",
     na_name_hint: "What this agent is called — on the button, and in the CLAUDE.md Taurus writes. Empty = the name the source brings itself.",
     na_source: "Source", na_source_ph: "https://github.com/owner/repo",
     na_read: "Read", na_reading: "Fetching and reading…",
@@ -1219,7 +1223,7 @@ function commitProjectOrder() {
   const dragged = [...els.procList.children]
     .filter((c) => c.classList.contains("project-card") && !c.classList.contains("embedded"))
     .map((c) => snap.find((p) => p.id === c.dataset.id))
-    .filter((p) => p && !p.role && !p.origin && !p.parent);
+    .filter((p) => p && !isAgentCard(p) && !p.parent);
   const rest = snap.filter((p) => !dragged.includes(p));
   const next = [...rest, ...dragged];
   if (next.length === snap.length) {
@@ -1356,6 +1360,16 @@ async function patchOrigin(p, patch) {
 //
 // Het lijntje scheidt dus niet "special" van "gewoon" maar STAAND van BIJ EEN
 // WERKPROCES. Boven staan de mensen naar wie je terugkeert, onder staat je werk.
+// Hoort deze kaart bij de AGENTS of bij de PROCESSEN? `kind` is het antwoord;
+// staat het er niet (een kaart van voor dat veld), dan geldt de oude afleiding.
+// Die afleiding was "heeft een rol of een bron", en dat klopte tot een proces ook
+// van GitHub kon komen -- toen verhuisde zo'n proces naar de agents (#188).
+function isAgentCard(p) {
+  if (!p) return false;
+  if (p.kind) return p.kind === "agent";
+  return !!(p.role || p.origin);
+}
+
 function projectOrder() {
   const roleRank = (p) => {
     const i = ROLES.findIndex((r) => r.id === p.role);
@@ -1363,12 +1377,12 @@ function projectOrder() {
   };
   const roots = projects.filter((p) => !p.parent);
   const agents = roots
-    .filter((p) => p.role || p.origin)
+    .filter(isAgentCard)
     // Rollen op hun vaste plek; specialisten daarna, in de volgorde waarin je ze
     // uitrolde. Een rol die je verwijdert en opnieuw uitrolt komt dus terug waar
     // hij hoort, en niet onderaan.
     .sort((a, b) => (a.role ? 0 : 1) - (b.role ? 0 : 1) || roleRank(a) - roleRank(b));
-  const processes = roots.filter((p) => !p.role && !p.origin);
+  const processes = roots.filter((p) => !isAgentCard(p));
   const withKids = (list) => {
     const out = [];
     for (const p of list) {
@@ -1438,7 +1452,7 @@ function renderProjects() {
     // Alleen werkprocessen zijn versleepbaar. De staande rollen hebben een vaste
     // plek -- dat is waar een vak voor is -- en een ingebedde kaart volgt zijn
     // gastheer. Half-versleepbaar zou een regel zijn die je moet uitleggen.
-    if (!row.child && !p.role && !p.origin) {
+    if (!row.child && !isAgentCard(p)) {
       makeReorderable(card, { axis: "y", itemClass: "project-card", endSelector: null, onDrop: commitProjectOrder });
     }
     row.box.appendChild(card);
@@ -4080,10 +4094,23 @@ function openCardMenu(x, y, p) {
     `<div class="ctx-item" data-act="move">${t("ctx_move")}</div>` +
     (aims.length
       ? aims.map((r, i) => `<div class="ctx-item" data-aim="${i}">${escapeHtml(t("ctx_aim").replace("{name}", r.label))}</div>`).join("")
-      : `<div class="ctx-item disabled">${escapeHtml(t("aim_none"))}</div>`);
+      : `<div class="ctx-item disabled">${escapeHtml(t("aim_none"))}</div>`) +
+    // Verwijderen hoort ook hier te kunnen. De 🗑 op de kaart is klein, staat
+    // naast twee andere knopjes en verschijnt pas als je de kaart aanraakt --
+    // gemeld als "de eerste drie keer lukte het niet". Dit is dezelfde vraag,
+    // maar met een trefzeker doel.
+    `<div class="ctx-item ctx-danger" data-act="del">${escapeHtml(t("delete"))}</div>`;
   m.style.left = x + "px";
   m.style.top = y + "px";
   m.querySelector('[data-act="move"]').addEventListener("click", () => { closeTabMenu(); openMoveModal(p); });
+  m.querySelector('[data-act="del"]').addEventListener("click", () => {
+    closeTabMenu();
+    // Dezelfde bevestiging als de 🗑: de kaart zelf stelt de vraag, met het aantal
+    // ingebedde kaarten erbij. Staat de kaart er niet (gefilterd), dan is er niets
+    // om op te vragen en doen we niets.
+    const card = cardFor(p);
+    if (card) card.classList.add("confirming");
+  });
   m.querySelectorAll("[data-aim]").forEach((el) => {
     el.addEventListener("click", () => {
       closeTabMenu();
@@ -4997,6 +5024,35 @@ function naName() {
   return els.naName ? els.naName.value.trim() : "";
 }
 
+// "Waar draait dit?" voor een proces: op zichzelf, of als onderdeel van een
+// werkproces dat je al hebt. Dat laatste zet `parent`, waarmee de kaart onder zijn
+// gastheer komt te staan -- dezelfde nesting die een ingebedde rol al gebruikt.
+// Alleen wortels van DEZE machine: een proces onder een remote kaart hangen zegt
+// niets over waar het draait.
+function renderProcessWhere() {
+  const keep = els.naPwhere.value;
+  els.naPwhere.innerHTML =
+    `<option value="">${escapeHtml(t("na_pstanding"))}</option>` +
+    projects
+      .filter((p) => !p.host_id && !p.parent)
+      .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(t("na_pinside").replace("{label}", p.label))}</option>`)
+      .join("");
+  els.naPwhere.value = keep;
+}
+
+// Waar het voorstel voor de map onder komt: onder de gastheer als je die koos,
+// anders op de standaardplek. Alleen een VOORSTEL, en alleen zolang je zelf niets
+// hebt ingevuld -- vandaar dat het vorige voorstel bewaard wordt.
+let naPathProposed = "";
+function proposeProcessPath() {
+  if (!naProcProbe || !naProcProbe.name) return;
+  const host = els.naPwhere.value ? projects.find((p) => p.id === els.naPwhere.value) : null;
+  const nu = els.naPath.value.trim();
+  if (nu && nu !== naPathProposed) return; // zelf getypt: afblijven
+  naPathProposed = joinPath(host ? host.path : defaultAgentParent(), slugify(naProcProbe.name));
+  els.naPath.value = naPathProposed;
+}
+
 // De bron van een PROCES lezen. Zelfde probe als bij een rol, maar zonder slot:
 // `strict: false` laat een bron die niet als ICM-werkproces te herkennen is
 // gewoon door, met in het rapport wat er niet gevonden is. Die bevinding komt
@@ -5030,10 +5086,7 @@ async function naReadProcessSource() {
         .replace("{sha}", (p.sha || "").slice(0, 7))
         .replace("{kb}", p.sizeKb);
   els.naPnote.className = niets ? "hint warn" : "hint";
-  // Een voorstel voor waar het komt, alleen als je nog niets koos.
-  if (!els.naPath.value.trim() && p.name) {
-    els.naPath.value = joinPath(defaultAgentParent(), slugify(p.name));
-  }
+  proposeProcessPath();
 }
 
 async function naDeploy() {
@@ -5088,6 +5141,9 @@ async function naDeploy() {
     accent: role ? role.accent : "#7c9cff",
     role: role ? role.id : "",
     parent: host ? host.id : "",
+    // Een rol of specialist is een AGENT en hoort in die lijst, ook als er geen
+    // rol bij zit.
+    kind: "agent",
     origin: { source: naProbe.url, branch: naProbe.branch, sha: naProbe.sha, installed: new Date().toISOString() },
   };
   try {
@@ -5119,6 +5175,9 @@ function openNewAgent() {
   els.naPath.value = "";
   els.naPsource.value = "";
   naProcProbe = null;
+  naPathProposed = "";
+  renderProcessWhere();
+  els.naPwhere.value = "";
   els.naPnote.textContent = t("na_psource_hint");
   els.naPnote.className = "hint";
   els.naTitle.value = "";
@@ -5233,6 +5292,10 @@ async function saveNewAgent() {
     path,
     host_id: host,
     origin,
+    // Een proces blijft een proces, ook met een bron erbij (#188).
+    kind: "process",
+    // Onderdeel van een groter werkproces? Dan hoort deze kaart daaronder.
+    parent: els.naPwhere.value || "",
     title: els.naTitle.value.trim(),
     task: els.naTask.value.trim(),
     agent: override ? (naDraft.agent || "claude") : chosen,
@@ -5261,7 +5324,7 @@ let editRows = [];
 // Gevuld = één agent, en dan is dit scherm de ✎ van díe kaart (#158).
 let editorOne = "";
 function slugify(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project"; }
-function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "", host_id: "", role: "", parent: "" }; }
+function blankRow() { return { id: "", label: "", path: "", title: "", task: "", accent: "#7c9cff", mode: "default", agent: "claude", model: "", command: "", host_id: "", role: "", parent: "", kind: "" }; }
 // Zonder argument: de hele lijst (beheren, via de voettekst). Met een project:
 // alleen díe agent (#158). De ✎ op een kaart riep dit aan ZONDER argument, dus
 // die opende de hele lijst met alles ingeklapt en negeerde waar je op klikte.
@@ -6217,6 +6280,7 @@ window.addEventListener("DOMContentLoaded", () => {
     naSubject: document.querySelector("#na-subject"),
     naName: document.querySelector("#na-name"),
     naPsource: document.querySelector("#na-psource"),
+    naPwhere: document.querySelector("#na-pwhere"),
     naPnote: document.querySelector("#na-pnote"),
     naSource: document.querySelector("#na-source"),
     naProbe: document.querySelector("#na-probe"),
@@ -6320,6 +6384,7 @@ window.addEventListener("DOMContentLoaded", () => {
   els.naSave.addEventListener("click", () => (naKind === "plain" ? saveNewAgent() : naDeploy()));
   document.querySelector("#na-read").addEventListener("click", naReadSource);
   document.querySelector("#na-pread").addEventListener("click", naReadProcessSource);
+  els.naPwhere.addEventListener("change", proposeProcessPath);
   els.upGo.addEventListener("click", doUpdate);
   document.querySelector("#up-skip").addEventListener("click", skipUpdate);
   // Van plek of onderwerp wisselen verandert het pad, dus meteen bijwerken --

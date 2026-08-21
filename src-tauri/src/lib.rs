@@ -53,6 +53,14 @@ struct Project {
     // staat op zichzelf.
     #[serde(default)]
     parent: String,
+    // "agent" of "process" -- in welke lijst deze kaart hoort. Stond er eerst
+    // niet: de zijbalk leidde het af uit `role || origin`, en dat hield precies
+    // zolang alleen rollen en specialisten een bron hadden. Sinds een PROCES ook
+    // van GitHub kan komen (#186) klopt die afleiding niet meer -- zo'n proces
+    // verhuisde naar de agents. Leeg = een kaart van voor dit veld; dan geldt de
+    // oude afleiding nog, zodat bestaande projects.json niets verschuift.
+    #[serde(default)]
+    kind: String,
 }
 
 // Herkomst van een gekloonde map. Alleen wat we nodig hebben om te weten of hij
@@ -9148,6 +9156,9 @@ mod tests {
             origin: None,
             role: String::new(),
             parent: String::new(),
+            // Leeg: de tests dekken juist de kaarten van VOOR dit veld, waar de
+            // zijbalk het nog uit role/origin afleidt.
+            kind: String::new(),
         }
     }
 
