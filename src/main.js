@@ -189,6 +189,8 @@ const I18N = {
     na_where: "Waar werkt hij?", na_standing: "Staand — eigen werkplek",
     na_embedded_in: "In: {label}",
     na_subject: "Waar gaat dit over? (één woord)", na_subject_ph: "bijv. meetings — leeg mag",
+    na_name: "Naam", na_name_ph: "leeg = de naam uit de bron",
+    na_name_hint: "Zo heet deze agent — op de knop, en in de CLAUDE.md die Taurus schrijft. Leeg = de naam die de bron zelf meegeeft.",
     na_source: "Bron", na_source_ph: "https://github.com/eigenaar/repo",
     na_read: "Lezen", na_reading: "Ophalen en lezen…",
     na_dest: "Komt in", na_deploy: "Uitrollen",
@@ -531,6 +533,8 @@ const I18N = {
     na_where: "Where does it work?", na_standing: "Standing — its own workspace",
     na_embedded_in: "In: {label}",
     na_subject: "What is this about? (one word)", na_subject_ph: "e.g. meetings — may be empty",
+    na_name: "Name", na_name_ph: "empty = the name from the source",
+    na_name_hint: "What this agent is called — on the button, and in the CLAUDE.md Taurus writes. Empty = the name the source brings itself.",
     na_source: "Source", na_source_ph: "https://github.com/owner/repo",
     na_read: "Read", na_reading: "Fetching and reading…",
     na_dest: "Goes in", na_deploy: "Deploy",
@@ -4885,16 +4889,19 @@ function naRefreshDest() {
 }
 
 function renderNaKinds() {
-  // Je installeert een ARCHITECT, niet een Jake. Dus de rol is de titel en de
-  // naam van de invulling staat eronder -- wissel je de bron, dan verandert die
-  // ondertitel en de titel niet.
+  // Je installeert een ARCHITECT, en hoe die heet bepaal JIJ. Op de tegel staat
+  // daarom alleen de rol: stond de naam uit de bron eronder, dan las die als een
+  // besluit ("de architect heet Jake") terwijl het een voorstel is. Het scherm
+  // eronder vraagt de naam. "Vrij" en "proces" houden hun ondertitel, want dat
+  // is uitleg en geen naam.
   const tile = (kind, icon, title, sub) =>
     `<button type="button" class="na-kind${naKind === kind ? " on" : ""}" data-kind="${escapeHtml(kind)}">` +
     `<span class="na-kind-ico" aria-hidden="true">${escapeHtml(icon)}</span>` +
     `<span class="na-kind-title">${escapeHtml(title)}</span>` +
-    `<span class="na-kind-sub">${escapeHtml(sub)}</span></button>`;
+    (sub ? `<span class="na-kind-sub">${escapeHtml(sub)}</span>` : "") +
+    `</button>`;
   els.naKinds.innerHTML =
-    enabledRoles().map((r) => tile(r.id, r.icon, t("role_" + r.id), r.name)).join("") +
+    enabledRoles().map((r) => tile(r.id, r.icon, t("role_" + r.id), "")).join("") +
     tile("free", "⬡", t("na_kind_free"), t("na_kind_free_sub"));
   // Een proces is geen agent: eigen lijst, eigen kopje. Dit was voorheen "project".
   els.naKinds2.innerHTML = tile("plain", "📁", t("na_kind_plain"), t("na_kind_plain_sub"));
@@ -4915,12 +4922,16 @@ function selectNaKind(kind) {
   naSay(els.naStatus, "", "");
   renderNaKinds();
   if (kind === "plain") { els.naLabel.focus(); return; }
-  // De rolkop zegt welke rol dit is en met welke vraag je binnenkomt.
+  // De rolkop zegt welke rol dit is en met welke vraag je binnenkomt. Geen naam:
+  // die vult het veld eronder in.
   els.naRoleHead.innerHTML = role
-    ? `<b>${escapeHtml(role.name)}</b> · ${escapeHtml(t("role_" + role.id))} — ${escapeHtml(t("role_" + role.id + "_q"))}`
+    ? `<b>${escapeHtml(t("role_" + role.id))}</b> — ${escapeHtml(t("role_" + role.id + "_q"))}`
     : "";
   els.naSource.value = role ? roleSource(role) : "";
   els.naSubject.value = "";
+  // Van rol wisselen betekent een andere bron, dus ook een ander voorstel voor de
+  // naam. Wat je zelf typte bewaren zou hier het verkeerde onthouden zijn.
+  els.naName.value = "";
   // Waar hij werkt: staand, of in een werkproces dat je al hebt. Geen
   // bladervenster -- Taurus kent de paden van je agents al.
   els.naWhere.innerHTML =
@@ -4952,6 +4963,9 @@ async function naReadSource() {
     return;
   }
   naSay(els.naStatus, "", "");
+  // De bron draagt een naam met zich mee; die is het VOORSTEL, niet het besluit.
+  // Heb je zelf al iets getypt, dan blijft dat staan.
+  if (!els.naName.value.trim()) els.naName.value = naProbe.name || "";
   const role = roleById(naKind);
   const row = (k, v) => `<div class="na-prow"><span class="na-pk">${escapeHtml(k)}</span><span class="na-pv">${escapeHtml(v)}</span></div>`;
   const when = naProbe.date ? new Date(naProbe.date).toLocaleDateString(settings.lang === "en" ? "en-GB" : "nl-NL") : "";
@@ -4965,6 +4979,12 @@ async function naReadSource() {
   els.naProbe.classList.remove("hidden");
   els.naDestField.classList.remove("hidden");
   naRefreshDest();
+}
+
+// Wat er in het naamveld staat, of niets. Eén plek, want de uitrol en de kaart
+// moeten dezelfde naam gebruiken -- anders heet de knop anders dan de agent.
+function naName() {
+  return els.naName ? els.naName.value.trim() : "";
 }
 
 async function naDeploy() {
@@ -4990,6 +5010,10 @@ async function naDeploy() {
       // Laag 2 is een TOEVOEGING: de werkplek werkt zonder. Aan of uit staat per
       // rol in de instellingen (#166).
       asSkill: role ? roleAsSkill(role) : false,
+      // De naam die JIJ koos. Leeg = de bron mag het zeggen. Gaat mee omdat de
+      // CLAUDE.md die Taurus schrijft ermee begint: heet de agent hier Sofie, dan
+      // hoort daar niet "Jake" te staan.
+      name: naName(),
     });
   } catch (e) {
     els.naSave.disabled = false;
@@ -5002,7 +5026,9 @@ async function naDeploy() {
   // Zelfde woord als in de map: een kaart die anders heet dan zijn map is een
   // kaart die je later niet terugvindt.
   const subject = subjectSlug(els.naSubject.value);
-  const label = subject !== "general" ? `${naProbe.name} · ${subject}` : naProbe.name;
+  // De knop draagt de naam die je koos; zonder keuze die van de bron.
+  const naam = naName() || naProbe.name;
+  const label = subject !== "general" ? `${naam} · ${subject}` : naam;
   const made = {
     ...blankRow(),
     id: uniqueId(label),
@@ -6102,6 +6128,7 @@ window.addEventListener("DOMContentLoaded", () => {
     naRoleHead: document.querySelector("#na-role-head"),
     naWhere: document.querySelector("#na-where"),
     naSubject: document.querySelector("#na-subject"),
+    naName: document.querySelector("#na-name"),
     naSource: document.querySelector("#na-source"),
     naProbe: document.querySelector("#na-probe"),
     naDestField: document.querySelector("#na-destfield"),

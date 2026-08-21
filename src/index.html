@@ -413,9 +413,10 @@
 
         <!-- Wat voor agent (#159). De zeven ICM-rollen staan hier naast "een map
              die je al hebt": de rol is van Taurus, de invulling van de repo. -->
-        <!-- Je installeert een ARCHITECT, niet een Jake: de rol is de titel en de
-             naam van de invulling staat eronder. Wissel je de bron, dan verandert
-             die naam en de titel niet. -->
+        <!-- Je installeert een ARCHITECT, en hoe die heet bepaal JIJ. Daarom staat
+             op de tegel alleen de rol: een naam die de bron meebrengt hoort niet
+             als besluit te lezen. De naam vraagt het scherm hieronder, met de naam
+             uit de bron als voorstel. -->
         <div class="na-kindcap" data-i18n="na_kind">Wat voor agent?</div>
         <div id="na-kinds" class="na-kinds"></div>
         <h2 class="na-second" data-i18n="na_process">Nieuw proces</h2>
@@ -425,6 +426,9 @@
              weet eerst waarvoor je iets haalt, dan pas waarvandaan. -->
         <div id="na-role" class="e-fields hidden">
           <div id="na-role-head" class="na-role-head"></div>
+          <div class="e-field"><span class="e-cap" data-i18n="na_name">Naam</span>
+            <input id="na-name" type="text" autocomplete="off" data-i18n-ph="na_name_ph" />
+            <div class="hint" data-i18n="na_name_hint">Zo heet deze agent -- op de knop, en in de CLAUDE.md die Taurus schrijft. Leeg = de naam die de bron zelf meegeeft.</div></div>
           <div class="e-grid">
             <div class="e-field"><span class="e-cap" data-i18n="na_where">Waar werkt hij?</span>
               <select id="na-where"></select></div>
