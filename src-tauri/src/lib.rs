@@ -5162,6 +5162,125 @@ fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+// ---------- links tussen preview-pagina's ----------
+//
+// De preview draait in een sandboxed srcdoc-iframe zonder eigen origin. Alles wat
+// daarin geklikt wordt loopt via de brug in PREVIEW_BRIDGE, en die liet tot nu toe
+// alleen http(s)/mailto naar buiten en ankers binnen het document. Een relatieve
+// link naar een BUURPAGINA (`dashboard.html#AST-0004`) deed dus niets, terwijl dat
+// precies is waar een gegenereerd rapport vol mee staat.
+//
+// Dat openzetten mag geen doorgeefluik worden: de pagina zelf is gegenereerde,
+// onvertrouwde HTML en kan ook zonder klik een bericht sturen. Daarom rekent de
+// Rust-kant uit waar een link heen wijst, en niet de pagina:
+//
+//   - alleen relatief. Een schema (`http:`, `file:`, `javascript:`) en een
+//     schijfletter (`C:`) vallen allebei af op dezelfde regel: er mag geen `:` in.
+//   - `..` wordt hier lexicaal weggerekend en niet met canonicalize, want die volgt
+//     symlinks -- en dan zou een link via een symlink in de map alsnog buiten de
+//     grens uitkomen.
+//   - het resultaat moet BINNEN de map van de sessie blijven, per padonderdeel
+//     vergeleken. Een tekstvergelijking zou `C:\werk` en `C:\werkmap` verwarren.
+//   - alleen wat de preview ook kan tonen: html, htm, md. Dezelfde set als
+//     scan_html, anders bied je een link aan naar iets dat leeg opent.
+
+// Splits een pad in onderdelen en reken `.` en `..` weg. Puur en lexicaal, dus
+// zonder schijf te raadplegen -- en dus testbaar.
+fn lexicaal_normaliseren(p: &Path) -> std::path::PathBuf {
+    let mut out = std::path::PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+// Ligt `kandidaat` binnen `wortel`? Per padonderdeel, niet als tekst: anders zou
+// C:\werkmap doorgaan voor iets binnen C:\werk. Kleingemaakt, want op Windows is
+// C:\Map dezelfde plek als c:\map.
+fn zit_binnen(wortel: &Path, kandidaat: &Path) -> bool {
+    let deel = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
+    };
+    let (w, k) = (deel(wortel), deel(kandidaat));
+    !w.is_empty() && k.len() >= w.len() && w.iter().zip(k.iter()).all(|(a, b)| a == b)
+}
+
+// %20 en vrienden. Een gegenereerde pagina codeert een spatie in een bestandsnaam,
+// en zonder dit zou "mijn%20rapport.html" als bestandsnaam gezocht worden.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
+// Waar wijst deze link heen, en mag dat? None = niet openen (en dan gebeurt er
+// net zo weinig als voorheen). Raakt de schijf niet; het bestaan wordt door de
+// aanroeper gecontroleerd.
+fn preview_link_target(wortel: &Path, vanuit: &Path, href: &str) -> Option<std::path::PathBuf> {
+    // Fragment en query horen niet bij de bestandsnaam.
+    let pad = href.split(['#', '?']).next().unwrap_or("").trim();
+    if pad.is_empty() || pad.contains(':') {
+        return None;
+    }
+    // Vanaf de wortel beginnen is geen relatieve link.
+    if pad.starts_with('/') || pad.starts_with('\\') {
+        return None;
+    }
+    let pad = percent_decode(pad);
+    let map = vanuit.parent()?;
+    // De grens is de sessiemap. Ligt de getoonde pagina daar helemaal buiten --
+    // dat kan, want je kunt ook een pad uit de terminal openen -- dan is zijn
+    // eigen map de grens. Zonder die terugval zou zo'n pagina geen enkele
+    // buurpagina mogen openen, wat niet strenger is maar alleen stiller kapot.
+    let grens = if zit_binnen(wortel, vanuit) { wortel } else { map };
+    let doel = lexicaal_normaliseren(&map.join(&pad));
+    if !zit_binnen(grens, &doel) {
+        return None;
+    }
+    let toonbaar = doel
+        .extension()
+        .map(|e| {
+            e.eq_ignore_ascii_case("html")
+                || e.eq_ignore_ascii_case("htm")
+                || e.eq_ignore_ascii_case("md")
+        })
+        .unwrap_or(false);
+    if !toonbaar {
+        return None;
+    }
+    Some(doel)
+}
+
+#[tauri::command]
+fn resolve_preview_link(root: String, from_file: String, href: String) -> Result<String, String> {
+    let doel = preview_link_target(Path::new(&root), Path::new(&from_file), &href)
+        .ok_or("link points outside the preview folder")?;
+    if !doel.is_file() {
+        return Err("no such file".to_string());
+    }
+    Ok(doel.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
     std::process::Command::new("explorer")
@@ -7153,6 +7272,7 @@ pub fn run() {
             session_state,
             create_session,
             list_agent_models,
+            resolve_preview_link,
             restart_session,
             write_session,
             resize_session,
@@ -9109,6 +9229,95 @@ mod tests {
         let got = parse_model_list(&many);
         assert_eq!(got.len(), 64);
         assert_eq!(got[0], "model 0");
+    }
+
+    // Een link tussen twee gegenereerde pagina's in dezelfde map is het hele punt.
+    #[test]
+    fn a_link_to_a_neighbouring_page_resolves() {
+        let wortel = Path::new(r"C:\werk\projecten");
+        let vanuit = Path::new(r"C:\werk\projecten\_index\acties.html");
+        // Het fragment hoort niet bij de bestandsnaam.
+        let got = preview_link_target(wortel, vanuit, "dashboard.html#AST-DHR-AIT-0009").unwrap();
+        assert_eq!(got, Path::new(r"C:\werk\projecten\_index\dashboard.html"));
+        // Met ./ ervoor, met een submap, en met een gecodeerde spatie.
+        assert_eq!(
+            preview_link_target(wortel, vanuit, "./dashboard.html").unwrap(),
+            Path::new(r"C:\werk\projecten\_index\dashboard.html")
+        );
+        assert_eq!(
+            preview_link_target(wortel, vanuit, "mail-log/week-36.html").unwrap(),
+            Path::new(r"C:\werk\projecten\_index\mail-log\week-36.html")
+        );
+        assert_eq!(
+            preview_link_target(wortel, vanuit, "mijn%20rapport.md").unwrap(),
+            Path::new(r"C:\werk\projecten\_index\mijn rapport.md")
+        );
+        // Omhoog mag, zolang je binnen de sessiemap blijft.
+        assert_eq!(
+            preview_link_target(wortel, vanuit, "../overzicht.html").unwrap(),
+            Path::new(r"C:\werk\projecten\overzicht.html")
+        );
+    }
+
+    // De grens is de sessiemap, en die moet ook houden als de pagina zijn best
+    // doet om eroverheen te komen.
+    #[test]
+    fn a_link_out_of_the_session_folder_is_refused() {
+        let wortel = Path::new(r"C:\werk\projecten");
+        let vanuit = Path::new(r"C:\werk\projecten\_index\acties.html");
+        for href in [
+            r"../../geheim.html",
+            r"..\..\geheim.html",
+            r"/etc/passwd.html",
+            r"\windows\win.ini.html",
+            r"C:\Users\AST\.ssh\id_rsa.html",
+            "file:///C:/geheim.html",
+            "http://example.com/x.html",
+            "javascript:alert(1)",
+            "",
+            "#alleen-een-anker",
+        ] {
+            assert!(
+                preview_link_target(wortel, vanuit, href).is_none(),
+                "had geweigerd moeten worden: {href}"
+            );
+        }
+        // Een buurmap met dezelfde beginletters is GEEN submap. Op een
+        // tekstvergelijking van het pad zou dit er wel doorheen glippen.
+        assert!(preview_link_target(
+            Path::new(r"C:\werk\proj"),
+            Path::new(r"C:\werk\proj\a.html"),
+            "../projecten/x.html"
+        )
+        .is_none());
+    }
+
+    // Een pagina die je via een pad uit de terminal opende ligt soms helemaal
+    // buiten de sessiemap. Dan geldt zijn eigen map als grens: buren mogen wel,
+    // eroverheen niet.
+    #[test]
+    fn a_page_outside_the_session_folder_falls_back_to_its_own_folder() {
+        let wortel = Path::new(r"C:\werk\projecten");
+        let vanuit = Path::new(r"D:\rapporten\week36\index.html");
+        assert_eq!(
+            preview_link_target(wortel, vanuit, "detail.html").unwrap(),
+            Path::new(r"D:\rapporten\week36\detail.html")
+        );
+        assert!(preview_link_target(wortel, vanuit, "../week35/detail.html").is_none());
+    }
+
+    // Alleen wat de preview ook echt kan tonen; anders bied je een link aan naar
+    // een leeg scherm.
+    #[test]
+    fn only_previewable_files_are_offered() {
+        let wortel = Path::new(r"C:\werk");
+        let vanuit = Path::new(r"C:\werk\a.html");
+        for goed in ["b.html", "b.HTM", "b.md"] {
+            assert!(preview_link_target(wortel, vanuit, goed).is_some(), "{goed}");
+        }
+        for fout in ["cards.json", "rapport.pdf", "script.ps1", "geenextensie"] {
+            assert!(preview_link_target(wortel, vanuit, fout).is_none(), "{fout}");
+        }
     }
 
     #[test]

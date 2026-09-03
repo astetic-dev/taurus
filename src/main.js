@@ -3802,15 +3802,49 @@ async function loadHtmlList(s) {
 // Forwarded to the sandboxed preview: external-link clicks (and programmatic
 // postMessage from the page) are relayed to the parent, which opens them in the
 // default browser. Keeps the iframe sandbox tight (no allow-same-origin needed).
-const PREVIEW_BRIDGE = `<script>
+//
+// Een link naar een BUURPAGINA gaat dezelfde weg op. Navigeren binnen de sandbox
+// kan niet -- srcdoc heeft geen eigen origin, dus een relatieve URL is nergens
+// tegen op te lossen -- maar de ouder kan het doelbestand wel inlezen en opnieuw
+// tonen. Waar die link heen mag wijzen rekent de Rust-kant uit
+// (resolve_preview_link): deze pagina is gegenereerd en onvertrouwd, en kan ook
+// zonder klik een bericht sturen.
+//
+// `fragment` is het anker waarop de pagina moet openen als je er via zo'n link
+// binnenkomt. Dat kan niet aan de srcdoc-URL geplakt worden, dus het reist mee in
+// de brug.
+function previewBridge(fragment) {
+  return `<script>
+  var NAAR = ${JSON.stringify(fragment || "")};
+  function springNaar(id) {
+    if (!id) return false;
+    var el = document.getElementById(id);
+    // GEMETEN in Chromium, in precies deze opstelling (sandbox=allow-scripts,
+    // srcdoc, geen eigen origin): scrollIntoView met behavior:'smooth' doet hier
+    // NIETS -- scrollY blijft 0 -- terwijl scrollTo en scrollIntoView zonder
+    // smooth gewoon werken. Ankers in de preview sprongen daardoor nooit; dat
+    // zag je niet, want er komt ook geen fout. Dus geen smooth.
+    if (el) { el.scrollIntoView(); return true; }
+    return false;
+  }
+  // Binnengekomen via een link met een anker: springen zodra het doel er staat.
+  // Drie momenten, en dat is geen slordigheid maar GEMETEN: op DOMContentLoaded
+  // springt hij wel, maar zodra het document klaar is zet de browser de
+  // scrollpositie terug op 0. Vandaar nog een poging bij load, en een derde er
+  // vlak achter voor een pagina die zijn inhoud zelf opbouwt.
+  if (NAAR) {
+    var probeer = function () { springNaar(NAAR); };
+    document.addEventListener('DOMContentLoaded', probeer);
+    window.addEventListener('load', function () { probeer(); setTimeout(probeer, 200); });
+  }
   document.addEventListener('click', function (ev) {
     var a = ev.target && ev.target.closest && ev.target.closest('a[href]');
     if (!a) return;
     // Het RUWE href-attribuut bekijken, niet a.href: die lost '#'/relatief op naar
     // de app-origin (http://...localhost/#) en matchte dan als "externe" link ->
     // localhost opende in de browser. Alleen echte http(s)-links gaan extern; een
-    // anker (#...) blijft in het document; al het andere (relatief/mailto) doet niets
-    // binnen de sandbox.
+    // anker (#...) blijft in het document; een relatieve link gaat als verzoek naar
+    // de ouder, die hem inleest en toont; de rest doet niets binnen de sandbox.
     var href = a.getAttribute('href') || '';
     if (/^(https?:\\/\\/|mailto:)/i.test(href)) {
       ev.preventDefault();
@@ -3821,14 +3855,20 @@ const PREVIEW_BRIDGE = `<script>
     } else if (href.charAt(0) === '#') {
       // Anker: expliciet scrollen -- fragment-navigatie is binnen een sandboxed
       // srcdoc-iframe niet overal betrouwbaar.
-      var el = document.getElementById(href.slice(1));
-      if (el) { ev.preventDefault(); el.scrollIntoView({ behavior: 'smooth' }); }
-      else { ev.preventDefault(); }
+      ev.preventDefault();
+      springNaar(href.slice(1));
+    } else if (/^[a-z][a-z0-9.+-]*:/i.test(href)) {
+      ev.preventDefault(); // ander schema (javascript:, data:, file:): niets doen
     } else {
-      ev.preventDefault(); // relatief e.d.: niet laten navigeren binnen de sandbox
+      // Alleen preventDefault, geen stopImmediatePropagation: hiervoor liep een
+      // relatieve link ook gewoon door naar de handlers van de pagina zelf, en
+      // dat blijft zo. Alleen de navigatie komt erbij.
+      ev.preventDefault();
+      parent.postMessage({ type: 'taurus-open-local', href: href }, '*');
     }
   }, true);
 <\/script>`;
+}
 
 // Thema-CSS voor de markdown-render (de srcdoc-iframe erft de app-CSS niet).
 const MD_STYLE = `<style>
@@ -3937,19 +3977,20 @@ function mdToHtml(src) {
 
 // Toon een .html-preview (ruw) of een .md-bestand (gerenderd of raw). .md wordt
 // altijd escape-eerst gerenderd; ruwe HTML in de .md draait dus nooit als script.
-async function renderPreview(s, path) {
+async function renderPreview(s, path, fragment) {
   if (!path) return;
   s.previewPath = path;
   const frame = s.el.querySelector(".preview-frame");
   const isMd = /\.md$/i.test(path);
+  const brug = previewBridge(fragment);
   try {
     const raw = await invoke("read_file", { path });
     if (isMd && !s.previewRaw) {
-      frame.srcdoc = PREVIEW_BRIDGE + MD_STYLE + `<body>${mdToHtml(raw)}</body>`;
+      frame.srcdoc = brug + MD_STYLE + `<body>${mdToHtml(raw)}</body>`;
     } else if (isMd) {
       frame.srcdoc = MD_STYLE + `<body><pre class="md-code"><code>${escapeHtml(raw)}</code></pre></body>`;
     } else {
-      frame.srcdoc = PREVIEW_BRIDGE + raw;
+      frame.srcdoc = brug + raw;
     }
   } catch (e) {
     // De 2 MB-grens wordt in Rust bewaakt (vóór lezen/IPC, #72); vertaal die
@@ -3961,6 +4002,35 @@ async function renderPreview(s, path) {
     }
   }
 }
+// Volg een link naar een buurpagina, geklikt binnen de preview. De sandbox kan
+// zelf niet navigeren, dus we lezen het doelbestand in en tonen het opnieuw --
+// met het anker eruit, zodat je op de goede regel binnenkomt.
+//
+// `bron` is het venster dat het bericht stuurde; die moet van DEZE preview zijn.
+// Anders zou een pagina in een andere tab de zichtbare preview kunnen omgooien.
+//
+// Waar de link heen mag wijzen bepaalt de Rust-kant. Wijst hij eroverheen of
+// bestaat het bestand niet, dan gebeurt er niets -- precies zoals het was voordat
+// relatieve links werkten.
+async function openPreviewLink(s, href, bron) {
+  const frame = s.el.querySelector(".preview-frame");
+  if (!frame || (bron && bron !== frame.contentWindow)) return;
+  if (!s.previewPath) return;
+  const hash = href.indexOf("#");
+  const fragment = hash >= 0 ? href.slice(hash + 1) : "";
+  let doel;
+  try {
+    doel = await invoke("resolve_preview_link", { root: s.path, fromFile: s.previewPath, href });
+  } catch (_) { return; }
+  // De keuzelijst meeverzetten, zodat te zien is waar je nu bent en je met
+  // dezelfde lijst terug kunt. Staat het bestand er niet in (list_html kijkt drie
+  // mappen diep en toont er tachtig), dan tonen we het toch.
+  const sel = s.el.querySelector(".preview-file");
+  const hit = [...sel.options].find((o) => o.value.toLowerCase() === doel.toLowerCase());
+  if (hit) sel.value = hit.value;
+  await renderPreview(s, doel, fragment);
+}
+
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
 async function openPreviewFile(s, rawPath) {
   let p = String(rawPath).trim().replace(/[)\].,;:'"]+$/, "");
@@ -6587,6 +6657,12 @@ window.addEventListener("DOMContentLoaded", () => {
     if (d && d.type === "taurus-open-external" && typeof d.url === "string"
         && /^(https?:\/\/|mailto:)/i.test(d.url)) {
       window.__TAURI__.opener.openUrl(d.url).catch(() => {});
+    }
+    // Link naar een buurpagina: die tonen we in dezelfde preview. Alleen voor de
+    // zichtbare sessie -- een preview van een andere tab hoort niets om te gooien.
+    if (d && d.type === "taurus-open-local" && typeof d.href === "string") {
+      const s = sessions.get(current);
+      if (s) openPreviewLink(s, d.href, e.source);
     }
   });
 
