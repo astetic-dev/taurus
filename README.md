@@ -99,7 +99,11 @@ consistently. That's what Taurus is for.
 - **HTML preview** — click an `.html` path in the terminal (or right-click a tab →
   *HTML preview*); it renders in a sandboxed pane beside (or instead of) the
   terminal. External links open in your default browser; `mailto:` opens your
-  mail client.
+  mail client. **Links to neighbouring pages work**: a generated report that links
+  to `dashboard.html#CARD-0004` opens that page and jumps to the block. The file
+  picker above the preview follows along, so it is also the way back. Where such a
+  link may point is decided on the Rust side, bounded to the session folder — a
+  link outside it does nothing.
 - **Markdown preview** — `.md` files render inline too: GFM **tables** (with
   alignment), **task lists**, strikethrough, code blocks, working in-document
   anchors — with a **`</>` raw/rendered toggle**. Rendering is escape-first
@@ -313,4 +317,8 @@ Want to show Taurus (or record a video) without exposing real projects?
   (Windows TTS + the sherpa-onnx STT sidecar) and the DROPZONE file operations.
 - Previews render in a **sandboxed iframe** (no same-origin, scripts contained);
   Markdown is rendered escape-first by a small built-in renderer, so documents
-  can't inject HTML/JS into the app.
+  can't inject HTML/JS into the app. A previewed page cannot navigate on its own:
+  every link is relayed to the parent, and for a relative one the target is
+  resolved in Rust — relative only, `..` collapsed lexically rather than through
+  `canonicalize` (which follows symlinks), the result checked component-wise
+  against the session folder, and limited to what the preview can display.
