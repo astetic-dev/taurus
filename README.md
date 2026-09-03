@@ -60,9 +60,10 @@ consistently. That's what Taurus is for.
   "ready" alerts), and can announce it out loud ("Porter is ready").
 - **Live status** — optionally shows Claude's current activity verb on the tab
   (✶ Orbiting…).
-- **Per-project agent, model & mode** — launch `claude` (Claude Code) or `agy`
-  (a Gemini-backed agent CLI), optionally pinned to a model, in `default`, `plan`
-  or `auto` (`--permission-mode`); all set per project, overridable per session.
+- **Per-project agent, model & mode** — launch `claude` (Claude Code), `agy`
+  (a Gemini-backed agent CLI) or `grok` (Grok Build), optionally pinned to a
+  model version, in `default`, `plan` or `auto` (`--permission-mode`); all set
+  per project, overridable per session.
 - **Restart / resume** — right-click a tab to restart and resume the same
   conversation; optionally **remember sessions and resume them on startup**.
   (`agy` has no session ids, so a restart resumes the folder's most recent
@@ -172,13 +173,19 @@ Edit them with the in-app **Agents** editor, or by hand. Format:
 ]
 ```
 
-- `agent` (optional) — which agent CLI to launch: `claude` (default, Claude Code)
-  or `agy` (a Gemini-backed agent CLI). Selectable per project in the editor and
-  overridable per session on the launch form. Resume limitation: `agy` has no
-  session ids, so restarts resume the folder's most recent conversation.
+- `agent` (optional) — which agent CLI to launch: `claude` (default, Claude Code),
+  `agy` (a Gemini-backed agent CLI) or `grok` (Grok Build). Selectable per project
+  in the editor and overridable per session on the launch form. Resume limitation:
+  `agy` has no session ids, so restarts resume the folder's most recent
+  conversation; `claude` and `grok` both resume by session id.
 - `model` (optional) — model the agent starts with (free text, e.g. `opus`,
-  `sonnet`, `gemini-2.5-pro`). Empty means the agent's own default. Passed as
-  `--model`.
+  `sonnet`, `grok-4.6`). Empty means the agent's own default. Passed as
+  `--model`. An alias such as `opus` always follows the newest model in that
+  line; type a full model name (`claude-opus-4-8`) to pin a version. Suggestions
+  come from the aliases, from `agy models` / `grok models`, and from
+  `%APPDATA%\Taurus\models.json` — a file you can edit or hand out without
+  rebuilding Taurus, re-read every time the list is filled. Whatever you type
+  yourself is appended to it after a successful start.
 - `command` (optional) — run a different program instead of the agent for this
   project (no agent flags). Takes precedence over `agent`/`model`. Use double
   quotes around a program path or argument that contains spaces.
