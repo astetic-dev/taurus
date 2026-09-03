@@ -30,7 +30,7 @@ struct Project {
     mode: String,
     #[serde(default)]
     command: String,
-    // Welke agent-CLI start dit project: "" / "claude" (default) of "agy".
+    // Welke agent-CLI start dit project: "" / "claude" (default), "agy" of "grok".
     #[serde(default)]
     agent: String,
     // Model voor de agent (vrije tekst). Leeg = de eigen default van de agent.
@@ -2980,12 +2980,63 @@ struct SessionState {
     age_secs: u64,
 }
 
+// Waar staat het transcript van een grok-sessie? Grok groepeert per werkmap:
+// ~/.grok/sessions/<gecodeerde-werkmap>/<sessie-id>/. Die mapnaam is de
+// URL-gecodeerde werkmap, en bij een naam boven 255 bytes juist een slug plus
+// een hash (staat zo in grok's eigen sessies-documentatie). Terugrekenen zou
+// dus twee vormen moeten raden, waarvan er één een ongedocumenteerde hash is.
+// Daarom zoeken we op het SESSIE-ID: dat is een UUID die de launcher zelf heeft
+// meegegeven, hij is uniek, en hij staat altijd precies één niveau diep.
+fn grok_session_file(uuid: &str) -> Option<std::path::PathBuf> {
+    let home = std::env::var("USERPROFILE").ok()?;
+    let root = std::path::PathBuf::from(home).join(".grok").join("sessions");
+    for entry in std::fs::read_dir(&root).ok()? {
+        let entry = match entry {
+            Ok(e) => e,
+            // Een onleesbare map is geen reden de rest niet te bekijken.
+            Err(_) => continue,
+        };
+        let dir = entry.path().join(uuid);
+        if !dir.is_dir() {
+            continue;
+        }
+        // updates.jsonl is volgens grok's documentatie het gesprekslog dat
+        // /resume voedt; sessies van een oudere grok hebben alleen
+        // chat_history.jsonl. De map zelf is de laatste terugval: die bestaat
+        // altijd, maar zijn wijzigingsdatum volgt alleen het TOEVOEGEN van
+        // bestanden, dus als ouderdom is hij minder waard dan een logbestand.
+        for name in ["updates.jsonl", "chat_history.jsonl"] {
+            let f = dir.join(name);
+            if f.is_file() {
+                return Some(f);
+            }
+        }
+        return Some(dir);
+    }
+    None
+}
+
 // Bestaat het transcript nog, en hoe oud (seconden sinds laatste wijziging)?
 // Claude ruimt oude sessies zelf op; ontbreekt het bestand -> niet herstartbaar,
 // dan proberen we het bij het opstarten niet eens.
+//
+// `agent` mag ontbreken: dan geldt de claude-vorm, en dat is precies wat er
+// gebeurde toen dit nog geen agent kende. agy blijft daar ook op staan -- die
+// heeft geen sessie-id's en dus geen transcript om op te zoeken.
 #[tauri::command]
-fn session_state(path: String, uuid: String) -> SessionState {
-    let f = claude_session_file(&path, &uuid);
+fn session_state(path: String, uuid: String, agent: Option<String>) -> SessionState {
+    let f = match agent.as_deref().unwrap_or("") {
+        "grok" => match grok_session_file(&uuid) {
+            Some(f) => f,
+            None => {
+                return SessionState {
+                    exists: false,
+                    age_secs: 0,
+                }
+            }
+        },
+        _ => claude_session_file(&path, &uuid),
+    };
     match std::fs::metadata(&f) {
         Ok(meta) => {
             let age = meta
@@ -3007,10 +3058,11 @@ fn session_state(path: String, uuid: String) -> SessionState {
 }
 
 // Welk uitvoerbaar bestand hoort bij deze agent? Leeg/"claude" -> claude.exe,
-// "agy" -> agy.exe (de Gemini-agent-CLI).
+// "agy" -> agy.exe (de Gemini-agent-CLI), "grok" -> grok.exe (Grok Build).
 fn agent_exe(agent: &str) -> &'static str {
     match agent {
         "agy" => "agy.exe",
+        "grok" => "grok.exe",
         _ => "claude.exe",
     }
 }
@@ -3050,29 +3102,173 @@ fn resolve_program(agent: &str) -> (String, Vec<String>) {
     (exe.to_string(), Vec::new())
 }
 
-// Welk subcommando somt de modellen van deze agent op? Alleen agy heeft er een
-// (`agy models`, één label per regel). claude heeft het niet nodig: daar wijzen
-// de aliassen (fable/opus/sonnet/haiku) altijd naar het nieuwste model (#92).
+// ---------- vastgepinde modellen (models.json) ----------
+//
+// claude kan zijn modellen niet opsommen: er is geen `claude models` (GEMETEN op
+// 2.1.259: dat wordt als prompt opgevat), en op schijf staat geen catalogus. Toch
+// mag je een exacte versie kiezen -- `claude --model` neemt een alias of een
+// volledige modelnaam. Die namen moeten dus ergens vandaan komen.
+//
+// Niet uit een lijst in de code: #92 heeft zo'n lijst juist weggehaald omdat hij
+// bij elke modelrelease veroudert. Wel uit een LOSSTAAND bestand in de configmap:
+// een model erbij zetten kost dan geen nieuwe build van Taurus --
+// het bestand in %APPDATA%\Taurus zetten volstaat, en het telt nog
+// tijdens een lopende sessie mee, omdat de suggestielijst hem elke keer
+// opnieuw leest.
+//
+// Vorm, per agent een lijst modelnamen:
+//     {"claude": ["claude-opus-5", "claude-opus-4-8"], "grok": ["grok-4.5"]}
+fn model_pins_path() -> std::path::PathBuf {
+    config_dir().join("models.json")
+}
+
+// De startlijst, en alleen dat: hij wordt EEN keer weggeschreven, namelijk als
+// models.json er nog niet is. Daarna is het bestand de baas en raakt deze lijst
+// hem nooit meer aan -- ook niet na een update van Taurus. Zo
+// veroudert de lijst in de code niemands lijst op schijf.
+//
+// GEMETEN tegen claude 2.1.259: alle zes worden geaccepteerd door `claude
+// --model` (`-p "zeg alleen: ok"` gaf op elk een antwoord, geen
+// unrecognized_model). Klopt er ooit een niet meer, dan pas je models.json aan;
+// daar is het bestand voor.
+const MODEL_PINS_START: &str = r#"{
+  "claude": [
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    "claude-fable-5-1"
+  ]
+}
+"#;
+
+// Zorg dat models.json bestaat. Alleen aanmaken, nooit overschrijven: een
+// bestaand bestand is iemands keuze (uitgedeeld door de beheerder, of gegroeid
+// uit wat er hier getypt is) en die gaat voor.
+//
+// Dit hangt bewust NIET aan ensure_config: die springt eruit zodra projects.json
+// bestaat, en dan zou een bestaande installatie nooit een models.json krijgen.
+fn ensure_model_pins() {
+    let p = model_pins_path();
+    if p.exists() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(config_dir());
+    let _ = std::fs::write(&p, MODEL_PINS_START);
+}
+
+// Ontbreekt het bestand of is het stuk, dan is dat geen fout: dan zijn er geen
+// pins en blijven de aliassen en de CLI-lijst over. Een suggestielijst is geen
+// plek om een sessie op te laten stranden.
+#[tauri::command]
+fn read_model_pins() -> std::collections::BTreeMap<String, Vec<String>> {
+    ensure_model_pins();
+    std::fs::read_to_string(model_pins_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+// Zet een model achteraan in een pin-lijst. Puur, dus testbaar; geeft false als
+// er niets te schrijven valt. Achteraan, zodat de uitgedeelde volgorde vooraan
+// blijft staan. Een plafond zodat het bestand niet ongemerkt volloopt: dan valt
+// de oudste eruit en niet de zojuist gebruikte.
+fn pin_toevoegen(lijst: &mut Vec<String>, model: &str) -> bool {
+    if lijst.iter().any(|m| m == model) {
+        return false;
+    }
+    lijst.push(model.to_string());
+    if lijst.len() > 64 {
+        let weg = lijst.len() - 64;
+        lijst.drain(..weg);
+    }
+    true
+}
+
+// Onthoud een model dat iemand zelf intypte, zodat het de volgende keer in de
+// lijst staat.
+#[tauri::command]
+fn remember_model_pin(agent: String, model: String) -> Result<(), String> {
+    let (agent, model) = (agent.trim().to_string(), model.trim().to_string());
+    // Leeg = "de default van de agent", en dat is geen model om te bewaren.
+    // Te lang is geen modelnaam maar geplakte rommel.
+    if agent.is_empty() || model.is_empty() || model.len() > 120 {
+        return Ok(());
+    }
+    let mut pins = read_model_pins();
+    if !pin_toevoegen(pins.entry(agent).or_default(), &model) {
+        return Ok(());
+    }
+    let json = serde_json::to_string_pretty(&pins).map_err(|e| e.to_string())?;
+    std::fs::write(model_pins_path(), json).map_err(|e| e.to_string())
+}
+
+// Welk subcommando somt de modellen van deze agent op? agy en grok hebben er
+// allebei een (`agy models`, `grok models`). claude heeft het niet: daar wijzen
+// de aliassen (fable/opus/sonnet/haiku) altijd naar het nieuwste model (#92),
+// en een exacte versie typ je zelf -- zie de suggestielijst in models.json.
 fn model_list_subcommand(agent: &str) -> Option<&'static str> {
     match agent {
-        "agy" => Some("models"),
+        "agy" | "grok" => Some("models"),
         _ => None,
     }
 }
 
+// Haal de modelnaam uit één regel van het list-commando, of None als deze regel
+// geen model is. Per agent, want de twee CLIs met zo'n lijst schrijven iets
+// heel anders op.
+//
+// agy schrijft TWEE kolommen, tab-gescheiden:
+//     gemini-3.8-flash-high<TAB>Gemini 3.8 Flash (High)
+// GEMETEN op agy in september 2026. Toen #92 dit bouwde was piped uitvoer nog
+// één kale slug per regel, en de hele regel bewaren leverde sindsdien een
+// --model-waarde met een tab en het label erin. Dat viel niet op omdat agy een
+// onbekend model zonder foutmelding slikt en stil op zijn default terugvalt --
+// precies het gat waar #92 zelf voor waarschuwde. De slug is de eerste kolom.
+//
+// grok schrijft proza met opsommingstekens (GEMETEN op grok 1.0.13):
+//     You are logged in with grok.com.
+//
+//     Default model: grok-4.6
+//
+//     Available models:
+//       * grok-4.6 (default)
+//       - grok-4.5
+// Alleen de regels met een opsommingsteken zijn modellen. "(default)" hoort bij
+// de weergave en niet bij de naam, dus daar knippen we op de eerste spatie.
+fn model_from_line(agent: &str, line: &str) -> Option<String> {
+    let line = line.trim();
+    let name = match agent {
+        "agy" => line.split('\t').next().unwrap_or("").trim(),
+        "grok" => {
+            let rest = line.strip_prefix("* ").or_else(|| line.strip_prefix("- "))?;
+            rest.split_whitespace().next().unwrap_or("")
+        }
+        _ => line,
+    };
+    // Modelnamen zijn korte labels; alles daarbuiten is geen modelregel.
+    if name.is_empty() || name.len() > 120 {
+        return None;
+    }
+    Some(name.to_string())
+}
+
 // Zet de stdout van het list-commando om in modelnamen. Puur, dus testbaar:
-// trimmen, lege regels en CR weg, ontdubbelen met behoud van volgorde (de CLI
-// zet het nieuwste bovenaan), en een plafond zodat onverwachte uitvoer -- een
-// hulptekst of een foutmelding op stdout -- de datalist niet volspamt.
-fn parse_model_list(stdout: &str) -> Vec<String> {
+// per regel schonen, ontdubbelen met behoud van volgorde (de CLI zet het
+// nieuwste bovenaan), en een plafond zodat onverwachte uitvoer -- een hulptekst
+// of een foutmelding op stdout -- de datalist niet volspamt.
+fn parse_model_list(agent: &str, stdout: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for line in stdout.lines() {
-        let name = line.trim();
-        // Modelnamen zijn korte labels; alles daarbuiten is geen modelregel.
-        if name.is_empty() || name.len() > 120 || out.iter().any(|s| s == name) {
+        let name = match model_from_line(agent, line) {
+            Some(n) => n,
+            None => continue,
+        };
+        if out.iter().any(|s| s == &name) {
             continue;
         }
-        out.push(name.to_string());
+        out.push(name);
         if out.len() == 64 {
             break;
         }
@@ -3129,7 +3325,7 @@ fn list_agent_models(agent: String) -> Result<Vec<String>, String> {
     if !out.status.success() {
         return Err(format!("{} {} exited with {}", agent, sub, out.status));
     }
-    let models = parse_model_list(&String::from_utf8_lossy(&out.stdout));
+    let models = parse_model_list(&agent, &String::from_utf8_lossy(&out.stdout));
     if models.is_empty() {
         return Err(format!("{} {} returned no models", agent, sub));
     }
@@ -3510,6 +3706,7 @@ fn parse_override(command: &str) -> Result<(String, Vec<String>), String> {
 fn remote_agent_program(agent: &str, os: &str) -> String {
     let base = match agent {
         "agy" => "agy",
+        "grok" => "grok",
         _ => "claude",
     };
     if os == "windows" {
@@ -3523,18 +3720,19 @@ fn remote_agent_program(agent: &str, os: &str) -> String {
 // mee moet (#130).
 //
 // De lijst is die van claude 2.1.232: acceptEdits, auto, bypassPermissions, manual,
-// dontAsk, plan. Een whitelist en geen doorgeefluik, want een kaart kan een modus
-// bewaren die bij een ANDERE agent hoorde -- zet je een agy-kaart met "sandbox" om
-// naar claude, dan zou dat anders een ongeldige vlag worden en krijg je de fout drie
-// lagen diep uit een remote shell. Onbekend valt daarom terug op "geen vlag", wat
-// altijd werkt.
+// dontAsk, plan. GEMETEN dat grok 1.0.13 exact diezelfde zes accepteert, dus die
+// deelt deze whitelist -- vandaar de naam agent_ en niet claude_. Een whitelist en
+// geen doorgeefluik, want een kaart kan een modus bewaren die bij een ANDERE agent
+// hoorde -- zet je een agy-kaart met "sandbox" om naar claude, dan zou dat anders
+// een ongeldige vlag worden en krijg je de fout drie lagen diep uit een remote
+// shell. Onbekend valt daarom terug op "geen vlag", wat altijd werkt.
 //
 // "default" is geen modus maar de afwezigheid van een keuze: geen vlag, dus de eigen
 // instelling van de agent geldt. Dat is bewust -- wie `defaultMode: acceptEdits` in
 // zijn settings.json heeft staan, wil niet dat Taurus daar overheen gaat. De CLI
 // accepteert `default` overigens nog steeds als niet-gedocumenteerde alias, maar
 // meesturen zou juist die eigen instelling overschrijven.
-fn claude_permission_mode(mode: &str) -> Option<&'static str> {
+fn agent_permission_mode(mode: &str) -> Option<&'static str> {
     match mode.trim() {
         "manual" => Some("manual"),
         "acceptEdits" => Some("acceptEdits"),
@@ -3599,6 +3797,47 @@ fn build_command(
                 }
             }
         }
+        // grok (Grok Build): de vlaggen liggen dicht bij die van claude --
+        // --session-id met een UUID voor een verse sessie, --resume voor
+        // hervatten, en --permission-mode met exact dezelfde zes waarden
+        // (GEMETEN op grok 1.0.13, zie agent_permission_mode). Twee dingen
+        // wijken af:
+        //   - er is geen -n/--name, dus de tabtitel gaat niet mee naar de CLI.
+        //     grok maakt zijn eigen titel uit het gesprek; de tab in dit venster
+        //     houdt de titel die jij gaf.
+        //   - het equivalent van --append-system-prompt heet --rules ("extra
+        //     rules to append to the system prompt"), dus volledige paden gaan
+        //     daarlangs.
+        "grok" => {
+            match kind {
+                LaunchKind::Create => {
+                    a.push("--session-id".into());
+                    a.push(session_id.into());
+                }
+                LaunchKind::Resume => {
+                    a.push("--resume".into());
+                    a.push(session_id.into());
+                }
+            }
+            if let Some(m) = agent_permission_mode(mode) {
+                a.push("--permission-mode".into());
+                a.push(m.into());
+            }
+            if !model.trim().is_empty() {
+                a.push("--model".into());
+                a.push(model.trim().into());
+            }
+            if full_paths {
+                a.push("--rules".into());
+                a.push(FULL_PATH_PROMPT.into());
+            }
+            // Taak alleen bij een verse start; --resume hervat het gesprek.
+            if let LaunchKind::Create = kind {
+                if !task.trim().is_empty() {
+                    a.push(task.trim().into());
+                }
+            }
+        }
         // claude (default): ongewijzigde vlaggen, plus --model wanneer gezet.
         _ => {
             match kind {
@@ -3613,7 +3852,7 @@ fn build_command(
             }
             a.push("-n".into());
             a.push(norm_title(title));
-            if let Some(m) = claude_permission_mode(mode) {
+            if let Some(m) = agent_permission_mode(mode) {
                 a.push("--permission-mode".into());
                 a.push(m.into());
             }
@@ -3892,8 +4131,8 @@ fn herdr_posix_script(session: &str, cwd: &str, program: &str, args: &[String]) 
         ),
         "fi".to_string(),
         // Rechtstreeks aan de agent-terminal hangen geeft een kale tab, zonder
-        // herdr's eigen tabbalk. Herkent herdr het programma niet (agy, of een
-        // command-override), dan is er geen agent om aan te hangen en is de
+        // herdr's eigen tabbalk. Herkent herdr het programma niet (agy, grok, of
+        // een command-override), dan is er geen agent om aan te hangen en is de
         // sessie-TUI de terugval -- een werkende tab met wat randwerk eromheen
         // is beter dan een tab die niet opent.
         format!(
@@ -7009,6 +7248,11 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "windows")]
             disable_accelerator_keys(app.handle());
+            // models.json meteen neerzetten als hij er nog niet is. Niet pas bij
+            // het eerste modelveld: dit bestand is bedoeld om aan te passen en
+            // uit te delen, en dan moet je hem kunnen vinden zonder eerst het
+            // goede scherm te hebben geopend.
+            ensure_model_pins();
             // Stond de SSH-host aan toen je Taurus afsloot? Dan weer aan -- de
             // netwerk-gate beslist alsnog of er echt geluisterd wordt. Zonder
             // dit moest je na elke start opnieuw aanvinken.
@@ -7153,6 +7397,8 @@ pub fn run() {
             session_state,
             create_session,
             list_agent_models,
+            read_model_pins,
+            remember_model_pin,
             restart_session,
             write_session,
             resize_session,
@@ -7456,7 +7702,7 @@ mod tests {
         assert!(s.contains("run pane get w1:p1 >/dev/null 2>&1 || run workspace create --cwd '/home/a/p'"));
         assert!(s.contains("if ! run agent get w1:p1 >/dev/null 2>&1; then"));
         // Attach mag pas als de agent herkend IS; anders komt hij een seconde te
-        // vroeg. En wordt hij nooit herkend (agy, command-override), dan is de
+        // vroeg. En wordt hij nooit herkend (agy, grok, command-override), dan is de
         // sessie-TUI de terugval in plaats van een tab die niet opent.
         assert!(s.contains("while [ $i -lt 8 ]; do run agent get w1:p1"));
         assert!(s.contains("if run agent get w1:p1 >/dev/null 2>&1; then exec \"$H\" --session 'taurus-h1-p-0' agent attach w1:p1; fi"));
@@ -8856,20 +9102,20 @@ mod tests {
     #[test]
     fn every_permission_mode_the_cli_accepts_is_reachable() {
         for m in ["manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"] {
-            assert_eq!(claude_permission_mode(m), Some(m), "{m} hoort door te komen");
+            assert_eq!(agent_permission_mode(m), Some(m), "{m} hoort door te komen");
         }
         // "default" is geen modus maar de afwezigheid van een keuze: geen vlag,
         // zodat de eigen instelling van de agent blijft gelden.
-        assert_eq!(claude_permission_mode("default"), None);
-        assert_eq!(claude_permission_mode(""), None);
+        assert_eq!(agent_permission_mode("default"), None);
+        assert_eq!(agent_permission_mode(""), None);
     }
 
     // Een kaart kan een modus bewaren die bij een andere agent hoorde. Die mag nooit
     // als vlag doorkomen -- dat geeft een fout drie lagen diep in een remote shell.
     #[test]
     fn a_mode_from_another_agent_never_becomes_a_flag() {
-        assert_eq!(claude_permission_mode("sandbox"), None, "agy-modus");
-        assert_eq!(claude_permission_mode("Manual"), None, "hoofdletters telt de CLI ook niet");
+        assert_eq!(agent_permission_mode("sandbox"), None, "agy-modus");
+        assert_eq!(agent_permission_mode("Manual"), None, "hoofdletters telt de CLI ook niet");
         let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "sandbox", "", false, None);
         assert!(!a.contains(&"--permission-mode".to_string()), "{a:?}");
     }
@@ -8909,6 +9155,45 @@ mod tests {
         // agy kent geen prompt bij --continue en geen full-paths-equivalent.
         assert!(!a.contains(&"--prompt-interactive".to_string()));
         assert!(!a.contains(&"--append-system-prompt".to_string()));
+    }
+
+    // grok leunt op de claude-vorm: sessie-id's, --resume en dezelfde zes modi.
+    // Deze test legt vast waar hij WEL afwijkt, want dat is het stuk dat je bij
+    // een volgende overname stilletjes kwijtraakt.
+    #[test]
+    fn build_command_grok_follows_claude_except_for_name_and_rules() {
+        let (_, a) = build_command("grok", LaunchKind::Create, "u1", "t", "do it", "plan", "grok-4.5", true, None);
+        assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
+        assert!(a.windows(2).any(|w| w == ["--permission-mode", "plan"]), "{a:?}");
+        assert!(a.windows(2).any(|w| w == ["--model", "grok-4.5"]), "{a:?}");
+        // Volledige paden gaan via --rules; --append-system-prompt bestaat niet.
+        assert!(a.contains(&"--rules".to_string()), "{a:?}");
+        assert!(!a.contains(&"--append-system-prompt".to_string()), "{a:?}");
+        // En er is geen -n: de tabtitel blijft in dit venster, grok maakt zijn
+        // eigen titel uit het gesprek.
+        assert!(!a.contains(&"-n".to_string()), "{a:?}");
+        assert_eq!(a.last().unwrap(), "do it");
+
+        let (_, r) = build_command("grok", LaunchKind::Resume, "u1", "t", "do it", "default", "", false, None);
+        assert_eq!(r[0..2], ["--resume".to_string(), "u1".to_string()]);
+        assert!(!r.contains(&"do it".to_string()), "{r:?}");
+        assert!(!r.contains(&"--permission-mode".to_string()), "{r:?}");
+    }
+
+    // Een modus die bij een ANDERE agent hoort mag geen ongeldige vlag worden:
+    // zet je een agy-kaart met "sandbox" om naar grok, dan hoort er geen
+    // --permission-mode uit te komen.
+    #[test]
+    fn build_command_grok_drops_a_mode_that_is_not_his() {
+        let (_, a) = build_command("grok", LaunchKind::Create, "u1", "t", "", "sandbox", "", false, None);
+        assert!(!a.contains(&"--permission-mode".to_string()), "{a:?}");
+    }
+
+    #[test]
+    fn grok_has_his_own_binary_locally_and_remotely() {
+        assert_eq!(agent_exe("grok"), "grok.exe");
+        assert_eq!(remote_agent_program("grok", "linux"), "grok");
+        assert_eq!(remote_agent_program("grok", "windows"), "grok.exe");
     }
 
     #[test]
@@ -9079,43 +9364,129 @@ mod tests {
 
     #[test]
     fn parse_model_list_keeps_cli_order_and_cleans_up() {
+        // Lege regels en witruimte eromheen verdwijnen, volgorde blijft.
+        assert_eq!(parse_model_list("claude", "\n  A  \n\n\tB\n"), vec!["A", "B"]);
+        // Dubbelen vallen weg; de eerste (nieuwste) blijft staan.
+        assert_eq!(parse_model_list("claude", "A\nB\nA\n"), vec!["A", "B"]);
+        assert!(parse_model_list("claude", "").is_empty());
+        assert!(parse_model_list("claude", "   \n\n").is_empty());
+    }
+
+    // De uitvoer van `agy models` heeft TWEE kolommen. De hele regel bewaren gaf
+    // een --model-waarde met een tab en het label erin, en agy valt op een
+    // onbekend model stil terug op zijn default -- dus dat was onzichtbaar fout.
+    #[test]
+    fn parse_model_list_takes_the_slug_column_from_agy() {
         // Echte `agy models`-uitvoer (ingekort), met CRLF zoals op Windows.
-        let out = "Gemini 3.6 Flash (High)\r\nGemini 3.5 Flash (Medium)\r\nGPT-OSS 120B (Medium)\r\n";
+        let out = concat!(
+            "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\r\n",
+            "gemini-3.1-pro-low\tGemini 3.1 Pro (Low)\r\n",
+            "gpt-oss-120b-medium\tGPT-OSS 120B (Medium)\r\n",
+        );
         assert_eq!(
-            parse_model_list(out),
+            parse_model_list("agy", out),
             vec![
-                "Gemini 3.6 Flash (High)",
-                "Gemini 3.5 Flash (Medium)",
-                "GPT-OSS 120B (Medium)"
+                "gemini-3.8-flash-high",
+                "gemini-3.1-pro-low",
+                "gpt-oss-120b-medium"
             ]
         );
-        // Lege regels en witruimte eromheen verdwijnen, volgorde blijft.
-        assert_eq!(parse_model_list("\n  A  \n\n\tB\n"), vec!["A", "B"]);
-        // Dubbelen vallen weg; de eerste (nieuwste) blijft staan.
-        assert_eq!(parse_model_list("A\nB\nA\n"), vec!["A", "B"]);
-        assert!(parse_model_list("").is_empty());
-        assert!(parse_model_list("   \n\n").is_empty());
+    }
+
+    // `grok models` schrijft proza met opsommingstekens. Alleen de regels met een
+    // teken zijn modellen; "(default)" is weergave en hoort niet in de naam.
+    #[test]
+    fn parse_model_list_takes_only_the_bulleted_lines_from_grok() {
+        // Echte `grok models`-uitvoer (grok 1.0.13), met CRLF zoals op Windows.
+        let out = concat!(
+            "You are logged in with grok.com.\r\n",
+            "\r\n",
+            "Default model: grok-4.6\r\n",
+            "\r\n",
+            "Available models:\r\n",
+            "  * grok-4.6 (default)\r\n",
+            "  - grok-4.5\r\n",
+        );
+        assert_eq!(parse_model_list("grok", out), vec!["grok-4.6", "grok-4.5"]);
+        // De proza-regels mogen er niet als model in glippen: "Default model:
+        // grok-4.6" noemt wel een model, maar heeft geen opsommingsteken.
+        assert!(parse_model_list("grok", "Default model: grok-4.6\n").is_empty());
+        // Niet aangemeld: dan is er geen lijst, en dat is geen model.
+        assert!(parse_model_list("grok", "You are not authenticated.\n").is_empty());
     }
 
     #[test]
     fn parse_model_list_bounds_unexpected_output() {
         // Een hulptekst of stacktrace op stdout mag de datalist niet volspammen.
         let long = "x".repeat(121);
-        assert!(parse_model_list(&long).is_empty());
+        assert!(parse_model_list("claude", &long).is_empty());
         let many = (0..200)
             .map(|i| format!("model {}", i))
             .collect::<Vec<_>>()
             .join("\n");
-        let got = parse_model_list(&many);
+        let got = parse_model_list("claude", &many);
         assert_eq!(got.len(), 64);
         assert_eq!(got[0], "model 0");
     }
 
     #[test]
-    fn only_agy_has_a_model_list_command() {
+    fn a_pin_is_appended_once_and_the_list_stays_bounded() {
+        let mut l = vec!["claude-opus-5".to_string()];
+        // Nieuw model: achteraan erbij, de uitgedeelde volgorde blijft vooraan.
+        assert!(pin_toevoegen(&mut l, "claude-sonnet-5"));
+        assert_eq!(l, ["claude-opus-5", "claude-sonnet-5"]);
+        // Al bekend: niets te schrijven, dus ook geen bestand aanraken.
+        assert!(!pin_toevoegen(&mut l, "claude-opus-5"));
+        assert_eq!(l.len(), 2);
+
+        // Vol: de oudste valt eruit, nooit de zojuist gebruikte.
+        let mut vol: Vec<String> = (0..64).map(|i| format!("m{i}")).collect();
+        assert!(pin_toevoegen(&mut vol, "nieuw"));
+        assert_eq!(vol.len(), 64);
+        assert_eq!(vol.first().unwrap(), "m1");
+        assert_eq!(vol.last().unwrap(), "nieuw");
+    }
+
+    // De startlijst moet leesbaar zijn door dezelfde code die models.json leest;
+    // een typefout erin zou anders pas op iemands werkstation opvallen, als een
+    // stil lege suggestielijst.
+    #[test]
+    fn the_starting_pin_list_parses_as_the_file_it_seeds() {
+        let pins: std::collections::BTreeMap<String, Vec<String>> =
+            serde_json::from_str(MODEL_PINS_START).expect("startlijst is geen geldige JSON");
+        let claude = pins.get("claude").expect("geen claude-lijst");
+        assert!(claude.contains(&"claude-opus-5".to_string()), "{claude:?}");
+        // Aliassen horen hier niet: die staan al in de frontend, en een alias is
+        // juist het tegenovergestelde van een pin.
+        for m in claude {
+            assert!(m.starts_with("claude-"), "geen volledige modelnaam: {m}");
+        }
+    }
+
+    #[test]
+    fn agy_and_grok_have_a_model_list_command_and_claude_does_not() {
         assert_eq!(model_list_subcommand("agy"), Some("models"));
+        assert_eq!(model_list_subcommand("grok"), Some("models"));
+        // GEMETEN op claude 2.1.259: `claude models` start gewoon een sessie met
+        // "models" als prompt. Er valt dus niets op te vragen.
         assert_eq!(model_list_subcommand("claude"), None);
         assert_eq!(model_list_subcommand(""), None);
+    }
+
+    // Roept de echte CLI aan, dus alleen zinvol op een machine waar grok op PATH
+    // staat -- daarom #[ignore], net als bij agy hieronder.
+    #[test]
+    #[ignore]
+    fn list_agent_models_talks_to_the_grok_cli() {
+        let models = list_agent_models("grok".to_string()).expect("grok models failed");
+        assert!(!models.is_empty());
+        // De proza-regels eromheen ("Default model: ...", "Available models:")
+        // mogen er niet in zitten: een modelnaam heeft geen spaties.
+        assert!(
+            models.iter().all(|m| !m.is_empty() && !m.contains(' ')),
+            "unexpected entries: {:?}",
+            models
+        );
     }
 
     // Roept de echte CLI aan, dus alleen zinvol op een machine waar agy op PATH

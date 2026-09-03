@@ -37,9 +37,9 @@ const I18N = {
     mode_bypass: "Geen enkele controle (eenmalig te aanvaarden, beleid kan het blokkeren)",
     mode_default: "Standaard",
     mode_sandbox: "Sandbox (beperkte rechten)",
-    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
+    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity", agent_grok: "Grok Build",
     launch_model: "Model", model_ph: "standaard",
-    model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exact model-ID mag ook.",
+    model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exacte versie mag ook — die staan in models.json in de configmap.",
     model_fable: "nieuwste Fable", model_opus: "nieuwste Opus", model_sonnet: "nieuwste Sonnet",
     model_haiku: "nieuwste Haiku", model_opusplan: "Opus in plan-modus, daarna Sonnet",
     launch_host: "Draait op", host_local: "Deze computer",
@@ -390,9 +390,9 @@ const I18N = {
     mode_bypass: "No checks at all (accept once; policy can block it)",
     mode_default: "Default",
     mode_sandbox: "Sandbox (restricted)",
-    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
+    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity", agent_grok: "Grok Build",
     launch_model: "Model", model_ph: "default",
-    model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact model ID works too.",
+    model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact version works too — those live in models.json in the config folder.",
     model_fable: "newest Fable", model_opus: "newest Opus", model_sonnet: "newest Sonnet",
     model_haiku: "newest Haiku", model_opusplan: "Opus in plan mode, Sonnet after",
     launch_host: "Runs on", host_local: "This computer",
@@ -885,14 +885,18 @@ function wireGarble() {
 
 /* ============ agents + modellen ============ */
 // Welke agent-CLIs Taurus kan starten. De losse gemini-CLI is end-of-life en
-// staat hier bewust niet bij; "agy" is de ondersteunde Gemini-agent.
-const AGENTS = ["claude", "agy"];
+// staat hier bewust niet bij; "agy" is de ondersteunde Gemini-agent, "grok" is
+// Grok Build (de TUI van xAI, `grok.exe`).
+const AGENTS = ["claude", "agy", "grok"];
 // Een vastgepinde modellijst veroudert bij elke modelrelease (#92), dus pinnen
-// we niets meer: claude krijgt ALIASSEN, die de CLI zelf naar het nieuwste model
-// in die lijn vertaalt, en agy's lijst vragen we op bij de CLI (`agy models`).
-// Zo verschijnt een nieuw model zonder dat Taurus mee hoeft te updaten.
+// we niets in de CODE: claude krijgt ALIASSEN, die de CLI zelf naar het nieuwste
+// model in die lijn vertaalt, en de lijst van agy en grok vragen we op bij de CLI
+// (`agy models`, `grok models`). Zo verschijnt een nieuw model zonder dat Taurus
+// mee hoeft te updaten.
 // `claude --model` accepteert zo'n alias of een exact model-ID; vrije tekst
-// blijft toegestaan, dus een pin op een specifieke versie kan nog steeds.
+// blijft toegestaan, dus een pin op een specifieke versie kan nog steeds. Dat
+// was alleen niet te ZIEN -- vandaar models.json in de configmap, waar exacte
+// versies in staan die niet uit een CLI te halen zijn (zie modelPins hieronder).
 const CLAUDE_ALIASES = [
   { value: "fable", key: "model_fable" },
   { value: "opus", key: "model_opus" },
@@ -916,6 +920,9 @@ const CLAUDE_LEGACY_MODELS = {
 // i18n-sleutel voor het label naast de waarde.
 const MODEL_SUGGESTIONS = {
   claude: CLAUDE_ALIASES,
+  // grok's eigen lijst (`grok models`) is kort en bestaat uit versies; dit is de
+  // terugval zolang grok niet geinstalleerd is of nog geen antwoord gaf.
+  grok: ["grok-4.6", "grok-4.5"],
   agy: [
     "Gemini 3.5 Flash (Medium)",
     "Gemini 3.5 Flash (High)",
@@ -940,7 +947,34 @@ const liveModels = new Map();
 // label="Gemini 3.6 Flash (Low)"`). Dat moest expliciet worden nagemeten omdat
 // agy een ONBEKEND --model zonder foutmelding slikt en stil op het default-model
 // terugvalt -- een verkeerde vorm zou dus nooit zichtbaar falen (#92).
-const LIVE_MODEL_AGENTS = new Set(["agy"]);
+// grok mag hier ook in: `grok models` bestaat en geeft versienamen. Anders dan
+// agy weigert grok een onbekend model wel zichtbaar, dus een verkeerde vorm valt
+// daar meteen op.
+const LIVE_MODEL_AGENTS = new Set(["agy", "grok"]);
+
+// ---- vastgepinde modellen uit models.json ----
+//
+// claude kan zijn modellen niet opsommen (er is geen `claude models`), maar
+// `claude --model` neemt wel een exacte modelnaam. Die namen komen uit
+// models.json in de configmap: een los bestandje dat je kunt uitdelen zonder een
+// nieuwe build van Taurus, en dat we bij ELKE vulling van de lijst
+// opnieuw lezen -- zet iemand er tijdens deze sessie een model bij, dan staat het
+// er meteen in. Wat je zelf intypt en start wordt er achteraan bijgeschreven.
+let modelPins = {};
+async function refreshModelPins() {
+  try {
+    const p = await invoke("read_model_pins");
+    if (p && typeof p === "object") modelPins = p;
+  } catch (_) { /* geen bestand of stuk: dan zijn er geen pins */ }
+}
+// Onthoud een zelf ingetypt model. Nooit blokkerend: een suggestielijst is geen
+// reden om een sessie niet te starten.
+function rememberModel(agent, model) {
+  if (!agent || !(model || "").trim()) return;
+  invoke("remember_model_pin", { agent, model: model.trim() })
+    .then(() => refreshModelPins())
+    .catch(() => {});
+}
 
 // Vraag de agent-CLI om zijn modellen. Geeft true als er een nieuwe lijst is,
 // zodat de aanroeper de datalist opnieuw kan vullen.
@@ -956,10 +990,17 @@ async function refreshLiveModels(agent) {
   liveModels.set(agent, null);
   return false;
 }
+// De lijst die onder het modelveld hangt: eerst wat de agent zelf zegt (de
+// aliassen van claude, of de live lijst van agy/grok), daarna de pins uit
+// models.json. Pins achteraan en ontdubbeld, zodat een uitgedeeld bestand de
+// aliassen niet wegduwt maar wel exacte versies toevoegt.
 function modelSuggestionsFor(agent) {
   const live = liveModels.get(agent);
-  if (live && live.length) return live;
-  return MODEL_SUGGESTIONS[agent] || MODEL_SUGGESTIONS.claude;
+  const basis = (live && live.length) ? live : (MODEL_SUGGESTIONS[agent] || MODEL_SUGGESTIONS.claude);
+  const pins = Array.isArray(modelPins[agent]) ? modelPins[agent] : [];
+  if (!pins.length) return basis;
+  const gezien = new Set(basis.map(suggestionValue));
+  return basis.concat(pins.filter((p) => typeof p === "string" && p.trim() && !gezien.has(p)));
 }
 function suggestionValue(s) { return typeof s === "string" ? s : s.value; }
 // Vertaal de gekozen/ingetypte modelnaam naar de --model-waarde voor de agent.
@@ -984,6 +1025,10 @@ function fillModelDatalist(dl, agent) {
 // het veld nooit wacht op een procesaanroep.
 function updateModelDatalist(dl, agent) {
   fillModelDatalist(dl, agent);
+  // Twee bronnen die later binnen kunnen komen: models.json van schijf (elke
+  // keer opnieuw, zodat een wijziging tijdens deze sessie meetelt) en de lijst
+  // van de CLI. Allebei vullen de lijst nog een keer als er iets veranderd is.
+  refreshModelPins().then(() => fillModelDatalist(dl, agent));
   refreshLiveModels(agent).then((fresh) => { if (fresh) fillModelDatalist(dl, agent); });
 }
 
@@ -1020,6 +1065,11 @@ const MODE_OPTIONS = {
     { value: "auto", key: "mode_auto" },
   ],
 };
+// grok staat er bewust NIET bij: grok 1.0.13 accepteert exact dezelfde zes
+// waarden achter --permission-mode als claude (GEMETEN uit `grok --help`:
+// default, acceptEdits, auto, dontAsk, bypassPermissions, plan), dus de terugval
+// hieronder geeft hem al de goede lijst. Een eigen kopie zou alleen maar uit
+// elkaar kunnen lopen met de whitelist in agent_permission_mode aan de Rust-kant.
 function modesFor(agent) { return MODE_OPTIONS[agent] || MODE_OPTIONS.claude; }
 // Geldige modus voor deze agent? Anders terug naar "default" (bv. claude "plan"
 // bestaat niet voor agy).
@@ -3393,6 +3443,10 @@ async function startSession() {
     // al een agent draait), dus stoppen en hervatten mogen die naam niet meer uit
     // (host, map) terugrekenen.
     session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows })) || "";
+    // Een model dat je zelf intypte staat de volgende keer in de suggestielijst.
+    // Pas NA een geslaagde start: een modelnaam die de agent weigert hoort niet
+    // in de lijst terecht te komen.
+    if (!command.trim()) rememberModel(agent, resolveModelArg(agent, model));
     // Wat je een rol opdraagt hoort bewaard te blijven: het antwoord komt in zijn
     // werkplek, en zonder dit was de vraag weg zodra de tab sloot. Alleen voor de
     // rollen, alleen lokaal (een remote map schrijven is een ander verhaal), en
@@ -3540,7 +3594,7 @@ async function resumeBlocker(meta) {
     if (!er) return t("resume_no_folder").replace("{path}", meta.path);
   }
   let st = { exists: false, ageSecs: 0 };
-  try { st = await invoke("session_state", { path: meta.path, uuid: meta.uuid }); } catch (_) {}
+  try { st = await invoke("session_state", { path: meta.path, uuid: meta.uuid, agent: meta.agent || "" }); } catch (_) {}
   if (!st.exists) return t("resume_no_transcript");
   // Ouderdom blokkeert NIET. Dat was de oude auto-hervat-heuristiek, en #129 zegt
   // er zelf het juiste over: leeftijd is geen bewijs dat een sessie waardeloos is.
@@ -5303,6 +5357,7 @@ function renderNewAgentAgent() {
   els.naAgent.innerHTML =
     `<option value="claude"${!hasOverride && (naDraft.agent || "claude") === "claude" ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>` +
     `<option value="agy"${!hasOverride && naDraft.agent === "agy" ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>` +
+    `<option value="grok"${!hasOverride && naDraft.agent === "grok" ? " selected" : ""}>${escapeHtml(t("agent_grok"))}</option>` +
     `<option value="${AGENT_COMMAND}"${hasOverride ? " selected" : ""}>${escapeHtml(t("agent_command"))}</option>`;
   updateModelDatalist(els.naModelList, naDraft.agent);
   fillModeSelect(els.naMode, naDraft.agent, naDraft.mode || "default");
@@ -5498,6 +5553,7 @@ function renderEditor() {
           <select class="e-agent">
             <option value="claude"${(!hasOverride && (r.agent || "claude") === "claude") ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
             <option value="agy"${(!hasOverride && r.agent === "agy") ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>
+            <option value="grok"${(!hasOverride && r.agent === "grok") ? " selected" : ""}>${escapeHtml(t("agent_grok"))}</option>
             <option value="${AGENT_COMMAND}"${hasOverride ? " selected" : ""}>${escapeHtml(t("agent_command"))}</option>
           </select></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_model"))}</span>
