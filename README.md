@@ -105,6 +105,13 @@ consistently. That's what Taurus is for.
   picker above the preview follows along, so it is also the way back. Where such a
   link may point is decided on the Rust side, bounded to the session folder — a
   link outside it does nothing.
+- **The page can send something back** — a page in the preview may post a
+  selection to the launcher (a `postMessage` of type `taurus-submit`). It lands as
+  a JSON file in the session's `input\` folder, where the agent picks it up, and
+  the page hears back whether it did. Bounded on the Rust side: that folder only,
+  JSON only, with a size and count limit. A page that routes on `location.hash`
+  works as well — the bridge sets the hash inside the sandbox, so a deep link
+  opens the card it points at and not just the anchor it scrolls to.
 - **Markdown preview** — `.md` files render inline too: GFM **tables** (with
   alignment), **task lists**, strikethrough, code blocks, working in-document
   anchors — with a **`</>` raw/rendered toggle**. Rendering is escape-first
@@ -113,8 +120,8 @@ consistently. That's what Taurus is for.
 
 ### Comfort & polish
 
-- **Settings in tabs** (General / Theme / HTML preview / Terminal / Voice) with
-  per-setting hover help.
+- **Settings in tabs** (General / Theme / HTML preview / Terminal / Voice /
+  Specialists / Network) with per-setting hover help.
 - Search the scrollback (Ctrl+Shift+F), copy-on-select, right-click paste,
   Ctrl+Shift+C/V, clickable links, font zoom (Ctrl+= / − / 0), tab shortcuts
   (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W), agent-mouse toggle — all toggleable.
@@ -158,7 +165,7 @@ Output:
 ## Configuration
 
 Projects live in `%APPDATA%\Taurus\projects.json` (per user, created on first run).
-Edit them with the in-app **Agents** editor, or by hand. Format:
+Edit them with the in-app **Specialists** editor, or by hand. Format:
 
 ```json
 [
@@ -193,6 +200,14 @@ Edit them with the in-app **Agents** editor, or by hand. Format:
 - `command` (optional) — run a different program instead of the agent for this
   project (no agent flags). Takes precedence over `agent`/`model`. Use double
   quotes around a program path or argument that contains spaces.
+- **Where a specialist comes from** — a specialist's `source` is a GitHub URL, the
+  bare `owner/repo` shorthand, or a local folder. Running your own Bitbucket
+  Server? Set `TAURUS_BITBUCKET_HOST=bitbucket.example.com` and its URLs are
+  accepted too, including a *browse* URL copied straight from the address bar:
+  Taurus clones the repo and deploys just that subfolder, so a skill can stay
+  where a shared marketplace repo already keeps it. Without that variable,
+  github.com is the only host that passes the check — which host you trust is a
+  choice, not the result of a regular expression.
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
 
