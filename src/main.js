@@ -266,7 +266,9 @@ const I18N = {
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
     ctx_restart: "↻ Herstart (resume gesprek)", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
-    preview_none: "(geen .html/.md in de werkmap)", preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten", preview_toobig: "Bestand te groot om te previewen.",
+    preview_none: "(geen .html/.md in de werkmap)",
+    preview_group_session: "Sinds deze tab open is", preview_group_today: "Eerder vandaag", preview_group_older: "Ouder",
+    preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten", preview_toobig: "Bestand te groot om te previewen.",
     submit_saved: "{n} item(s) klaargezet: {name}",
     submit_remote: "Een selectie kan nog niet naar een sessie op een andere machine",
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
@@ -621,7 +623,9 @@ const I18N = {
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
     ctx_restart: "↻ Restart (resume conversation)", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
-    preview_none: "(no .html/.md in the working folder)", preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview", preview_toobig: "File too large to preview.",
+    preview_none: "(no .html/.md in the working folder)",
+    preview_group_session: "Since this tab opened", preview_group_today: "Earlier today", preview_group_older: "Older",
+    preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview", preview_toobig: "File too large to preview.",
     submit_saved: "{n} item(s) ready: {name}",
     submit_remote: "A selection cannot go to a session on another machine yet",
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
@@ -3297,6 +3301,9 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
+    // Waarvandaan de preview-lijst "sinds deze tab open is" rekent. Wat de agent in
+    // deze run schreef staat daarmee bovenaan, los van wat er verder in de map ligt.
+    startedAt: Date.now(),
   };
   sessions.set(id, session);
 
@@ -3348,7 +3355,13 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   el.querySelector(".preview-file").addEventListener("change", (e) => renderPreview(session, e.target.value));
   // Raw/rendered wisselen (alleen zinvol voor .md); hertekent het huidige bestand.
   el.querySelector(".preview-raw").addEventListener("click", () => { session.previewRaw = !session.previewRaw; if (session.previewPath) renderPreview(session, session.previewPath); });
-  el.querySelector(".preview-refresh").addEventListener("click", () => loadHtmlList(session));
+  // Vernieuwen leest opnieuw in wat je NU leest (de agent schrijft dezelfde pagina
+  // vaak opnieuw). Alleen als er nog niets openstaat pakt hij het nieuwste bestand.
+  el.querySelector(".preview-refresh").addEventListener("click", async () => {
+    const huidig = session.previewPath;
+    await loadHtmlList(session, huidig);
+    if (huidig) await renderPreview(session, huidig);
+  });
   el.querySelector(".preview-mode").addEventListener("click", () => { session.previewMode = session.previewMode === "split" ? "full" : "split"; applyLayout(session); refitTerm(session); });
   el.querySelector(".preview-close").addEventListener("click", () => closePreview(session));
 
@@ -3855,18 +3868,72 @@ async function openPreview(id) {
   await loadHtmlList(s);
 }
 function closePreview(s) { s.previewMode = null; applyLayout(s); refitTerm(s); }
-async function loadHtmlList(s) {
+// De keuzelijst is de inhoud van de werkmap, en die staat vooral vol met de
+// werkprocesbeschrijving zelf: rules.md, identity.md, CLAUDE.md -- bestanden die de
+// agent LEEST. Wat je wilt zien is wat hij net GESCHREVEN heeft, en dat is niet aan
+// de extensie te zien (zijn uitvoer is even vaak .md als .html). Wel aan de klok:
+// daarom groeperen we op wanneer een bestand geschreven is, met de tijd erbij.
+function previewGroups(s, files) {
+  const dag = new Date(); dag.setHours(0, 0, 0, 0);
+  const groepen = [
+    { label: t("preview_group_session"), vanaf: s.startedAt || 0, items: [] },
+    { label: t("preview_group_today"), vanaf: dag.getTime(), items: [] },
+    { label: t("preview_group_older"), vanaf: -Infinity, items: [] },
+  ];
+  for (const f of files) {
+    const ms = f.mtime * 1000;
+    const g = groepen.find((x) => ms >= x.vanaf) || groepen[groepen.length - 1];
+    g.items.push(f);
+  }
+  return groepen.filter((g) => g.items.length);
+}
+// Het pad in de map plus het tijdstip. Het pad staat voorop: daar zoek je op, en een
+// keuzelijst springt naar de eerste letters die je typt.
+function previewLabel(f) {
+  const d = new Date(f.mtime * 1000);
+  const dag = new Date(); dag.setHours(0, 0, 0, 0);
+  const wanneer = d.getTime() >= dag.getTime()
+    ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `${f.rel}  ·  ${wanneer}`;
+}
+// Laat de lijst zien wat er in beeld staat. Een bestand van buiten de werkmap, of
+// dieper dan list_html kijkt, staat er niet in; dan zetten we het er zelf bij. Een
+// lijst die een andere naam toont dan de pagina die je leest, liegt.
+function selectInList(s, path) {
+  const sel = s.el.querySelector(".preview-file");
+  const hit = [...sel.options].find((o) => o.value.toLowerCase() === path.toLowerCase());
+  if (hit) { sel.value = hit.value; return; }
+  const o = document.createElement("option");
+  o.value = path; o.textContent = path;
+  sel.insertBefore(o, sel.firstChild);
+  sel.value = path;
+}
+// `want` = het bestand dat de aanroeper zo toont. Dan kiest deze functie niet zelf het
+// nieuwste en tekent hij ook niets: anders lees je eerst een pagina waar je niet om
+// vroeg, en een tel later pas de goede.
+async function loadHtmlList(s, want) {
   const sel = s.el.querySelector(".preview-file");
   const frame = s.el.querySelector(".preview-frame");
   let files = [];
   try { files = await invoke("list_html", { dir: s.path }); } catch (_) {}
   sel.innerHTML = "";
-  if (!files.length) {
+  if (!files.length && !want) {
     const o = document.createElement("option"); o.value = ""; o.textContent = t("preview_none"); sel.appendChild(o);
     frame.srcdoc = `<body style="font-family:sans-serif;color:#888;padding:24px">${escapeHtml(t("preview_none"))}</body>`;
     return;
   }
-  for (const f of files) { const o = document.createElement("option"); o.value = f.path; o.textContent = f.name; sel.appendChild(o); }
+  for (const g of previewGroups(s, files)) {
+    const og = document.createElement("optgroup");
+    og.label = g.label;
+    for (const f of g.items) {
+      const o = document.createElement("option");
+      o.value = f.path; o.textContent = previewLabel(f);
+      og.appendChild(o);
+    }
+    sel.appendChild(og);
+  }
+  if (want) { selectInList(s, want); return; }
   sel.value = files[0].path;
   await renderPreview(s, files[0].path);
 }
@@ -4168,9 +4235,7 @@ async function openPreviewLink(s, href, bron) {
   // De keuzelijst meeverzetten, zodat te zien is waar je nu bent en je met
   // dezelfde lijst terug kunt. Staat het bestand er niet in (list_html kijkt drie
   // mappen diep en toont er tachtig), dan tonen we het toch.
-  const sel = s.el.querySelector(".preview-file");
-  const hit = [...sel.options].find((o) => o.value.toLowerCase() === doel.toLowerCase());
-  if (hit) sel.value = hit.value;
+  selectInList(s, doel);
   await renderPreview(s, doel, fragment);
 }
 
@@ -4221,10 +4286,7 @@ async function openPreviewFile(s, rawPath) {
   // Zie openPreview: de nieuwe maat hoort bij de layout-wissel, niet pas erna.
   applyLayout(s);
   refitTerm(s);
-  await loadHtmlList(s);
-  const sel = s.el.querySelector(".preview-file");
-  const hit = [...sel.options].find((o) => o.value.toLowerCase() === p.toLowerCase());
-  if (hit) sel.value = hit.value;
+  await loadHtmlList(s, p);
   await renderPreview(s, p);
 }
 
@@ -4380,6 +4442,7 @@ async function restartSession(id) {
   // (zelfde id!) worden vanaf nu genegeerd (#71).
   s.gen = ++genSeq;
   s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
+  s.startedAt = Date.now(); // nieuwe run, dus opnieuw rekenen wat "van deze sessie" is
   if (current !== id) showView(id); else renderTabs();
   try {
     await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), hostId: s.hostId || "", muxName: s.muxName || "", cols: s.term.cols, rows: s.term.rows });

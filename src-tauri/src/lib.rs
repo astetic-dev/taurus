@@ -5529,11 +5529,13 @@ fn close_session(state: State<AppState>, id: String) {
 #[derive(serde::Serialize)]
 struct HtmlFile {
     path: String,
-    name: String,
+    // Pad ten opzichte van de werkmap. `_index/dashboard.html` zegt waar je kijkt;
+    // een lijst met vier keer `acties.md` erin zegt niets.
+    rel: String,
     mtime: u64,
 }
 
-fn scan_html(dir: &Path, depth: i32, out: &mut Vec<HtmlFile>) {
+fn scan_html(root: &Path, dir: &Path, depth: i32, out: &mut Vec<HtmlFile>) {
     if depth < 0 {
         return;
     }
@@ -5549,7 +5551,7 @@ fn scan_html(dir: &Path, depth: i32, out: &mut Vec<HtmlFile>) {
             if skip.contains(&name.as_str()) || name.starts_with('.') {
                 continue;
             }
-            scan_html(&p, depth - 1, out);
+            scan_html(root, &p, depth - 1, out);
         } else if p
             .extension()
             .map(|e| {
@@ -5566,12 +5568,14 @@ fn scan_html(dir: &Path, depth: i32, out: &mut Vec<HtmlFile>) {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
+            let rel = p
+                .strip_prefix(root)
+                .unwrap_or(&p)
+                .to_string_lossy()
+                .into_owned();
             out.push(HtmlFile {
                 path: p.to_string_lossy().into_owned(),
-                name: p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
+                rel,
                 mtime,
             });
         }
@@ -5582,7 +5586,8 @@ fn scan_html(dir: &Path, depth: i32, out: &mut Vec<HtmlFile>) {
 #[tauri::command]
 fn list_html(dir: String) -> Vec<HtmlFile> {
     let mut out = Vec::new();
-    scan_html(Path::new(&dir), 3, &mut out);
+    let root = Path::new(&dir);
+    scan_html(root, root, 3, &mut out);
     out.sort_by(|a, b| b.mtime.cmp(&a.mtime));
     out.truncate(80);
     out
