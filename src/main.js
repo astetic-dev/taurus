@@ -3864,12 +3864,26 @@ async function loadHtmlList(s) {
 // (resolve_preview_link): deze pagina is gegenereerd en onvertrouwd, en kan ook
 // zonder klik een bericht sturen.
 //
-// `fragment` is het anker waarop de pagina moet openen als je er via zo'n link
-// binnenkomt. Dat kan niet aan de srcdoc-URL geplakt worden, dus het reist mee in
-// de brug.
+// `fragment` is waarop de pagina moet openen als je er via zo'n link binnenkomt.
+// Aan het srcdoc-ATTRIBUUT valt het niet te plakken, dus het reist mee in de brug --
+// en de brug zet het van binnenuit op de sandbox-URL.
 function previewBridge(fragment) {
   return `<script>
   var NAAR = ${JSON.stringify(fragment || "")};
+  // Een anker is niet de enige manier waarop een pagina een deep link opvat: een
+  // gegenereerd dashboard leest location.hash en opent die kaart in een modal --
+  // er is dan geen element met dat id om naartoe te scrollen. Alleen springen is
+  // dus te weinig; de hash moet er ook echt staan. Dit stukje staat vóór de pagina
+  // in het srcdoc, en dus vóór haar eigen scripts.
+  // (In dit commentaar geen backticks -- het zit in een template-literal.)
+  //
+  // GEMETEN in Chromium in precies deze opstelling (sandbox=allow-scripts, srcdoc,
+  // origin null): toewijzen werpt niets, is meteen terug te lezen, herlaadt het
+  // document NIET (about:srcdoc#... is een navigatie binnen het document, de brug
+  // draait dus eenmalig) en vuurt hashchange na load. Of de browser daarbij zelf
+  // naar het anker springt is niet gemeten -- springNaar hieronder doet dat
+  // expliciet, en blijft nodig.
+  if (NAAR) { try { if (location.hash.slice(1) !== NAAR) location.hash = NAAR; } catch (_) {} }
   function springNaar(id) {
     if (!id) return false;
     var el = document.getElementById(id);
@@ -3908,9 +3922,14 @@ function previewBridge(fragment) {
       parent.postMessage({ type: 'taurus-open-external', url: href }, '*');
     } else if (href.charAt(0) === '#') {
       // Anker: expliciet scrollen -- fragment-navigatie is binnen een sandboxed
-      // srcdoc-iframe niet overal betrouwbaar.
+      // srcdoc-iframe niet overal betrouwbaar. De hash zetten we er wel bij, zodat
+      // een pagina die op location.hash of hashchange routeert ook binnen de
+      // preview reageert. Een leeg fragment slaan we over: href="#" is op veel
+      // pagina's een knop, en die hoort geen hashchange te worden.
       ev.preventDefault();
-      springNaar(href.slice(1));
+      var frag = href.slice(1);
+      if (frag) { try { if (location.hash.slice(1) !== frag) location.hash = frag; } catch (_) {} }
+      springNaar(frag);
     } else if (/^[a-z][a-z0-9.+-]*:/i.test(href)) {
       ev.preventDefault(); // ander schema (javascript:, data:, file:): niets doen
     } else {

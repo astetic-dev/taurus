@@ -823,6 +823,13 @@ select:-webkit-autofill {
   box-shadow: 0 20px 60px rgba(0,0,0,.5);
 }
 .modal-box.wide { width: 680px; }
+/* De instellingen dragen meer dan een dialoog: een tabstrip van zeven, en rijen
+   met een veld plus knoppen erachter. Op 460px wrapte die tabstrip naar meerdere
+   regels en liep een rij het venster uit -- afgekapt en niet bij te schuiven,
+   want een modal heeft geen horizontale scrollbalk. Vast breed kan niet:
+   1920x1080 met 150% schaal is effectief 1280x720 CSS-px, en het venster is vaak
+   nog kleiner. Vandaar min(): breed als het past, en anders wat er is. */
+.modal-box.settings-box { width: min(1180px, 94vw); }
 .modal-box h2 { margin: 0 0 18px; font-size: 20px; }
 .modal-box h3 { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
 .setting-group { margin-bottom: 22px; }
