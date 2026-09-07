@@ -205,7 +205,7 @@ const I18N = {
     na_dest_hint: "Voorstel — pas het aan of kies met 📁 een andere plek.",
     na_dest_pick: "Kies met 📁 waar deze mag komen.",
     na_deploying: "Uitrollen…",
-    na_shape_skill: "skill", na_shape_workspace: "werkmap",
+    na_shape_skill: "skill", na_shape_workspace: "werkmap", na_shape_plugin: "plugin",
     na_p_shape: "vorm", na_p_version: "versie", na_p_claude: "bevat",
     na_p_size: "grootte", na_p_role: "vak",
     na_claude_kept: "eigen CLAUDE.md — die blijft ongemoeid",
@@ -558,7 +558,7 @@ const I18N = {
     na_dest_hint: "A proposal — edit it, or pick another place with 📁.",
     na_dest_pick: "Pick where this may go with 📁.",
     na_deploying: "Deploying…",
-    na_shape_skill: "skill", na_shape_workspace: "workspace",
+    na_shape_skill: "skill", na_shape_workspace: "workspace", na_shape_plugin: "plugin",
     na_p_shape: "shape", na_p_version: "version", na_p_claude: "contains",
     na_p_size: "size", na_p_role: "slot",
     na_claude_kept: "its own CLAUDE.md — left untouched",
@@ -5202,7 +5202,7 @@ async function naReadSource() {
   els.naProbe.innerHTML =
     `<div class="na-plead"><b>${escapeHtml(naProbe.name)}</b>${naProbe.description ? " — " + escapeHtml(naProbe.description) : ""}</div>` +
     (role ? row(t("na_p_role"), t("role_" + role.id)) : "") +
-    row(t("na_p_shape"), t(naProbe.shape === "skill" ? "na_shape_skill" : "na_shape_workspace")) +
+    row(t("na_p_shape"), t(naProbe.shape === "skill" ? "na_shape_skill" : naProbe.shape === "plugin" ? "na_shape_plugin" : "na_shape_workspace")) +
     row(t("na_p_version"), `${naProbe.branch} @ ${(naProbe.sha || "").slice(0, 7)}${when ? ", " + when : ""}`) +
     row(t("na_p_claude"), t(naProbe.hasClaudeMd ? "na_claude_kept" : "na_claude_gen")) +
     row(t("na_p_size"), `${naProbe.sizeKb} KB`);
@@ -5297,7 +5297,10 @@ async function naDeploy() {
   let rep = null;
   try {
     rep = await invoke("git_deploy", {
-      source: naProbe.url,
+      // naProbe.url is de GENORMALISEERDE klon-URL (zonder submap-pad); de
+      // oorspronkelijke tekst uit het veld draagt een eventuele /browse/-submap
+      // nog wel. git_deploy leidt zelf opnieuw af wat te klonen is.
+      source: els.naSource.value.trim(),
       dest,
       hostId: "",
       role: role ? role.id : "",
@@ -5470,7 +5473,9 @@ async function saveNewAgent() {
     let rep = null;
     try {
       rep = await invoke("git_deploy", {
-        source: naProcProbe.url,
+        // Zelfde reden als bij de rol-deploy: naProcProbe.url mist een eventuele
+        // /browse/-submap, het veld zelf niet.
+        source: els.naPsource.value.trim(),
         dest: path,
         hostId: host,
         // Geen rol en geen veld: een proces staat waar jij het zet.

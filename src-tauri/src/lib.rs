@@ -556,10 +556,12 @@ fn save_roles(roles: Vec<RoleInstall>) -> Result<(), String> {
 // hij bezit, en de versiecheck is later een enkele `git ls-remote`.
 
 // Naar een clone-bare URL. Geaccepteerd: https://github.com/eigenaar/repo (met
-// of zonder .git) en het kale eigenaar/repo. Alles wat geen https + github.com
-// is wordt geweigerd; dezelfde lijn als de STT-downloads, want een willekeurig
-// adres binnenhalen en er een agent in laten draaien is precies het gat dat je
-// niet wilt.
+// of zonder .git), het kale eigenaar/repo (altijd github.com -- er is geen
+// kortvorm voor Bitbucket, want "project/repo" zou dan ambigu zijn), en een
+// volledige URL naar de eigen Bitbucket Server, als je die in
+// TAURUS_BITBUCKET_HOST hebt gezet. Alles daarbuiten wordt geweigerd; dezelfde
+// lijn als de STT-downloads, want een willekeurig adres binnenhalen en er een
+// agent in laten draaien is precies het gat dat je niet wilt.
 // Is dit een lokale map in plaats van een adres? Dan is de bron een pad, en
 // uitrollen is kopieren in plaats van klonen. Geen versiebewaking: er is geen sha
 // om mee te vergelijken, en mtimes vergelijken is te slim voor wat het oplevert.
@@ -582,10 +584,70 @@ fn local_source(src: &str) -> Option<std::path::PathBuf> {
     }
 }
 
+// De Bitbucket Server van je eigen organisatie, als je er een hebt:
+// TAURUS_BITBUCKET_HOST=bitbucket.example.com. Niet gezet betekent: alleen
+// github.com, en de browse-URL-herkenning hieronder staat uit.
+//
+// Bewust een host die je zelf noemt en geen patroon dat "elke bitbucket.*"
+// toelaat: welk adres je vertrouwt is een keuze, geen gevolg van een reguliere
+// expressie.
+fn bitbucket_host() -> Option<String> {
+    std::env::var("TAURUS_BITBUCKET_HOST").ok().and_then(|v| {
+        let v = v.trim().to_ascii_lowercase();
+        if v.is_empty() { None } else { Some(v) }
+    })
+}
+
+// Een Bitbucket Server "browse"-URL -- wat je uit de adresbalk kopieert als je
+// een submap in een repo bekijkt -- wijst naar een MAP, niet naar de repo zelf.
+// git kan die URL niet klonen. Herkennen aan /projects/<KEY>/repos/<repo>/browse
+// [/<pad>]; geeft (project, repo, pad) terug, pad leeg als er niets achter
+// /browse staat. `?at=...`-branchparameters en een `#`-fragment horen niet bij
+// het pad en worden eraf geknipt.
+fn bitbucket_browse_parts_in(src: &str, host: Option<&str>) -> Option<(String, String, String)> {
+    let host = host?;
+    let s = src.trim().trim_end_matches('/');
+    let rest = s.strip_prefix(&format!("https://{}/projects/", host))?;
+    let (project, rest) = rest.split_once("/repos/")?;
+    let (repo, rest) = rest.split_once("/browse")?;
+    let path = rest.trim_start_matches('/');
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    if project.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((project.to_string(), repo.to_string(), path.trim_end_matches('/').to_string()))
+}
+
+// Het pad ACHTER /browse/, apart van normalize_source: die geeft de klonbare
+// repo-URL terug (zonder het pad), dit geeft het pad terug (zonder de repo-URL).
+// Beide lezen dezelfde ruwe bron; geen van beide hoeft de ander te kennen.
+fn source_subpath(src: &str) -> String {
+    source_subpath_in(src, bitbucket_host().as_deref())
+}
+
+fn source_subpath_in(src: &str, host: Option<&str>) -> String {
+    bitbucket_browse_parts_in(src, host).map(|(_, _, path)| path).unwrap_or_default()
+}
+
 fn normalize_source(src: &str) -> Result<String, String> {
+    normalize_source_in(src, bitbucket_host().as_deref())
+}
+
+fn normalize_source_in(src: &str, bb: Option<&str>) -> Result<String, String> {
     let s = src.trim().trim_end_matches('/');
     if s.is_empty() {
         return Err("Geen adres opgegeven.".into());
+    }
+    // Een browse-URL naar de klonbare scm-vorm: het projectsleuteldeel van de
+    // URL is hoofdlettergevoelig zoals Bitbucket het toont, de scm-clone-URL wil
+    // hem klein.
+    if let (Some((project, repo, _path)), Some(host)) = (bitbucket_browse_parts_in(s, bb), bb) {
+        return Ok(format!(
+            "https://{}/scm/{}/{}.git",
+            host,
+            project.to_lowercase(),
+            repo
+        ));
     }
     let s = s.strip_suffix(".git").unwrap_or(s);
     if !s.contains("://") && !s.contains(char::is_whitespace) {
@@ -600,8 +662,18 @@ fn normalize_source(src: &str) -> Result<String, String> {
         .strip_prefix("https://")
         .ok_or_else(|| format!("Alleen https-adressen: {}", src.trim()))?;
     let host = rest.split('/').next().unwrap_or("");
-    if !host.eq_ignore_ascii_case("github.com") && !host.eq_ignore_ascii_case("www.github.com") {
-        return Err(format!("Alleen github.com: {}", src.trim()));
+    // Toegestane hosts: GitHub (publiek, de rollen wijzen ernaar) en de eigen
+    // Bitbucket Server uit TAURUS_BITBUCKET_HOST, als die gezet is. Een host
+    // erbij is een bewuste keuze van wie de launcher draait, geen generieke
+    // opening -- vandaar deze twee en geen patroon dat een heel domein toelaat.
+    const GITHUB_HOSTS: &[&str] = &["github.com", "www.github.com"];
+    let toegestaan = GITHUB_HOSTS.iter().any(|h| host.eq_ignore_ascii_case(h))
+        || bb.map_or(false, |h| host.eq_ignore_ascii_case(h));
+    if !toegestaan {
+        return Err(match bb {
+            Some(h) => format!("Alleen github.com of {}: {}", h, src.trim()),
+            None => format!("Alleen github.com: {}", src.trim()),
+        });
     }
     if rest.split('/').filter(|p| !p.is_empty()).count() < 3 {
         return Err(format!("Geen eigenaar/repo in: {}", src.trim()));
@@ -734,13 +806,51 @@ fn icm_missing_markers(files: &[String]) -> Vec<String> {
         .collect()
 }
 
+// De ANDERE vorm die net zo geldig is: een marketplace-plugin. Daar zit SKILL.md
+// een laag dieper (skills/<naam>/SKILL.md, de Claude Code plugin-conventie), of
+// is er alleen een .claude-plugin/plugin.json en geen los SKILL.md. icm_shape
+// kijkt met opzet niet in submappen -- dit is een even ondiepe check die WEL een
+// laag induikt, en dan ook alleen in die twee vaste plekken. Geeft het gevonden
+// pad terug (voor de foutmelding/UI), geen bool: "plugin.json gevonden" zegt meer
+// dan "true".
+fn plugin_marker(root: &std::path::Path) -> Option<String> {
+    if root.join(".claude-plugin").join("plugin.json").is_file() {
+        return Some(".claude-plugin/plugin.json".to_string());
+    }
+    let rd = std::fs::read_dir(root.join("skills")).ok()?;
+    for e in rd.flatten() {
+        if e.path().join("SKILL.md").is_file() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            return Some(format!("skills/{}/SKILL.md", name));
+        }
+    }
+    None
+}
+
+// Zelfde controle, maar over een platte lijst met VOLLEDIGE paden (zoals `git
+// ls-files` teruggeeft) in plaats van een map op schijf. Nodig zodra de bron op
+// een andere machine kan staan (git_deploy naar een remote host): dan is er geen
+// lokaal Path om in te lezen, wel de bestandslijst die git zelf al teruggaf.
+fn plugin_marker_in_paths(paths: &[String]) -> Option<String> {
+    let norm: Vec<String> = paths.iter().map(|p| p.replace('\\', "/")).collect();
+    if norm.iter().any(|f| f.eq_ignore_ascii_case(".claude-plugin/plugin.json")) {
+        return Some(".claude-plugin/plugin.json".to_string());
+    }
+    norm.into_iter().find(|f| {
+        let parts: Vec<&str> = f.split('/').collect();
+        parts.len() == 3 && parts[0].eq_ignore_ascii_case("skills") && parts[2].eq_ignore_ascii_case("SKILL.md")
+    })
+}
+
 #[derive(serde::Serialize, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 struct SourceProbe {
     url: String,
     name: String,
     description: String,
-    // "skill" (SKILL.md in de wortel) | "workspace" (identity.md/rules.md) | "unknown"
+    // "skill" (SKILL.md in de wortel) | "workspace" (identity.md/rules.md) |
+    // "plugin" (marketplace-vorm: .claude-plugin/plugin.json of skills/*/SKILL.md
+    // een laag dieper) | "unknown"
     shape: String,
     branch: String,
     sha: String,
@@ -889,6 +999,9 @@ fn git_probe(source: String, strict: Option<bool>) -> Result<SourceProbe, String
         }
         p.has_claude_md = p.files.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md"));
         p.shape = icm_shape(&p.files).into();
+        if p.shape == "unknown" && plugin_marker(&dir).is_some() {
+            p.shape = "plugin".into();
+        }
         p.missing = icm_missing_markers(&p.files);
         if strict && p.shape == "unknown" {
             return Err(format!(
@@ -902,6 +1015,9 @@ fn git_probe(source: String, strict: Option<bool>) -> Result<SourceProbe, String
         return Ok(p);
     }
     let url = normalize_source(&source)?;
+    // Een browse-URL wijst naar een submap; git kloont altijd de hele repo, dus
+    // de submap is waar we NA het klonen naar kijken -- niet de wortel van de clone.
+    let subpath = source_subpath(&source);
     let tmp = probe_temp_dir(&url);
     let _ = std::fs::remove_dir_all(&tmp);
     if let Some(parent) = tmp.parent() {
@@ -913,6 +1029,11 @@ fn git_probe(source: String, strict: Option<bool>) -> Result<SourceProbe, String
         let _ = std::fs::remove_dir_all(&tmp);
         return Err(format!("Ophalen mislukte: {}", out.trim()));
     }
+    let root = if subpath.is_empty() { tmp.clone() } else { tmp.join(&subpath) };
+    if !root.is_dir() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(format!("Submap niet gevonden in de repo: {}", subpath));
+    }
 
     let mut p = SourceProbe {
         url: url.clone(),
@@ -921,12 +1042,14 @@ fn git_probe(source: String, strict: Option<bool>) -> Result<SourceProbe, String
     let g = |args: &[&str]| -> String {
         git_local(args).map(|(s, ok)| if ok { s.trim().to_string() } else { String::new() }).unwrap_or_default()
     };
+    // Git-metadata komt altijd van de echte repo-wortel (tmp), ook als alleen een
+    // submap de bron is -- de branch/sha van een submap bestaat niet los.
     p.branch = g(&["-C", &tmp_s, "rev-parse", "--abbrev-ref", "HEAD"]);
     p.sha = g(&["-C", &tmp_s, "rev-parse", "HEAD"]);
     p.date = g(&["-C", &tmp_s, "log", "-1", "--format=%cI"]);
-    p.size_kb = dir_size_excluding_git(&tmp) / 1024;
+    p.size_kb = dir_size_excluding_git(&root) / 1024;
 
-    if let Ok(rd) = std::fs::read_dir(&tmp) {
+    if let Ok(rd) = std::fs::read_dir(&root) {
         for e in rd.flatten() {
             let n = e.file_name().to_string_lossy().into_owned();
             if n == ".git" {
@@ -938,8 +1061,11 @@ fn git_probe(source: String, strict: Option<bool>) -> Result<SourceProbe, String
     }
     p.has_claude_md = p.files.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md"));
     p.shape = icm_shape(&p.files).into();
+    if p.shape == "unknown" && plugin_marker(&root).is_some() {
+        p.shape = "plugin".into();
+    }
     p.missing = icm_missing_markers(&p.files);
-    let (name, desc) = read_repo_meta(&tmp, &url);
+    let (name, desc) = read_repo_meta(&root, &url);
     p.name = name;
     p.description = desc;
     let files_seen = p.files.join(", ");
@@ -1069,7 +1195,6 @@ fn git_deploy(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    let url = normalize_source(&source)?;
     let dest = dest.trim().to_string();
     if dest.is_empty() {
         return Err("Geen doelmap opgegeven.".into());
@@ -1094,7 +1219,7 @@ fn git_deploy(
         let roots: Vec<String> = std::fs::read_dir(&dest)
             .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
             .unwrap_or_default();
-        if icm_shape(&roots) == "unknown" {
+        if icm_shape(&roots) == "unknown" && plugin_marker(Path::new(&dest)).is_none() {
             if strict {
                 let _ = std::fs::remove_dir_all(Path::new(&dest));
                 return Err(format!(
@@ -1128,6 +1253,82 @@ fn git_deploy(
         return Ok(rep);
     }
 
+    let url = normalize_source(&source)?;
+    let subpath = source_subpath(&source);
+
+    // Bron met een submap (een browse-URL): git kan alleen de hele repo klonen,
+    // dus eerst naar een wegwerpplek en dan alleen die submap naar dest kopieren
+    // -- dezelfde truc als de lokale-bron-tak hierboven, nu met een clone ervoor.
+    // Alleen lokaal: op een remote host zou dit een tweede shell-rondje per
+    // bestand worden (kopieren kan daar niet met copy_recursive), en dat is nu
+    // niet nodig.
+    if !subpath.is_empty() {
+        if !local {
+            return Err("Een bron met een submap kan nu alleen lokaal uitgerold worden.".into());
+        }
+        let tmp = probe_temp_dir(&url);
+        let _ = std::fs::remove_dir_all(&tmp);
+        if let Some(parent) = tmp.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let tmp_s = tmp.to_string_lossy().into_owned();
+        let (out, ok) = git_local(&["clone", "--quiet", &url, &tmp_s])?;
+        if !ok {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(format!("Ophalen mislukte: {}", out.trim()));
+        }
+        let g = |args: &[&str]| -> String {
+            git_local(args).map(|(s, ok)| if ok { s.trim().to_string() } else { String::new() }).unwrap_or_default()
+        };
+        let branch = g(&["-C", &tmp_s, "rev-parse", "--abbrev-ref", "HEAD"]);
+        let sha = g(&["-C", &tmp_s, "rev-parse", "HEAD"]);
+        let sub_root = tmp.join(&subpath);
+        if !sub_root.is_dir() {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(format!("Submap niet gevonden in de repo: {}", subpath));
+        }
+        if let Err(e) = copy_recursive(&sub_root, Path::new(&dest)) {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(format!("Kopieren mislukte: {}", e));
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let mut rep = DeployReport { dest: dest.clone(), branch, sha, ..Default::default() };
+        let roots: Vec<String> = std::fs::read_dir(&dest)
+            .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .unwrap_or_default();
+        if icm_shape(&roots) == "unknown" && plugin_marker(Path::new(&dest)).is_none() {
+            if strict {
+                let _ = std::fs::remove_dir_all(Path::new(&dest));
+                return Err(format!(
+                    "Dit lijkt geen ICM-werkproces: geen identity.md en geen SKILL.md in de wortel. Wat er wel staat: {}",
+                    roots.join(", ")
+                ));
+            }
+            rep.notes.push(format!(
+                "geen ICM-markering gevonden ({})",
+                icm_missing_markers(&roots).join(", ")
+            ));
+        }
+        if roots.iter().any(|f| f.eq_ignore_ascii_case("CLAUDE.md")) {
+            rep.claude_md = "kept".into();
+        } else {
+            let (bron, _) = read_repo_meta(Path::new(&dest), &url);
+            let naam = gekozen.clone().unwrap_or(bron);
+            let body = generated_claude_md(&naam, &role, &field, &url, &rep.branch, &rep.sha, &roots, "");
+            std::fs::write(Path::new(&dest).join("CLAUDE.md"), &body)
+                .map_err(|e| format!("CLAUDE.md schrijven mislukte: {}", e))?;
+            rep.claude_md = "written".into();
+        }
+        rep.paths = roots;
+        rep.paths.sort();
+        // branch/sha staan er wel (uit de echte clone), maar dest zelf heeft geen
+        // .git: alleen de submap is gekopieerd. update_workspace zou hier stuklopen
+        // op "geen git-map". Zelfde beperking als een lokale bron, andere reden.
+        rep.notes.push("submap uit een repo: geen bijwerken vanuit deze werkplek".into());
+        return Ok(rep);
+    }
+
     let (out, ok) = git_on(&host_id, &["clone", "--quiet", &url, &dest])?;
     if !ok {
         return Err(format!("Uitrollen mislukte: {}", out.trim()));
@@ -1157,7 +1358,7 @@ fn git_deploy(
     // Dezelfde ICM-regel als in de probe. Hier ook, want git_deploy is los
     // aanroepbaar en dan zou de regel te omzeilen zijn. De clone staat er al, dus
     // opruimen en dan pas weigeren -- niets achterlaten wat de gebruiker niet vroeg.
-    if icm_shape(&roots) == "unknown" {
+    if icm_shape(&roots) == "unknown" && plugin_marker_in_paths(&files).is_none() {
         if strict {
             if local {
                 let _ = std::fs::remove_dir_all(Path::new(&dest));
@@ -9929,12 +10130,135 @@ mod tests {
         assert_eq!(normalize_source("RinDig/icm-architect").unwrap(), "https://github.com/RinDig/icm-architect");
         assert_eq!(normalize_source("https://github.com/a/b.git").unwrap(), "https://github.com/a/b");
         assert_eq!(normalize_source(" https://github.com/a/b/ ").unwrap(), "https://github.com/a/b");
-        // Alleen https, alleen github: een willekeurig adres binnenhalen en er
-        // een agent in laten draaien is het gat dat we niet willen.
+        // Alleen https, alleen github of de eigen Bitbucket Server uit
+        // TAURUS_BITBUCKET_HOST: een willekeurig adres binnenhalen en er een agent
+        // in laten draaien is het gat dat we niet willen.
         assert!(normalize_source("http://github.com/a/b").is_err());
         assert!(normalize_source("https://evil.example/a/b").is_err());
         assert!(normalize_source("https://github.com/a").is_err());
         assert!(normalize_source("").is_err());
+    }
+
+    #[test]
+    fn a_bitbucket_server_url_is_accepted_but_no_shorthand_exists_for_it() {
+        let bb = Some("bitbucket.example.com");
+        assert_eq!(
+            normalize_source_in("https://bitbucket.example.com/scm/team/skills.git", bb).unwrap(),
+            "https://bitbucket.example.com/scm/team/skills"
+        );
+        assert_eq!(
+            normalize_source_in(" https://bitbucket.example.com/scm/team/skills/ ", bb).unwrap(),
+            "https://bitbucket.example.com/scm/team/skills"
+        );
+        assert!(normalize_source_in("http://bitbucket.example.com/scm/team/x", bb).is_err(), "geen https = geweigerd");
+        assert!(normalize_source_in("https://bitbucket.evil.example/scm/team/x", bb).is_err(), "een gelijkende host is niet jouw host");
+        // Zonder TAURUS_BITBUCKET_HOST bestaat die host niet voor de launcher:
+        // dan is github.com het enige dat door de controle komt.
+        assert!(normalize_source_in("https://bitbucket.example.com/scm/team/skills.git", None).is_err(), "geen host gezet = geen Bitbucket");
+        assert_eq!(
+            normalize_source_in("https://github.com/a/b", None).unwrap(),
+            "https://github.com/a/b"
+        );
+        // Geen kortvorm: "team/skills" zou anders ambigu zijn met de
+        // GitHub-kortvorm en zonder waarschuwing naar github.com wijzen.
+        assert_eq!(
+            normalize_source_in("team/skills", bb).unwrap(),
+            "https://github.com/team/skills"
+        );
+    }
+
+    // Een browse-URL wijst naar een submap in een gedeelde repo -- de plek waar
+    // een skill al lang kan zitten zonder dat hij een eigen repo krijgt.
+    // normalize_source geeft de klonbare repo-URL terug (zonder pad), en
+    // source_subpath het pad erin (zonder repo-URL) -- op dezelfde ruwe invoer.
+    #[test]
+    fn a_browse_url_splits_into_a_clone_url_and_a_subpath() {
+        let bb = Some("bitbucket.example.com");
+        let src = "https://bitbucket.example.com/projects/TEAM/repos/marketplace/browse/proces/skills/nieuw-proces";
+        assert_eq!(
+            normalize_source_in(src, bb).unwrap(),
+            "https://bitbucket.example.com/scm/team/marketplace.git"
+        );
+        assert_eq!(source_subpath_in(src, bb), "proces/skills/nieuw-proces");
+
+        // Zonder pad erachter: gewoon de repo-root, geen submap.
+        assert_eq!(
+            normalize_source_in("https://bitbucket.example.com/projects/TEAM/repos/skills/browse", bb).unwrap(),
+            "https://bitbucket.example.com/scm/team/skills.git"
+        );
+        assert_eq!(
+            source_subpath_in("https://bitbucket.example.com/projects/TEAM/repos/skills/browse", bb),
+            ""
+        );
+
+        // Een branch-parameter (?at=...) hoort niet bij het pad.
+        assert_eq!(
+            source_subpath_in("https://bitbucket.example.com/projects/TEAM/repos/marketplace/browse/proces?at=refs%2Fheads%2Ffeature", bb),
+            "proces"
+        );
+
+        // Een gewone scm-URL is geen browse-URL: geen subpath.
+        assert_eq!(source_subpath_in("https://bitbucket.example.com/scm/team/skills.git", bb), "");
+        assert_eq!(source_subpath_in("RinDig/icm-architect", bb), "");
+        // En zonder host gezet is een browse-URL gewoon een onbekend adres.
+        assert_eq!(source_subpath_in(src, None), "");
+    }
+
+    // Live tegen een echte repo: de submap-uitrol van #172, met de exacte URL die
+    // uit de Bitbucket-adresbalk gekopieerd wordt. Wijst naar je eigen server, dus
+    // de URL komt uit de omgeving: zet TAURUS_BITBUCKET_HOST en
+    // TAURUS_TEST_BROWSE_URL (een browse-URL naar een submap met een SKILL.md).
+    #[test]
+    #[ignore]
+    fn probing_a_bitbucket_browse_url_resolves_to_just_the_subfolder() {
+        let src = match std::env::var("TAURUS_TEST_BROWSE_URL") {
+            Ok(v) if !v.trim().is_empty() => v,
+            _ => {
+                eprintln!("TAURUS_TEST_BROWSE_URL niet gezet -- overgeslagen");
+                return;
+            }
+        };
+        let p = git_probe(src.clone(), None).expect("de submap hoort door te komen");
+        assert_eq!(p.shape, "skill", "SKILL.md zit al plat op de root van de submap");
+        assert!(p.files.iter().any(|f| f == "SKILL.md"));
+        // Alleen de submap: wat een laag hoger in de repo staat hoort er niet bij.
+        assert!(!p.files.iter().any(|f| f == ".claude-plugin"), "{:?}", p.files);
+        assert!(!p.branch.is_empty());
+        assert!(!p.sha.is_empty() && p.sha.len() >= 40);
+    }
+
+    // Zelfde bron, maar nu de echte uitrol: dest hoort alleen de submap te
+    // bevatten, niet de rest van de repo. Zie de test hierboven voor de omgeving.
+    #[test]
+    #[ignore]
+    fn deploying_a_bitbucket_browse_url_copies_just_the_subfolder() {
+        let dest = std::env::temp_dir().join("taurus-deploy-test-browse-subpath");
+        let _ = std::fs::remove_dir_all(&dest);
+        let src = match std::env::var("TAURUS_TEST_BROWSE_URL") {
+            Ok(v) if !v.trim().is_empty() => v,
+            _ => {
+                eprintln!("TAURUS_TEST_BROWSE_URL niet gezet -- overgeslagen");
+                return;
+            }
+        };
+        let rep = git_deploy(
+            src.clone(),
+            dest.to_string_lossy().into_owned(),
+            String::new(),
+            "architect".into(),
+            "blueprints/".into(),
+            false,
+            Some("Jake".into()),
+            None,
+        )
+        .expect("de submap hoort uitgerold te worden");
+        assert!(!rep.branch.is_empty(), "de branch is nog bekend, ook al is dest een kopie");
+        assert!(!rep.sha.is_empty());
+        assert!(dest.join("SKILL.md").is_file());
+        assert!(!dest.join(".claude-plugin").exists(), "dat zit een laag hoger, niet in de submap zelf");
+        assert!(!dest.join(".git").exists(), "een kopie van de submap, geen eigen clone");
+        assert!(rep.notes.iter().any(|n| n.contains("geen bijwerken")), "de beperking hoort in het rapport te staan");
+        let _ = std::fs::remove_dir_all(&dest);
     }
 
     #[test]
@@ -10063,6 +10387,41 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dest);
     }
 
+    // Regressie: normalize_source werd aangeroepen voor de local_source-check,
+    // dus een pad als bron sneuvelde altijd op "Alleen https-adressen" en de
+    // kopieerlogica hieronder werd nooit bereikt. Geen #[ignore]: dit gaat niet
+    // over het netwerk, alleen lokaal kopieren.
+    #[test]
+    fn deploying_from_a_local_folder_copies_instead_of_cloning() {
+        let src = std::env::temp_dir().join("taurus-deploy-test-local-src");
+        let dest = std::env::temp_dir().join("taurus-deploy-test-local-dest");
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("SKILL.md"), "# Test\n").unwrap();
+
+        let rep = git_deploy(
+            src.to_string_lossy().into_owned(),
+            dest.to_string_lossy().into_owned(),
+            String::new(),
+            "architect".into(),
+            "blueprints/".into(),
+            false,
+            Some("Sofie".into()),
+            None,
+        )
+        .expect("een lokale map hoort uitgerold te worden door te kopieren");
+        assert_eq!(rep.claude_md, "written");
+        assert!(rep.paths.iter().any(|p| p == "SKILL.md"));
+        assert!(rep.sha.is_empty(), "een kopie heeft geen sha, want er is niets gekloond");
+        assert!(rep.notes.iter().any(|n| n.contains("geen versiebewaking")));
+        let md = std::fs::read_to_string(dest.join("CLAUDE.md")).unwrap();
+        assert!(md.starts_with("# Sofie"), "{}", md.lines().next().unwrap_or(""));
+
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
     // Rollen zijn verwisselbaar -- elke ICM-repo mag elk vak vullen -- maar het
     // moet er wel een ZIJN. De marker is het enige bewijs; geen allow-list, want
     // dan kan niemand anders een eigen ICM-werkmap gebruiken.
@@ -10086,6 +10445,88 @@ mod tests {
         assert_eq!(icm_shape(&["README.md".to_string(), "rules.md".to_string()]), "unknown");
         // Een lege wortel ook niet.
         assert_eq!(icm_shape(&[]), "unknown");
+    }
+
+    // De marketplace-plugin-vorm: SKILL.md zit een laag dieper dan icm_shape kijkt.
+    #[test]
+    fn plugin_marker_recognises_the_claude_code_plugin_shape() {
+        let dir = std::env::temp_dir().join("taurus-plugin-marker-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Kaal: geen van beide markers.
+        assert_eq!(plugin_marker(&dir), None);
+
+        // Alleen skills/<naam>/SKILL.md -- de vorm van een marketplace-repo.
+        std::fs::create_dir_all(dir.join("skills").join("example-skill")).unwrap();
+        std::fs::write(dir.join("skills").join("example-skill").join("SKILL.md"), "# x").unwrap();
+        assert_eq!(plugin_marker(&dir), Some("skills/example-skill/SKILL.md".to_string()));
+
+        // .claude-plugin/plugin.json wint als het er ook is (eerst gecheckt).
+        std::fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        std::fs::write(dir.join(".claude-plugin").join("plugin.json"), "{}").unwrap();
+        assert_eq!(plugin_marker(&dir), Some(".claude-plugin/plugin.json".to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Dezelfde regel, maar over een platte padlijst (zoals git ls-files teruggeeft)
+    // in plaats van een map op schijf -- de vorm die git_deploy gebruikt zodra de
+    // bestemming op een remote host kan staan.
+    #[test]
+    fn plugin_marker_in_paths_mirrors_the_filesystem_check() {
+        assert_eq!(
+            plugin_marker_in_paths(&["README.md".into(), "skills/nieuw-werkproces/SKILL.md".into()]),
+            Some("skills/nieuw-werkproces/SKILL.md".into())
+        );
+        assert_eq!(
+            plugin_marker_in_paths(&[".claude-plugin/plugin.json".into(), "README.md".into()]),
+            Some(".claude-plugin/plugin.json".into())
+        );
+        // Niet precies twee lagen onder skills/ telt niet mee -- anders zou een
+        // willekeurige, diep verstopte SKILL.md ook doorgaan.
+        assert_eq!(plugin_marker_in_paths(&["skills/SKILL.md".into()]), None);
+        assert_eq!(plugin_marker_in_paths(&["skills/a/b/SKILL.md".into()]), None);
+        assert_eq!(plugin_marker_in_paths(&["README.md".into(), "src/index.ts".into()]), None);
+        assert_eq!(plugin_marker_in_paths(&[]), None);
+    }
+
+    // Regressie voor het motiverende geval: een bron in exact de vorm van
+    // een marketplace-repo (geen SKILL.md/identity.md op de root, wel .claude-plugin/
+    // plugin.json en skills/<naam>/SKILL.md) hoort NIET geweigerd te worden, ook
+    // niet streng -- via zowel git_probe als git_deploy.
+    #[test]
+    fn a_plugin_shaped_source_passes_the_strict_gate_too() {
+        let src = std::env::temp_dir().join("taurus-plugin-shape-src");
+        let dest = std::env::temp_dir().join("taurus-plugin-shape-dest");
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::create_dir_all(src.join(".claude-plugin")).unwrap();
+        std::fs::write(src.join(".claude-plugin").join("plugin.json"), "{\"name\":\"x\"}").unwrap();
+        std::fs::create_dir_all(src.join("skills").join("example-skill")).unwrap();
+        std::fs::write(src.join("skills").join("example-skill").join("SKILL.md"), "# x").unwrap();
+        std::fs::write(src.join("README.md"), "x").unwrap();
+
+        let probe = git_probe(src.to_string_lossy().into_owned(), None)
+            .expect("plugin-vorm hoort door de strenge check te komen");
+        assert_eq!(probe.shape, "plugin");
+
+        let rep = git_deploy(
+            src.to_string_lossy().into_owned(),
+            dest.to_string_lossy().into_owned(),
+            String::new(),
+            "architect".into(),
+            "blueprints/".into(),
+            false,
+            None,
+            None,
+        )
+        .expect("plugin-vorm hoort ook via git_deploy niet geweigerd te worden");
+        assert!(rep.paths.iter().any(|p| p == ".claude-plugin"));
+        assert!(rep.paths.iter().any(|p| p == "skills"));
+
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
     }
 
     // De zeven bronnen zoals ze op 17 aug 2026 zijn: zes werkmappen en één skill.
