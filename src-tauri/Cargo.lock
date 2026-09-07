@@ -5495,7 +5495,7 @@ dependencies = [
 
 [[package]]
 name = "taurus"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "bzip2",
  "cpal",

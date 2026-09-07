@@ -3,7 +3,7 @@ const { invoke } = window.__TAURI__.core;
 // buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
 // was twee avonden lang de onbekende. Zie je hier een ander nummer dan
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
-const UI_BUILD = "ui-5";
+const UI_BUILD = "ui-6";
 const { listen } = window.__TAURI__.event;
 
 /* ============ i18n ============ */
