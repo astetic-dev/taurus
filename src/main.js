@@ -267,6 +267,8 @@ const I18N = {
     search_ph: "Zoeken…",
     ctx_restart: "↻ Herstart (resume gesprek)", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
     preview_none: "(geen .html/.md in de werkmap)", preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten", preview_toobig: "Bestand te groot om te previewen.",
+    submit_saved: "{n} item(s) klaargezet: {name}",
+    submit_remote: "Een selectie kan nog niet naar een sessie op een andere machine",
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
@@ -620,6 +622,8 @@ const I18N = {
     search_ph: "Search…",
     ctx_restart: "↻ Restart (resume conversation)", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
     preview_none: "(no .html/.md in the working folder)", preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview", preview_toobig: "File too large to preview.",
+    submit_saved: "{n} item(s) ready: {name}",
+    submit_remote: "A selection cannot go to a session on another machine yet",
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
@@ -3905,6 +3909,39 @@ function previewBridge(fragment) {
     document.addEventListener('DOMContentLoaded', probeer);
     window.addEventListener('load', function () { probeer(); setTimeout(probeer, 200); });
   }
+  // TERUGKANAAL. Een gegenereerd rapport heeft vinkjes; tot nu toe kon het die
+  // alleen op het KLEMBORD zetten en moest een mens ze plakken. Hiermee stuurt de
+  // pagina een selectie terug: de ouder maakt er een JSON-bestand van in de
+  // input-map van de sessie (dezelfde bestemming als de dropzone) en zet het pad
+  // in de prompt. Wat er precies mag bepaalt de Rust-kant (preview_submit) --
+  // deze pagina is gegenereerd en onvertrouwd.
+  //
+  // Voor de pagina is het een regel:
+  //   taurus.submit({ items: [...] }, 'selectie')
+  // en het antwoord komt terug als event, zodat de knop "verstuurd" kan worden:
+  //   addEventListener('taurus:submitted', function (e) { e.detail.naam ... })
+  //   addEventListener('taurus:submit-mislukt', function (e) { e.detail.fout ... })
+  window.taurus = {
+    submit: function (data, soort) {
+      var json;
+      // Zelf serialiseren en als TEKST versturen: dan kan een DOM-node of een
+      // functie in de payload geen structured-clone-fout geven die de pagina niet
+      // ziet, en heeft de ouder meteen iets waarvan de grootte te meten is.
+      try { json = JSON.stringify(data); } catch (e) { return false; }
+      if (typeof json !== 'string') return false;
+      parent.postMessage({ type: 'taurus-submit', soort: String(soort || ''), json: json }, '*');
+      return true;
+    }
+  };
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || typeof d.type !== 'string') return;
+    if (d.type === 'taurus-submit-ok') {
+      window.dispatchEvent(new CustomEvent('taurus:submitted', { detail: { naam: d.naam, aantal: d.aantal } }));
+    } else if (d.type === 'taurus-submit-mislukt') {
+      window.dispatchEvent(new CustomEvent('taurus:submit-mislukt', { detail: { fout: d.fout } }));
+    }
+  });
   document.addEventListener('click', function (ev) {
     var a = ev.target && ev.target.closest && ev.target.closest('a[href]');
     if (!a) return;
@@ -4102,6 +4139,42 @@ async function openPreviewLink(s, href, bron) {
   const hit = [...sel.options].find((o) => o.value.toLowerCase() === doel.toLowerCase());
   if (hit) sel.value = hit.value;
   await renderPreview(s, doel, fragment);
+}
+
+// Een selectie uit de preview: wordt een bestand in input\ en daarna een pad in de
+// prompt -- precies wat er gebeurt als je een bestand in de dropzone laat vallen.
+// Bewust NIET verzenden met Enter: de laatste toets blijft van jou, en zo komt er
+// geen tekst uit een gegenereerde pagina in een agent terecht die jij niet zag.
+//
+// `bron` moet het venster van DEZE preview zijn; een pagina in een ander tabblad
+// hoort niets in deze sessie te kunnen zetten.
+async function submitFromPreview(s, msg, bron) {
+  const frame = s.el.querySelector(".preview-frame");
+  if (!frame || (bron && bron !== frame.contentWindow)) return;
+  const antwoord = (type, extra) => { if (bron) bron.postMessage(Object.assign({ type }, extra), "*"); };
+  // Een sessie op een andere machine heeft zijn input-map daar, en die weg loopt
+  // via scp (zie dropToRemote). Dat kan dit nog niet, en stil niets doen zou de
+  // pagina laten denken dat het gelukt is.
+  if (s.hostId) {
+    toast(t("submit_remote"), "err");
+    antwoord("taurus-submit-mislukt", { fout: t("submit_remote") });
+    return;
+  }
+  try {
+    const r = await invoke("preview_submit", {
+      root: s.path,
+      fromFile: s.previewPath || "",
+      soort: msg.soort || "",
+      json: msg.json,
+    });
+    addDropperEntry(r.pad);
+    insertPathIntoTerminal(r.pad, true);
+    toast(t("submit_saved").replace("{name}", r.naam).replace("{n}", r.aantal));
+    antwoord("taurus-submit-ok", { naam: r.naam, aantal: r.aantal });
+  } catch (err) {
+    toast("✗ " + err, "err");
+    antwoord("taurus-submit-mislukt", { fout: String(err) });
+  }
 }
 
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
@@ -6743,6 +6816,12 @@ window.addEventListener("DOMContentLoaded", () => {
     if (d && d.type === "taurus-open-local" && typeof d.href === "string") {
       const s = sessions.get(current);
       if (s) openPreviewLink(s, d.href, e.source);
+    }
+    // Terugkanaal: een selectie uit de preview. Alleen voor de zichtbare sessie,
+    // om dezelfde reden als hierboven.
+    if (d && d.type === "taurus-submit" && typeof d.json === "string") {
+      const s = sessions.get(current);
+      if (s) submitFromPreview(s, d, e.source);
     }
   });
 
