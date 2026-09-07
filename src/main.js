@@ -3400,9 +3400,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
         const w0 = (qi - first) * cols; // offset-venster van de bevraagde rij
         const w1 = w0 + cols;
 
-        // Drive-letter paths may use either separator (C:\dir\f.html or C:/dir/f.html);
-        // accept both so forward-slash absolute paths stay clickable too.
-        const re = /([A-Za-z]:[\\/][^\s"'<>|]+?\.(?:html?|md)|[\w.\-\\/]+\.(?:html?|md))/gi;
+        const re = padRe();
         const links = [];
         let m;
         while ((m = re.exec(full)) !== null) {
@@ -3830,6 +3828,18 @@ async function closeSession(id) {
 }
 
 /* ============ HTML-preview ============ */
+// Paden naar iets dat de preview kan tonen, zoals ze in de terminal staan. Een
+// schijfletter mag beide scheidingstekens (C:\map\f.html en C:/map/f.html), zodat
+// een pad met slashes even goed herkend wordt. Een verse regex per aanroep: met
+// /g draagt hij anders zijn lastIndex mee naar de volgende lezer.
+const padRe = () => /([A-Za-z]:[\\/][^\s"'<>|]+?\.(?:html?|md)|[\w.\-\\/]+\.(?:html?|md))/gi;
+// Een pad uit de terminal absoluut maken tegen de werkmap van de sessie, en de
+// leestekens eraf halen die er in een zin achteraan plakken.
+function absPreviewPath(s, rawPath) {
+  const p = String(rawPath).trim().replace(/[)\].,;:'"]+$/, "");
+  if (/^([A-Za-z]:[\\/]|\\\\)/.test(p)) return p;
+  return s.path.replace(/[\\/]+$/, "") + "\\" + p.replace(/^[.][\\/]/, "").replace(/\//g, "\\");
+}
 function applyLayout(s) {
   s.el.classList.toggle("split", s.previewMode === "split");
   s.el.classList.toggle("full", s.previewMode === "full");
@@ -3873,6 +3883,42 @@ function closePreview(s) { s.previewMode = null; applyLayout(s); refitTerm(s); }
 // agent LEEST. Wat je wilt zien is wat hij net GESCHREVEN heeft, en dat is niet aan
 // de extensie te zien (zijn uitvoer is even vaak .md als .html). Wel aan de klok:
 // daarom groeperen we op wanneer een bestand geschreven is, met de tijd erbij.
+// De agent zet zijn werk lang niet altijd IN de werkmap: hij schrijft zijn rapport
+// in een projectmap ernaast en noemt het pad in de terminal ("Open in browser:
+// C:/.../_index/dashboard.html"). Die paden vissen we uit het transcript, zodat de
+// keuzelijst ook kan aanbieden wat hij deze sessie maakte waar het ook staat. Lange
+// paden wrappen over meerdere rijen, dus we lezen per LOGISCHE regel -- net als de
+// klikbare links, anders houd je een staartfragment over.
+function terminalPaths(s, maxRows, maxPaths) {
+  const uit = [];
+  const gezien = new Set();
+  // Een full-screen TUI tekent in het alt-scherm, en dat heeft geen scrollback: daar
+  // staat alleen wat nu zichtbaar is. De scrollback zit in de normale buffer. We
+  // lezen ze allebei, het alt-scherm als laatste, want dat is het meest recent.
+  const b = s.term.buffer;
+  const buffers = b.active === b.normal ? [b.normal] : [b.normal, b.active];
+  for (const buf of buffers) {
+    let regel = "";
+    for (let r = Math.max(0, buf.length - (maxRows || 2000)); r < buf.length; r++) {
+      const ln = buf.getLine(r);
+      if (!ln) continue;
+      regel += ln.translateToString(false);
+      const next = buf.getLine(r + 1);
+      if (next && next.isWrapped) continue; // de regel loopt door op de volgende rij
+      const re = padRe();
+      let m;
+      while ((m = re.exec(regel)) !== null) {
+        const pad = absPreviewPath(s, m[1]);
+        const sleutel = pad.toLowerCase();
+        if (gezien.has(sleutel)) continue;
+        gezien.add(sleutel);
+        uit.push(pad);
+      }
+      regel = "";
+    }
+  }
+  return uit.slice(-(maxPaths || 60));
+}
 function previewGroups(s, files) {
   const dag = new Date(); dag.setHours(0, 0, 0, 0);
   const groepen = [
@@ -3917,6 +3963,22 @@ async function loadHtmlList(s, want) {
   const frame = s.el.querySelector(".preview-frame");
   let files = [];
   try { files = await invoke("list_html", { dir: s.path }); } catch (_) {}
+  // Wat de agent buiten de werkmap schreef staat niet in die scan. Van de paden uit
+  // het transcript houden we daarom over wat bestaat en wat in DEZE sessie
+  // geschreven is -- dat laatste scheelt de tientallen bestanden die hij alleen las.
+  // Niet bij een sessie op een andere machine: die paden bestaan hier niet.
+  if (!s.hostId) {
+    const bekend = new Set(files.map((f) => f.path.toLowerCase()));
+    let extra = [];
+    try { extra = await invoke("stat_files", { base: s.path, paths: terminalPaths(s) }); } catch (_) {}
+    for (const f of extra) {
+      if (bekend.has(f.path.toLowerCase())) continue;
+      if (f.mtime * 1000 < (s.startedAt || 0)) continue;
+      bekend.add(f.path.toLowerCase());
+      files.push(f);
+    }
+    files.sort((a, b) => b.mtime - a.mtime);
+  }
   sel.innerHTML = "";
   if (!files.length && !want) {
     const o = document.createElement("option"); o.value = ""; o.textContent = t("preview_none"); sel.appendChild(o);
@@ -4277,10 +4339,7 @@ async function submitFromPreview(s, msg, bron) {
 
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
 async function openPreviewFile(s, rawPath) {
-  let p = String(rawPath).trim().replace(/[)\].,;:'"]+$/, "");
-  if (!/^([A-Za-z]:[\\/]|\\\\)/.test(p)) {
-    p = s.path.replace(/[\\/]+$/, "") + "\\" + p.replace(/^[.][\\/]/, "").replace(/\//g, "\\");
-  }
+  const p = absPreviewPath(s, rawPath);
   if (current !== s.id) showView(s.id);
   s.previewMode = settings.htmlView || "split";
   // Zie openPreview: de nieuwe maat hoort bij de layout-wissel, niet pas erna.

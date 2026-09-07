@@ -5593,6 +5593,58 @@ fn list_html(dir: String) -> Vec<HtmlFile> {
     out
 }
 
+// Wat een agent maakt hoeft niet in zijn werkmap te staan -- hij schrijft een
+// rapport in een projectmap ernaast en noemt het pad in de terminal. De frontend
+// vist die paden uit het transcript en vraagt hier welke ervan echt bestaan; met
+// het tijdstip erbij kan de keuzelijst ze net zo groeperen als de rest.
+//
+// Alleen wat de preview ook kan tonen (html, htm, md), dezelfde set als scan_html,
+// en niet meer dan 200 paden per keer: het transcript is van de agent, en een lijst
+// die eindeloos lang mag zijn is een lijst die je machine bezig houdt.
+#[tauri::command]
+fn stat_files(base: String, paths: Vec<String>) -> Vec<HtmlFile> {
+    let root = Path::new(&base);
+    let mut out = Vec::new();
+    let mut gezien = std::collections::HashSet::new();
+    for raw in paths.iter().take(200) {
+        let p = Path::new(raw);
+        let toonbaar = p
+            .extension()
+            .map(|e| {
+                e.eq_ignore_ascii_case("html")
+                    || e.eq_ignore_ascii_case("htm")
+                    || e.eq_ignore_ascii_case("md")
+            })
+            .unwrap_or(false);
+        if !toonbaar || !gezien.insert(raw.to_lowercase()) {
+            continue;
+        }
+        let meta = match std::fs::metadata(p) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let rel = p
+            .strip_prefix(root)
+            .map(|r| r.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| raw.clone());
+        out.push(HtmlFile {
+            path: raw.clone(),
+            rel,
+            mtime,
+        });
+    }
+    out
+}
+
 // Preview-plafond aan de Rust-kant: voorheen werd het hele bestand gelezen en
 // over de IPC gestuurd en pas in JS op 2 MB gecontroleerd (#72). De frontend
 // herkent "file too large" en toont de preview_toobig-melding.
@@ -7908,6 +7960,7 @@ pub fn run() {
             resize_session,
             close_session,
             list_html,
+            stat_files,
             read_file,
             open_folder,
             save_dropped_path,
