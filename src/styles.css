@@ -500,7 +500,7 @@ select:-webkit-autofill {
 /* ---- Terminals ---- */
 .terminals { position: absolute; inset: 0; background: var(--bg); }
 .term-container { position: absolute; inset: 0; display: flex; }
-.term-pane { flex: 1; min-width: 0; position: relative; padding: 8px 10px; }
+.term-pane { flex: 1; min-width: 0; position: relative; padding: 8px 10px; overflow: hidden; }
 .term-pane .xterm { height: 100%; }
 .xterm .xterm-viewport { background-color: transparent !important; }
 

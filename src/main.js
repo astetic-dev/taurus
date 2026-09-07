@@ -3303,9 +3303,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   term.onData((d) => session.mirror
     ? invoke("ssh_mirror_write", { id: session.mirror, data: d })
     : invoke("write_session", { id, data: d }));
-  term.onResize(({ cols, rows }) => session.mirror
-    ? invoke("ssh_mirror_resize", { id: session.mirror, cols, rows })
-    : invoke("resize_session", { id, cols, rows }));
+  term.onResize(({ cols, rows }) => sendSize(session, cols, rows));
   // Kopieren bij selectie via xterm's onSelectionChange (vuurt betrouwbaar; een
   // DOM mouseup op het paneel komt niet door xterm's eigen muis-afhandeling).
   // We leggen de laatste niet-lege selectie vast en kopieren met een korte
@@ -3823,12 +3821,23 @@ function applyLayout(s) {
   s.el.classList.toggle("split", s.previewMode === "split");
   s.el.classList.toggle("full", s.previewMode === "full");
 }
+// De maat gaat via EEN pad naar de pty, en alleen als hij echt veranderd is.
+// fit() vuurt zelf onResize, dus zonder cache ging dezelfde maat er twee keer uit:
+// twee keer SIGWINCH, en een TUI als Claude Code hertekent daarop zijn hele beeld
+// (inclusief het diff-paneel) twee keer.
+function sendSize(s, cols, rows) {
+  if (!cols || !rows) return;
+  const key = cols + "x" + rows;
+  if (s.sentSize === key) return;
+  s.sentSize = key;
+  if (s.mirror) invoke("ssh_mirror_resize", { id: s.mirror, cols, rows });
+  else invoke("resize_session", { id: s.id, cols, rows });
+}
 function refitTerm(s) {
   if (s.previewMode === "full") return;
   requestAnimationFrame(() => {
     try { s.fit.fit(); } catch (_) {}
-    if (s.mirror) invoke("ssh_mirror_resize", { id: s.mirror, cols: s.term.cols, rows: s.term.rows });
-    else invoke("resize_session", { id: s.id, cols: s.term.cols, rows: s.term.rows });
+    sendSize(s, s.term.cols, s.term.rows);
   });
 }
 async function openPreview(id) {
@@ -3837,9 +3846,13 @@ async function openPreview(id) {
   if (!s) return;
   if (current !== id) showView(id);
   s.previewMode = settings.htmlView || "split";
+  // Meteen refitten, in dezelfde stap als de layout. Wachten tot het bestand
+  // ingelezen is laat de terminal een moment op zijn OUDE breedte staan in een
+  // half zo breed paneel; de agent hertekent dan een tel later en zet zijn
+  // diff-paneel opeens middenin het venster (#194).
   applyLayout(s);
-  await loadHtmlList(s);
   refitTerm(s);
+  await loadHtmlList(s);
 }
 function closePreview(s) { s.previewMode = null; applyLayout(s); refitTerm(s); }
 async function loadHtmlList(s) {
@@ -4205,13 +4218,14 @@ async function openPreviewFile(s, rawPath) {
   }
   if (current !== s.id) showView(s.id);
   s.previewMode = settings.htmlView || "split";
+  // Zie openPreview: de nieuwe maat hoort bij de layout-wissel, niet pas erna.
   applyLayout(s);
+  refitTerm(s);
   await loadHtmlList(s);
   const sel = s.el.querySelector(".preview-file");
   const hit = [...sel.options].find((o) => o.value.toLowerCase() === p.toLowerCase());
   if (hit) sel.value = hit.value;
   await renderPreview(s, p);
-  refitTerm(s);
 }
 
 /* ============ status uit output ============ */
