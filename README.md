@@ -106,7 +106,10 @@ consistently. That's what Taurus is for.
   link may point is decided on the Rust side, bounded to the session folder — a
   link outside it does nothing.
 - **The page can send something back** — a page in the preview may post a
-  selection to the launcher (a `postMessage` of type `taurus-submit`). It lands as
+  selection to the launcher: one line, `launcher.submit({ items: [...] }, 'selection')`.
+  That name is deliberately brand-free, so the same generated page works in a
+  white-labelled build too; the brand name (`taurus`) is an alias of the same
+  object, and the answer arrives as a `launcher:submitted` event. It lands as
   a JSON file in the session's `input\` folder, where the agent picks it up, and
   the page hears back whether it did. Bounded on the Rust side: that folder only,
   JSON only, with a size and count limit. A page that routes on `location.hash`

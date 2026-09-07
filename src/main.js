@@ -3917,11 +3917,20 @@ function previewBridge(fragment) {
   // deze pagina is gegenereerd en onvertrouwd.
   //
   // Voor de pagina is het een regel:
-  //   taurus.submit({ items: [...] }, 'selectie')
+  //   launcher.submit({ items: [...] }, 'selectie')
   // en het antwoord komt terug als event, zodat de knop "verstuurd" kan worden:
-  //   addEventListener('taurus:submitted', function (e) { e.detail.naam ... })
-  //   addEventListener('taurus:submit-mislukt', function (e) { e.detail.fout ... })
-  window.taurus = {
+  //   addEventListener('launcher:submitted', function (e) { e.detail.naam ... })
+  //   addEventListener('launcher:submit-mislukt', function (e) { e.detail.fout ... })
+  //
+  // De naam launcher is MERKLOOS, en dat is met opzet: een gegenereerde pagina weet
+  // niet onder welk merk hij bekeken wordt, en hoort in elke build van deze launcher
+  // te werken -- ook een gebrande, waar het merk een andere naam draagt. Hetzelfde
+  // object staat daarom ook onder de merknaam (window.taurus), zodat een pagina die
+  // daarvoor geschreven is blijft werken. Nieuwe paginas nemen de merkloze naam, en
+  // wie ook oudere builds wil bedienen test er de merknaam bij:
+  //   var api = window.launcher || window.taurus;
+  // (In dit commentaar geen backticks -- het zit in een template-literal.)
+  var brug = {
     submit: function (data, soort) {
       var json;
       // Zelf serialiseren en als TEKST versturen: dan kan een DOM-node of een
@@ -3929,17 +3938,28 @@ function previewBridge(fragment) {
       // ziet, en heeft de ouder meteen iets waarvan de grootte te meten is.
       try { json = JSON.stringify(data); } catch (e) { return false; }
       if (typeof json !== 'string') return false;
-      parent.postMessage({ type: 'taurus-submit', soort: String(soort || ''), json: json }, '*');
+      parent.postMessage({ type: 'launcher-submit', soort: String(soort || ''), json: json }, '*');
       return true;
     }
   };
+  window.launcher = brug;
+  window.taurus = brug;
   window.addEventListener('message', function (ev) {
     var d = ev.data;
     if (!d || typeof d.type !== 'string') return;
-    if (d.type === 'taurus-submit-ok') {
-      window.dispatchEvent(new CustomEvent('taurus:submitted', { detail: { naam: d.naam, aantal: d.aantal } }));
-    } else if (d.type === 'taurus-submit-mislukt') {
-      window.dispatchEvent(new CustomEvent('taurus:submit-mislukt', { detail: { fout: d.fout } }));
+    // De oude merknamen worden er nog bij gevuurd: een knop die op
+    // 'taurus:submitted' wacht hoort niet stil te blijven na deze wijziging.
+    var namen = null, detail = null;
+    if (d.type === 'launcher-submit-ok' || d.type === 'taurus-submit-ok') {
+      namen = ['launcher:submitted', 'taurus:submitted'];
+      detail = { naam: d.naam, aantal: d.aantal };
+    } else if (d.type === 'launcher-submit-mislukt' || d.type === 'taurus-submit-mislukt') {
+      namen = ['launcher:submit-mislukt', 'taurus:submit-mislukt'];
+      detail = { fout: d.fout };
+    }
+    if (!namen) return;
+    for (var i = 0; i < namen.length; i++) {
+      window.dispatchEvent(new CustomEvent(namen[i], { detail: detail }));
     }
   });
   document.addEventListener('click', function (ev) {
@@ -4157,7 +4177,7 @@ async function submitFromPreview(s, msg, bron) {
   // pagina laten denken dat het gelukt is.
   if (s.hostId) {
     toast(t("submit_remote"), "err");
-    antwoord("taurus-submit-mislukt", { fout: t("submit_remote") });
+    antwoord("launcher-submit-mislukt", { fout: t("submit_remote") });
     return;
   }
   try {
@@ -4170,10 +4190,10 @@ async function submitFromPreview(s, msg, bron) {
     addDropperEntry(r.pad);
     insertPathIntoTerminal(r.pad, true);
     toast(t("submit_saved").replace("{name}", r.naam).replace("{n}", r.aantal));
-    antwoord("taurus-submit-ok", { naam: r.naam, aantal: r.aantal });
+    antwoord("launcher-submit-ok", { naam: r.naam, aantal: r.aantal });
   } catch (err) {
     toast("✗ " + err, "err");
-    antwoord("taurus-submit-mislukt", { fout: String(err) });
+    antwoord("launcher-submit-mislukt", { fout: String(err) });
   }
 }
 
@@ -6819,7 +6839,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     // Terugkanaal: een selectie uit de preview. Alleen voor de zichtbare sessie,
     // om dezelfde reden als hierboven.
-    if (d && d.type === "taurus-submit" && typeof d.json === "string") {
+    if (d && (d.type === "launcher-submit" || d.type === "taurus-submit") && typeof d.json === "string") {
       const s = sessions.get(current);
       if (s) submitFromPreview(s, d, e.source);
     }
