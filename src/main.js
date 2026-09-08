@@ -168,7 +168,7 @@ const I18N = {
     c_trimsel: "Selectie opschonen bij kopiëren",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
     c_tabs: "Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude-status op de tab (✶ Orbiting…)",
-    c_groups: "Tabs uit dezelfde map bundelen vanaf", c_groups_unit: "tabs",
+    c_groups: "Tabs uit dezelfde map bundelen vanaf", c_groups_unit: "tabs in die map",
     c_recap: "Recap tonen bij hover over een tab",
     grp_tab_members: "{n} sessies", grp_waiting: "wacht", grp_working: "bezig",
     grp_adhoc: "Losse sessies",
@@ -292,7 +292,7 @@ const I18N = {
     help_search: "Zoeken in de scrollback met Ctrl+Shift+F. Geldt voor nieuwe sessies.",
     help_tabshortcuts: "Sneltoetsen voor tabs: Ctrl+Tab wisselt, Ctrl+1..9 springt naar een tab, Ctrl+T opent een nieuwe, Ctrl+W sluit de huidige.",
     help_tabstatus: "Toont Claude's huidige bezigheid live op het tabblad.\nVoorbeeld: '✶ Orbiting…' terwijl Claude werkt; een stille groene stip = klaar/wachtend.",
-    help_groups: "Vanaf dit aantal tabs worden sessies uit dezelfde map onder een tab gebundeld.\nHover (of klik) op zo'n tab om de sessies eronder uit te klappen.\nDe gebundelde tab flitst als een van zijn sessies op je wacht, dus je mist niets.",
+    help_groups: "Heeft een map dit aantal tabs, dan schuiven ze samen onder een tab. Mappen met minder houden hun eigen tabs.\nHover (of klik) op zo'n tab om de sessies eronder uit te klappen.\nDe gebundelde tab flitst als een van zijn sessies op je wacht, dus je mist niets.\n0 = nooit bundelen.",
     help_recap: "Toont bij hover het laatste wat die agent zei, ook van tabs die niet in beeld staan.\nGelezen uit het terminalvenster van die sessie zelf; er wordt niets naar de agent gestuurd.",
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
     skin_default: "Standaard (donker)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
@@ -521,7 +521,7 @@ const I18N = {
     c_trimsel: "Tidy up a copied selection",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
     c_tabs: "Tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude status on the tab (✶ Orbiting…)",
-    c_groups: "Group tabs from the same folder from", c_groups_unit: "tabs",
+    c_groups: "Group tabs from the same folder from", c_groups_unit: "tabs in that folder",
     c_recap: "Show a recap when hovering a tab",
     grp_tab_members: "{n} sessions", grp_waiting: "waiting", grp_working: "working",
     grp_adhoc: "Ad-hoc sessions",
@@ -645,7 +645,7 @@ const I18N = {
     help_search: "Search the scrollback with Ctrl+Shift+F. Applies to new sessions.",
     help_tabshortcuts: "Tab shortcuts: Ctrl+Tab switches, Ctrl+1..9 jumps to a tab, Ctrl+T opens a new one, Ctrl+W closes the current.",
     help_tabstatus: "Shows Claude's current activity live on the tab.\nExample: '✶ Orbiting…' while Claude works; a steady green dot = done/waiting.",
-    help_groups: "From this many tabs, sessions from the same folder collapse into one tab.\nHover (or click) such a tab to expand its sessions below it.\nThe grouped tab flashes when one of its sessions is waiting for you, so nothing is missed.",
+    help_groups: "Once one folder holds this many tabs, they collapse into a single tab. Folders with fewer keep their own tabs.\nHover (or click) such a tab to expand its sessions below it.\nThe grouped tab flashes when one of its sessions is waiting for you, so nothing is missed.\n0 = never group.",
     help_recap: "On hover, shows the last thing that agent said — including tabs that are not on screen.\nRead from that session's own terminal view; nothing is sent to the agent.",
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
     skin_default: "Default (dark)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
@@ -1062,9 +1062,10 @@ const DEFAULT_SETTINGS = {
   // Een kopie levert de TEKST, niet de rechthoek waar hij in stond (#177).
   trimSelection: true,
   webLinks: true, search: true, tabShortcuts: true, tabStatus: true,
-  // Tabs bundelen zodra het er te veel worden (#90). Onder de drempel verandert
-  // er niets; daarboven vouwen sessies uit dezelfde bron samen.
-  tabGroups: true, tabGroupAt: 10, tabRecap: true,
+  // Tabs uit dezelfde bron bundelen (#90). Het getal is de groepsgrootte PER MAP,
+  // niet een drempel over alle tabs samen (#196): een map schuift samen zodra hij
+  // zoveel sessies heeft, en de rest houdt gewone tabs.
+  tabGroups: true, tabGroupSize: 3, tabRecap: true,
   fullPaths: true,
   // Drie standen sinds #129: ask (default) / silent / clean. Het oude
   // persistSessions-vinkje wordt nog gelezen zodat een bestaande config klopt.
@@ -1083,8 +1084,22 @@ const DEFAULT_SETTINGS = {
 };
 let settings = { ...DEFAULT_SETTINGS };
 
+// Tot #196 telde het getal ALLE tabs; nu telt het de tabs in een map. Wie zelf een getal
+// had gezet bedoelde de map -- zo staat het immers op het label -- dus dat getal verhuist
+// ongewijzigd mee. Wie op de oude standaard stond zou met "tien tabs in dezelfde map"
+// nooit meer iets gebundeld zien, en krijgt daarom de nieuwe standaard.
+const OUDE_TABGROUPAT_STANDAARD = 10;
 function loadSettings() {
-  try { const raw = localStorage.getItem("taurus.settings"); if (raw) settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }; } catch (_) {}
+  let opgeslagen = null;
+  try { const raw = localStorage.getItem("taurus.settings"); if (raw) opgeslagen = JSON.parse(raw); } catch (_) {}
+  if (opgeslagen) settings = { ...DEFAULT_SETTINGS, ...opgeslagen };
+  if (opgeslagen && opgeslagen.tabGroupSize === undefined) {
+    const oud = opgeslagen.tabGroupAt;
+    settings.tabGroupSize = Number.isFinite(oud) && oud > 0 && oud !== OUDE_TABGROUPAT_STANDAARD
+      ? Math.max(2, oud)
+      : DEFAULT_SETTINGS.tabGroupSize;
+  }
+  delete settings.tabGroupAt;
 }
 function saveSettings() { localStorage.setItem("taurus.settings", JSON.stringify(settings)); }
 
@@ -2768,13 +2783,16 @@ function tabGroupKey(s) {
   return s.projectId || "";
 }
 
-// De rijen voor de tabbalk: losse sessies, of groepen als het er te veel worden.
+// De rijen voor de tabbalk: losse sessies, en een groep voor elke map die er genoeg heeft.
 // De volgorde volgt de tabvolgorde; een groep staat op de plek van zijn eerste lid.
+//
+// De groepsgrootte geldt PER MAP (#196), niet over alle tabs samen. Een bak met minder
+// sessies dan die grootte blijft dus gewone tabs -- elk op zijn eigen plek, want een rij
+// met twee leden zou als niet-groep maar een van de twee tonen.
 function tabRows() {
   const alle = [...sessions.values()];
-  if (!settings.tabGroups || alle.length <= settings.tabGroupAt) {
-    return alle.map((s) => ({ groep: false, leden: [s] }));
-  }
+  const grootte = settings.tabGroups ? Math.max(2, settings.tabGroupSize) : 0;
+  if (!grootte) return alle.map((s) => ({ groep: false, leden: [s] }));
   const perBron = new Map();
   for (const s of alle) {
     const k = tabGroupKey(s);
@@ -2785,10 +2803,11 @@ function tabRows() {
   const gezien = new Set();
   for (const s of alle) {
     const k = tabGroupKey(s);
+    const leden = perBron.get(k);
+    if (leden.length < grootte) { rijen.push({ groep: false, leden: [s] }); continue; }
     if (gezien.has(k)) continue;
     gezien.add(k);
-    const leden = perBron.get(k);
-    rijen.push({ groep: leden.length > 1, leden, key: k });
+    rijen.push({ groep: true, leden, key: k });
   }
   return rijen;
 }
@@ -4483,7 +4502,7 @@ function openSettings() {
   els.setTabs.checked = settings.tabShortcuts;
   els.setTabStatus.checked = settings.tabStatus;
   els.setTabRecap.checked = settings.tabRecap;
-  els.setTabGroupAt.value = settings.tabGroups ? settings.tabGroupAt : 0;
+  els.setTabGroupSize.value = settings.tabGroups ? settings.tabGroupSize : 0;
   els.setFullPaths.checked = settings.fullPaths;
   renderRoleRows();
   els.setConfirmExit.checked = settings.confirmExit !== false;
@@ -4737,9 +4756,11 @@ function saveSettingsFromForm() {
   settings.tabRecap = els.setTabRecap.checked;
   // 0 = uit. Een aparte aanvinkvakje ernaast zou twee besturingselementen voor
   // een keuze zijn; nul is hier de natuurlijke "nooit bundelen".
-  const drempel = parseInt(els.setTabGroupAt.value, 10);
-  settings.tabGroupAt = Number.isFinite(drempel) && drempel > 0 ? drempel : DEFAULT_SETTINGS.tabGroupAt;
-  settings.tabGroups = Number.isFinite(drempel) && drempel > 0;
+  // Een groep van een is geen groep: alles boven nul telt vanaf twee.
+  const grootte = parseInt(els.setTabGroupSize.value, 10);
+  const bundelen = Number.isFinite(grootte) && grootte > 0;
+  settings.tabGroups = bundelen;
+  settings.tabGroupSize = bundelen ? Math.max(2, grootte) : DEFAULT_SETTINGS.tabGroupSize;
   settings.fullPaths = els.setFullPaths.checked;
   saveRoles();
   settings.confirmExit = els.setConfirmExit.checked;
@@ -6251,7 +6272,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabs: document.querySelector("#set-tabshortcuts"),
     setTabStatus: document.querySelector("#set-tabstatus"),
     setTabRecap: document.querySelector("#set-tabrecap"),
-    setTabGroupAt: document.querySelector("#set-tabgroupat"),
+    setTabGroupSize: document.querySelector("#set-tabgroupsize"),
     setFullPaths: document.querySelector("#set-fullpaths"),
     setConfirmExit: document.querySelector("#set-confirm-exit"),
     exitModal: document.querySelector("#exit-modal"),
