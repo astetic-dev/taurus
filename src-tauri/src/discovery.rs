@@ -284,14 +284,7 @@ fn announced_os() -> &'static str {
 
 // Waar een sessie op deze machine zou beginnen als niemand iets kiest.
 fn home_dir() -> String {
-    for key in ["USERPROFILE", "HOME"] {
-        if let Ok(v) = std::env::var(key) {
-            if !v.trim().is_empty() {
-                return v;
-            }
-        }
-    }
-    String::new()
+    crate::platform::home_string()
 }
 
 // De naam waaronder deze machine zich aankondigt: zijn eigen naam, want dat is
