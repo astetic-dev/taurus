@@ -5,6 +5,9 @@ const { invoke } = window.__TAURI__.core;
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
 const UI_BUILD = "ui-6";
 const { listen } = window.__TAURI__.event;
+// macOS (WKWebView) of niet. Eén vlag voor de plekken waar de webview of het OS
+// anders is dan op Windows (#199).
+const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent || "");
 
 /* ============ i18n ============ */
 const I18N = {
@@ -6258,9 +6261,12 @@ function wireFileDropper() {
   // Physical -> CSS px voor het hittesten (Tauri geeft physical; getBoundingClientRect
   // is CSS). Buiten de dropper -> null (drop negeren). In de dropper maar niet op een
   // zone -> "prompt" (veilige default, ook bij een snelle drop voordat je mikt).
+  // GEMETEN (#210): op macOS levert wry de positie in punten van de view -- dat
+  // zijn al CSS-px, alleen gelabeld als physical. Delen door dpr (2 op Retina)
+  // legde elke drop linksboven, op de sessie.
   function modeAt(pos) {
     if (!pos) return null;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = IS_MAC ? 1 : (window.devicePixelRatio || 1);
     const x = pos.x / dpr, y = pos.y / dpr;
     const pr = panel.getBoundingClientRect();
     if (x < pr.left || x > pr.right || y < pr.top || y > pr.bottom) return null;
