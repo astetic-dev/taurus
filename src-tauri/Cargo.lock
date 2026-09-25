@@ -5502,6 +5502,8 @@ dependencies = [
  "flate2",
  "hound",
  "mdns-sd",
+ "objc2-app-kit",
+ "objc2-foundation",
  "png 0.17.16",
  "portable-pty",
  "rand",
