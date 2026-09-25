@@ -3649,6 +3649,18 @@ struct Session {
     _job: Option<job::Job>,
 }
 
+impl Session {
+    // Stop de agent EN wat hij startte. Op Windows doet de Job Object dat bij het
+    // loslaten; elders ruimt platform::kill_tree de boom op (#218).
+    fn end(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.process_id() {
+            platform::kill_tree(pid);
+        }
+        let _ = self.child.kill();
+    }
+}
+
 // ---------- een lokale sessie ook naar buiten laten meelezen (#125) ----------
 //
 // De vraagmodus belooft dat het werk in de sessie blijft van degene die vastloopt:
@@ -5512,7 +5524,7 @@ fn restart_session(
 ) -> Result<(), String> {
     {
         if let Some(mut s) = state.sessions.lock().unwrap().remove(&id) {
-            let _ = s.child.kill();
+            s.end();
         }
     }
     let host = lookup_host(&host_id)?;
@@ -5574,7 +5586,7 @@ fn resize_session(state: State<AppState>, id: String, cols: u16, rows: u16) -> R
 #[tauri::command]
 fn close_session(state: State<AppState>, id: String) {
     if let Some(mut s) = state.sessions.lock().unwrap().remove(&id) {
-        let _ = s.child.kill();
+        s.end();
     }
 }
 
@@ -7180,7 +7192,7 @@ fn kill_all_sessions(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     let mut map = state.sessions.lock().unwrap();
     for (_, s) in map.iter_mut() {
-        let _ = s.child.kill();
+        s.end();
     }
     map.clear();
 }
