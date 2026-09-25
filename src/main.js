@@ -732,12 +732,26 @@ const I18N = {
 // de Mac anders is; de rest blijft uit de tabel hierboven komen.
 if (IS_MAC) {
   Object.assign(I18N.nl, {
+    c_ctrl: "⌘⇧C / ⌘⇧V (⌘C / ⌘V werken altijd)",
+    c_search: "Zoeken in scrollback — ⌘⇧F",
+    c_tabs: "Tab-sneltoetsen (⌃Tab, ⌘1..9, ⌘T/W)",
+    help_copyselect: "Zodra je tekst in de terminal selecteert, gaat die automatisch naar het klembord - geen ⌘C nodig.",
+    help_ctrlshift: "⌘C kopieert en ⌘V plakt in de terminal; ⌘⇧C / ⌘⇧V doen hetzelfde. ⌃C blijft een programma onderbreken.",
+    help_search: "Zoeken in de scrollback met ⌘⇧F. Geldt voor nieuwe sessies.",
+    help_tabshortcuts: "Sneltoetsen voor tabs: ⌃Tab wisselt, ⌘1..9 springt naar een tab, ⌘T opent een nieuwe, ⌘W sluit de huidige.",
     ph_path: "/Users/… of /Volumes/…",
     help_fullpaths: "Vraagt Claude volledige bestandspaden te printen, zodat ze klikbaar worden.\nVoorbeeld: /Users/jij/project/index.html i.p.v. alleen index.html.",
     ctx_explorer: "📂 Toon map in Finder",
     ssh_hint: "Een sessie draait als jouw Mac-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
   });
   Object.assign(I18N.en, {
+    c_ctrl: "⌘⇧C / ⌘⇧V (⌘C / ⌘V always work)",
+    c_search: "Search scrollback — ⌘⇧F",
+    c_tabs: "Tab shortcuts (⌃Tab, ⌘1..9, ⌘T/W)",
+    help_copyselect: "As soon as you select text in the terminal it goes to the clipboard automatically - no ⌘C needed.",
+    help_ctrlshift: "⌘C copies and ⌘V pastes in the terminal; ⌘⇧C / ⌘⇧V do the same. ⌃C still interrupts a program.",
+    help_search: "Search the scrollback with ⌘⇧F. Applies to new sessions.",
+    help_tabshortcuts: "Tab shortcuts: ⌃Tab switches, ⌘1..9 jumps to a tab, ⌘T opens a new one, ⌘W closes the current.",
     ph_path: "/Users/… or /Volumes/…",
     help_fullpaths: "Asks Claude to print full file paths so they become clickable.\nExample: /Users/you/project/index.html instead of just index.html.",
     ctx_explorer: "📂 Show folder in Finder",
@@ -6156,7 +6170,9 @@ document.addEventListener("keydown", (e) => {
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
   // sluiten voordat de toets naar de terminal gaat (#90).
   if (e.key === "Escape" && (tabPanel || recapTip)) { e.preventDefault(); closeTabPanel(); return; }
-  const ctrl = e.ctrlKey && !e.altKey;
+  // De modifier voor Taurus-sneltoetsen: Ctrl op Windows, Cmd op macOS (#216).
+  // Op de Mac blijft Ctrl van de terminal -- Ctrl+C is daar gewoon onderbreken.
+  const ctrl = IS_MAC ? (e.metaKey && !e.ctrlKey && !e.altKey) : (e.ctrlKey && !e.altKey);
   if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); changeFont(1); return; }
   if (ctrl && e.key === "-") { e.preventDefault(); changeFont(-1); return; }
   if (ctrl && e.key === "0") { e.preventDefault(); settings.fontSize = DEFAULT_SETTINGS.fontSize; saveSettings(); applyFontToTerms(); return; }
@@ -6175,7 +6191,8 @@ document.addEventListener("keydown", (e) => {
   }
   if (settings.search && ctrl && e.shiftKey && (e.key === "F" || e.key === "f")) { e.preventDefault(); openSearch(); return; }
   if (settings.tabShortcuts) {
-    if (ctrl && e.key === "Tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
+    // Ctrl+Tab ook op de Mac: dat is daar de gewone tabwissel (Safari, Terminal).
+    if ((IS_MAC ? e.ctrlKey && !e.metaKey : ctrl) && e.key === "Tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
     if (ctrl && (e.key === "t" || e.key === "T")) { e.preventDefault(); resetLaunchForm(); showView("new"); return; }
     if (ctrl && (e.key === "w" || e.key === "W")) { e.preventDefault(); if (current !== "new") closeSession(current); return; }
     if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); selectNthTab(parseInt(e.key)); return; }

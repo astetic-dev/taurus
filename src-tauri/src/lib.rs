@@ -7846,6 +7846,56 @@ fn ssh_kill_session(app: AppHandle, state: State<AppState>, id: String) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// macOS-menu (#216). Tauri's standaardmenu stopt de app met het voorgedefinieerde
+// Quit: dat slaat CloseRequested over, en daarmee de afsluitvraag (#168) en
+// kill_all_sessions. En zijn "Close Window" pakt Cmd+W, dat in Taurus een TAB
+// sluit. Dus: Quit als eigen item dat het venster sluit, geen Close Window, en
+// wel een Edit-menu -- zonder dat werken Cmd+C/Cmd+V niet in tekstvelden.
+#[cfg(target_os = "macos")]
+fn mac_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+    let quit = MenuItem::with_id(app, "quit", "Quit Taurus", true, Some("CmdOrCtrl+Q"))?;
+    let app_menu = Submenu::with_items(
+        app,
+        "Taurus",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::show_all(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    let window = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::fullscreen(app, None)?,
+        ],
+    )?;
+    Menu::with_items(app, &[&app_menu, &edit, &window])
+}
+
 // Een app die uit Finder of het Dock start krijgt het minimale PATH van launchd
 // (/usr/bin:/bin:/usr/sbin:/sbin), niet dat uit het shellprofiel. Dan vindt hij
 // ~/.local/bin/claude of Homebrew niet (#206). Daarom vragen we het PATH één keer
@@ -7918,7 +7968,20 @@ pub fn run() {
     let mic_level_thread = mic_level.clone();
     std::thread::spawn(move || audio_thread(stt_rx, mic_level_thread));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // macOS: een eigen menu in plaats van Tauri's standaardmenu (#216). Zie mac_menu.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(mac_menu).on_menu_event(|app, event| {
+        if event.id() == "quit" {
+            // Via het venster, zodat Cmd+Q dezelfde vraag stelt als de sluitknop.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.close();
+            } else {
+                app.exit(0);
+            }
+        }
+    });
+    builder
         .manage(AppState {
             sessions: Mutex::new(HashMap::new()),
             stt: SttState {
