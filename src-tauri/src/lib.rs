@@ -2680,7 +2680,11 @@ fn pull_workspace(
 }
 
 // Map-kiezer (bladeren-knop in de project-editor).
-#[tauri::command]
+// LET OP het `(async)`: blocking_pick_folder wacht op een antwoord dat via de
+// main thread binnenkomt. Als synchroon command draait dit zelf op de main
+// thread; op macOS hangt de app dan zodra het paneel iets van de app vraagt,
+// zoals "Nieuwe map" (gemeten met `sample`: recv() op de main thread).
+#[tauri::command(async)]
 fn pick_folder(app: AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
     app.dialog()
@@ -2692,8 +2696,8 @@ fn pick_folder(app: AppHandle) -> Option<String> {
 
 // Bestand-kiezer voor de dropzone-+. Start in `start_dir` (de input-map); die
 // maken we zo nodig eerst aan zodat de dialoog daar echt opent. Geeft het gekozen
-// absolute pad terug (None bij annuleren).
-#[tauri::command]
+// absolute pad terug (None bij annuleren). `(async)`: zie pick_folder.
+#[tauri::command(async)]
 fn pick_file(app: AppHandle, start_dir: String) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
     // ~ expanderen: de sleutelkiezer vraagt om "~/.ssh", en zonder dit zou
@@ -3490,7 +3494,8 @@ fn parse_model_list(agent: &str, stdout: &str) -> Vec<String> {
 // de suggestielijst verschijnt zonder dat Taurus mee hoeft te updaten (#92).
 // Faalt dit (agent niet geïnstalleerd, oudere CLI zonder `models`, timeout),
 // dan valt de frontend terug op zijn ingebouwde lijst.
-#[tauri::command]
+// `(async)`: het wachten op de CLI (tot 10 s) mag de main thread niet vasthouden.
+#[tauri::command(async)]
 fn list_agent_models(agent: String) -> Result<Vec<String>, String> {
     let sub = model_list_subcommand(&agent).ok_or("agent has no model list command")?;
     // Zelfde programma-resolutie als bij het starten van een sessie, dus de
@@ -5097,7 +5102,8 @@ fn apply_known_titles(view: &mut MachineAgents, titles: &HashMap<String, String>
     }
 }
 
-#[tauri::command]
+// `(async)`: ssh-ronde (tot 10 s); niet op de main thread.
+#[tauri::command(async)]
 fn remote_agents(host_id: String) -> Result<MachineAgents, String> {
     let host = lookup_host(&host_id)?
         .ok_or_else(|| "Agents opsommen kan alleen op een andere machine.".to_string())?;
@@ -5214,7 +5220,8 @@ fn stop_remote_session_at(host_id: String, path: String) -> Result<(), String> {
     stop_remote_session(host_id, name)
 }
 
-#[tauri::command]
+// `(async)`: ssh-ronde; niet op de main thread.
+#[tauri::command(async)]
 fn stop_remote_session(host_id: String, session: String) -> Result<(), String> {
     let host = lookup_host(&host_id)?
         .ok_or_else(|| "Een sessie stoppen kan alleen op een andere machine.".to_string())?;
@@ -6497,7 +6504,8 @@ fn push_voices(out: &mut Vec<String>, engine: &str, script: &str) {
 // natuurlijke stemmen en andere talen zoals het Nederlandse 'Microsoft Frank', dat
 // alleen in OneCore staat), SAPI als backup. Niet filteren op "Natural" -- dan
 // zouden juist die stemmen wegvallen.
-#[tauri::command]
+// `(async)`: wacht op PowerShell; niet op de main thread.
+#[tauri::command(async)]
 fn list_tts_voices() -> Vec<String> {
     let mut out = Vec::new();
     push_voices(
@@ -6980,7 +6988,8 @@ struct SttToggle {
     text: Option<String>,
 }
 
-#[tauri::command]
+// `(async)`: wacht op de audio-thread en transcribeert; niet op de main thread.
+#[tauri::command(async)]
 fn stt_toggle(state: State<AppState>) -> Result<SttToggle, String> {
     use std::sync::atomic::Ordering;
     if !state.stt.recording.load(Ordering::Relaxed) {
@@ -7570,7 +7579,8 @@ fn firewall_script(exe: &str) -> String {
     )
 }
 
-#[tauri::command]
+// `(async)`: PowerShell starten duurt seconden; niet op de main thread.
+#[tauri::command(async)]
 fn firewall_status(port: Option<u16>) -> FirewallStatus {
     let _ = port; // de poort zit in de regelnaam, niet in de vraag
     let dicht = FirewallStatus { tcp: false, udp: false, blocked: 0, checked: false };
@@ -7600,7 +7610,7 @@ fn firewall_status(port: Option<u16>) -> FirewallStatus {
 //
 // Bewust smal: alleen INBOUND, alleen BLOCK, en alleen als het programmafilter
 // precies deze exe is. Er wordt niets anders aangeraakt.
-#[tauri::command]
+#[tauri::command(async)]
 fn firewall_allow(port: Option<u16>) -> Result<(), String> {
     let p = port.unwrap_or(sshhost::DEFAULT_PORT);
     let exe = this_exe();
