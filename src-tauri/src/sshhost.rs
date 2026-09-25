@@ -642,7 +642,9 @@ fn shell_command(cmd: Option<&str>, cwd: Option<&str>) -> CommandBuilder {
         c.arg("/C");
         c.arg(line);
     }
-    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
+    let home = crate::platform::home_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".into());
     c.cwd(cwd.unwrap_or(&home));
     c
 }
@@ -691,7 +693,9 @@ fn session_command(cmd: Option<&str>, cwd: Option<&str>, power: Power) -> Comman
         c.arg("--permission-mode");
         c.arg("dontAsk");
     }
-    let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
+    let home = crate::platform::home_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".into());
     c.cwd(cwd.unwrap_or(&home));
     c
 }

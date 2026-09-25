@@ -36,7 +36,7 @@ fn to_path(p: &str) -> PathBuf {
     let s = p.replace('\\', "/");
     let s = s.strip_prefix('/').filter(|r| r.chars().nth(1) == Some(':')).unwrap_or(&s);
     if s.is_empty() || s == "." {
-        return PathBuf::from(std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into()));
+        return crate::platform::home_dir().unwrap_or_else(|| PathBuf::from("."));
     }
     PathBuf::from(s)
 }
@@ -75,8 +75,8 @@ mod tests {
     // client die realpath(".") vraagt hoort daar te landen.
     #[test]
     fn dot_is_the_home_directory() {
-        let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
-        assert_eq!(to_path("."), std::path::PathBuf::from(&home));
+        let home = crate::platform::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        assert_eq!(to_path("."), home);
         assert_eq!(to_path(""), std::path::PathBuf::from(&home));
     }
 

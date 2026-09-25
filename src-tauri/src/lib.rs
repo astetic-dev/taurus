@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 // Taurus als SSH-host: inkomende sessies met toestemming in de GUI (#121).
 mod discovery;
+mod platform;
 mod sshhost;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -90,8 +91,9 @@ fn default_projects() -> Vec<Project> {
     Vec::new()
 }
 
-// Per-gebruiker config: %APPDATA%\Taurus\projects.json (schrijfbaar, geen
-// hardcoded dev-pad, werkt na installatie).
+// Per-gebruiker config: %APPDATA%\Taurus\projects.json op Windows,
+// ~/Library/Application Support/Taurus op macOS (schrijfbaar, geen hardcoded
+// dev-pad, werkt na installatie). Zie platform::config_base (#208).
 //
 // TAURUS_CONFIG_DIR verlegt de HELE configmap. Bedoeld om een testexemplaar
 // naast een draaiende Taurus te zetten: die deelt anders sessions.json, en dan
@@ -101,18 +103,17 @@ fn default_projects() -> Vec<Project> {
 fn config_dir() -> std::path::PathBuf {
     resolve_config_dir(
         std::env::var("TAURUS_CONFIG_DIR").ok(),
-        std::env::var("APPDATA").ok(),
+        platform::config_base(),
     )
 }
 
 // Apart gehouden zodat de keuze te testen is zonder aan de omgeving te zitten:
 // env-variabelen zijn procesbreed en tests draaien parallel.
-fn resolve_config_dir(override_dir: Option<String>, appdata: Option<String>) -> std::path::PathBuf {
+fn resolve_config_dir(override_dir: Option<String>, base: Option<std::path::PathBuf>) -> std::path::PathBuf {
     if let Some(dir) = override_dir.filter(|s| !s.trim().is_empty()) {
         return std::path::PathBuf::from(dir.trim());
     }
-    appdata
-        .map(std::path::PathBuf::from)
+    base
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("Taurus")
 }
@@ -1155,10 +1156,7 @@ fn generated_claude_md(
 // De map van de gebruiker in ~/.claude/skills/. Optioneel, en nooit een
 // voorwaarde: laag 1 (de werkplek) draagt het gewicht.
 fn skill_dest(role: &str) -> String {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_default();
-    std::path::PathBuf::from(home)
+    std::path::PathBuf::from(platform::home_string())
         .join(".claude")
         .join("skills")
         .join(format!("icm-{}", role.trim().to_lowercase()))
@@ -3135,7 +3133,7 @@ fn first_user_text(v: &serde_json::Value) -> String {
 
 #[tauri::command(async)]
 fn scan_claude_sessions(limit: Option<usize>) -> ScanResult {
-    let root = std::path::PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default())
+    let root = std::path::PathBuf::from(platform::home_string())
         .join(".claude")
         .join("projects");
     let mut files: Vec<(u64, std::path::PathBuf)> = Vec::new();
@@ -3182,8 +3180,7 @@ fn claude_session_file(path: &str, uuid: &str) -> std::path::PathBuf {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    let home = std::env::var("USERPROFILE").unwrap_or_default();
-    std::path::PathBuf::from(home)
+    std::path::PathBuf::from(platform::home_string())
         .join(".claude")
         .join("projects")
         .join(enc)
@@ -3205,8 +3202,7 @@ struct SessionState {
 // Daarom zoeken we op het SESSIE-ID: dat is een UUID die de launcher zelf heeft
 // meegegeven, hij is uniek, en hij staat altijd precies één niveau diep.
 fn grok_session_file(uuid: &str) -> Option<std::path::PathBuf> {
-    let home = std::env::var("USERPROFILE").ok()?;
-    let root = std::path::PathBuf::from(home).join(".grok").join("sessions");
+    let root = platform::home_dir()?.join(".grok").join("sessions");
     for entry in std::fs::read_dir(&root).ok()? {
         let entry = match entry {
             Ok(e) => e,
@@ -4158,12 +4154,12 @@ fn resolve_key(host: &Host) -> Result<KeySource, String> {
     Ok(KeySource::Path(expanded))
 }
 
-// ~ of ~/ aan het begin -> %USERPROFILE%. Het issue toont "~/.ssh/id_ed25519"
+// ~ of ~/ aan het begin -> de thuismap (%USERPROFILE% op Windows). Het issue toont "~/.ssh/id_ed25519"
 // als voorbeeld, en dat moet op Windows gewoon werken.
 fn expand_home(p: &str) -> String {
     if p == "~" || p.starts_with("~/") || p.starts_with("~\\") {
-        if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
-            return format!("{}{}", home, &p[1..]);
+        if let Some(home) = platform::home_dir() {
+            return format!("{}{}", home.to_string_lossy(), &p[1..]);
         }
     }
     p.to_string()
@@ -5362,9 +5358,9 @@ fn ssh_interactive(host: &Host, payload: String) -> Result<(String, Vec<String>)
 // payload. start_pty eist wel een bestaande map, dus we geven de home van het
 // werkstation; die bestaat altijd.
 fn local_cwd_for_remote() -> String {
-    std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".into())
+    platform::home_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".into())
 }
 
 // Start een nieuwe agent-sessie. session_id is een vooraf bepaalde UUID, zodat we
@@ -9469,9 +9465,7 @@ mod tests {
 
     #[test]
     fn expand_home_only_touches_a_leading_tilde() {
-        let home = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .unwrap_or_default();
+        let home = platform::home_string();
         if !home.is_empty() {
             assert_eq!(expand_home("~/.ssh/id_ed25519"), format!("{}/.ssh/id_ed25519", home));
             assert_eq!(expand_home(r"~\.ssh\id_ed25519"), format!(r"{}\.ssh\id_ed25519", home));
@@ -9840,24 +9834,28 @@ mod tests {
     // pakken: dan hervat het je lopende sessies en overschrijft het ze daarna.
     #[test]
     fn config_dir_override_wins_over_appdata() {
-        let d = resolve_config_dir(Some(r"C:\Temp\TaurusTest".into()), Some(r"C:\Users\x\AppData\Roaming".into()));
-        assert_eq!(d, std::path::PathBuf::from(r"C:\Temp\TaurusTest"));
+        let base = std::env::temp_dir().join("Roaming");
+        let over = std::env::temp_dir().join("TaurusTest");
+        let d = resolve_config_dir(Some(over.to_string_lossy().into_owned()), Some(base));
+        assert_eq!(d, over);
         // Geen "Taurus" eronder plakken: de opgegeven map IS de configmap.
         assert!(!d.ends_with("Taurus"));
     }
 
     #[test]
     fn config_dir_falls_back_to_appdata() {
-        let d = resolve_config_dir(None, Some(r"C:\Users\x\AppData\Roaming".into()));
-        assert_eq!(d, std::path::PathBuf::from(r"C:\Users\x\AppData\Roaming\Taurus"));
+        let base = std::env::temp_dir().join("Roaming");
+        let d = resolve_config_dir(None, Some(base.clone()));
+        assert_eq!(d, base.join("Taurus"));
     }
 
     // Een lege of witruimte-variabele is per ongeluk gezet, niet bedoeld als
     // "gebruik de huidige map".
     #[test]
     fn empty_override_is_ignored() {
-        let d = resolve_config_dir(Some("   ".into()), Some(r"C:\Users\x\AppData\Roaming".into()));
-        assert_eq!(d, std::path::PathBuf::from(r"C:\Users\x\AppData\Roaming\Taurus"));
+        let base = std::env::temp_dir().join("Roaming");
+        let d = resolve_config_dir(Some("   ".into()), Some(base.clone()));
+        assert_eq!(d, base.join("Taurus"));
     }
 
     #[test]
