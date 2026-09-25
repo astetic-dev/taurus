@@ -745,6 +745,10 @@ if (IS_MAC) {
     help_fullpaths: "Vraagt Claude volledige bestandspaden te printen, zodat ze klikbaar worden.\nVoorbeeld: /Users/jij/project/index.html i.p.v. alleen index.html.",
     ctx_explorer: "📂 Toon map in Finder",
     voice_natural: "macOS-stemmen",
+    stt_head: "Spraak naar tekst — fn+F9 inhouden (of klik 🎙)",
+    stt_no_mac_engine: "Dit model heeft geen macOS-engine in de modellenlijst.",
+    stt_downloading: "Bezig met downloaden… (zie stt/download.log)",
+    rec_idle: "Klik of fn+F9 = dicteren", stt_rec: "● Opname… (laat fn+F9 los = stop)",
     voice_install_hint: "Meer stemmen of talen nodig? Voeg ze toe via Systeeminstellingen → Toegankelijkheid → Gesproken materiaal → Systeemstem → Beheer stemmen.",
     ssh_hint: "Een sessie draait als jouw Mac-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
   });
@@ -760,6 +764,10 @@ if (IS_MAC) {
     help_fullpaths: "Asks Claude to print full file paths so they become clickable.\nExample: /Users/you/project/index.html instead of just index.html.",
     ctx_explorer: "📂 Show folder in Finder",
     voice_natural: "macOS voices",
+    stt_head: "Speech to text — hold fn+F9 (or click 🎙)",
+    stt_no_mac_engine: "This model has no macOS engine in the model list.",
+    stt_downloading: "Downloading… (see stt/download.log)",
+    rec_idle: "Click or fn+F9 to dictate", stt_rec: "● Recording… (release fn+F9 to stop)",
     voice_install_hint: "Need more voices or languages? Add them in System Settings → Accessibility → Spoken Content → System voice → Manage Voices.",
     ssh_hint: "A session runs as your Mac account, with your rights. Every connection asks permission first; everything is recorded in an audit trail.",
   });
@@ -6490,6 +6498,9 @@ const DEFAULT_STT_MODELS = [
     engineSha256: "0043cd9cdd755d35627299e6a02839e95a262508ae9593af6c5c72ffd674b650",
     modelUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
     modelSha256: "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
+    // macOS-engine (arm64 + x86_64), zelfde model (#231). Digest van het release-asset.
+    engineUrlMacos: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-osx-universal2-shared-no-tts.tar.bz2",
+    engineSha256Macos: "d01e2bb576c8c7e6124c5866040ab51f372d35b98114a6f2c97354eaf4f8db03",
     size: "~486 MB",
   },
 ];
@@ -6862,9 +6873,6 @@ window.addEventListener("DOMContentLoaded", () => {
     dropperList: document.querySelector("#dropper-list"),
     dropperPaste: document.querySelector("#dropper-paste"),
   });
-  // Spraak naar tekst heeft (nog) geen macOS-engine (#222): geen Download aanbieden
-  // die niet kan werken.
-  if (IS_MAC) document.querySelector("#stt-rows")?.classList.add("hidden");
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
@@ -6976,7 +6984,12 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#set-stt-download").addEventListener("click", async () => {
     const m = sttModels.find((x) => x.name === els.sttModelSel.value) || sttModels[0];
     if (!m) return;
-    try { await invoke("stt_download", { engineUrl: m.engineUrl, engineSha256: m.engineSha256 || "", modelUrl: m.modelUrl, modelSha256: m.modelSha256 || "" }); } catch (e) { toast("✗ " + e, "err"); }
+    // Op macOS de macOS-engine van het model; zonder die velden geen Windows-build
+    // downloaden die hier niet kan draaien (#231).
+    const engineUrl = IS_MAC ? m.engineUrlMacos : m.engineUrl;
+    const engineSha256 = IS_MAC ? m.engineSha256Macos : m.engineSha256;
+    if (!engineUrl) { toast("✗ " + t("stt_no_mac_engine"), "err"); return; }
+    try { await invoke("stt_download", { engineUrl, engineSha256: engineSha256 || "", modelUrl: m.modelUrl, modelSha256: m.modelSha256 || "" }); } catch (e) { toast("✗ " + e, "err"); }
     refreshSttStatus();
   });
   document.querySelector("#set-stt-refresh").addEventListener("click", async () => {

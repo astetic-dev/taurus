@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- macOS only: Tauri merges this into the bundle's Info.plist (#231).
+     Without a usage description, macOS refuses microphone access for dictation. -->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Taurus records your voice only while you dictate (hold F9 or click the microphone), and turns it into text on this Mac.</string>
+</dict>
+</plist>

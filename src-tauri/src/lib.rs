@@ -6916,7 +6916,9 @@ struct SttStatus {
 
 fn stt_paths() -> (Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
     let d = stt_dir();
-    let exe = find_under(&d, &|n| n == "sherpa-onnx-offline.exe", 3);
+    // Buiten Windows heet de engine zonder .exe (#231).
+    let name = if cfg!(windows) { "sherpa-onnx-offline.exe" } else { "sherpa-onnx-offline" };
+    let exe = find_under(&d, &|n| n == name, 3);
     let tokens = find_under(&d, &|n| n == "tokens.txt", 3);
     (exe, tokens)
 }
@@ -6980,10 +6982,28 @@ fn dl_log(d: &Path, msg: &str) {
     }
 }
 
-// Download één bestand met PowerShell (blokkerend; wij zitten al op een
+// Download één bestand: PowerShell op Windows, curl elders (blokkerend; wij zitten al op een
 // worker-thread). Eerst naar .part, daarna atomisch hernoemen zodat een
 // afgebroken download nooit voor een compleet bestand doorgaat.
-fn ps_fetch(url: &str, dest: &Path) -> Result<(), String> {
+fn fetch_file(url: &str, dest: &Path) -> Result<(), String> {
+    // Buiten Windows: curl, dat bij macOS hoort. Zelfde .part-dans (#231).
+    #[cfg(not(windows))]
+    {
+        let part = dest.with_extension("part");
+        let status = std::process::Command::new("curl")
+            .args(["-fsSL", "--retry", "2", "-o"])
+            .arg(&part)
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            let _ = std::fs::remove_file(&part);
+            return Err(format!("download failed ({}): {}", status, url));
+        }
+        return std::fs::rename(&part, dest).map_err(|e| e.to_string());
+    }
+    #[allow(unreachable_code)]
     let part = dest.with_extension("part");
     let u = url.replace('\'', "''");
     let p = part.to_string_lossy().replace('\'', "''");
@@ -7052,14 +7072,6 @@ fn stt_download(
     model_url: String,
     model_sha256: String,
 ) -> Result<(), String> {
-    // De vastgepinde engine is een Windows-build en de download loopt via
-    // PowerShell en tar.exe. Buiten Windows staat STT voorlopig uit (#222).
-    #[cfg(not(windows))]
-    {
-        let _ = (&app, &engine_url, &engine_sha256, &model_url, &model_sha256);
-        return Err("Speech to text is not available on this platform yet.".into());
-    }
-    #[allow(unreachable_code)]
     for u in [&engine_url, &model_url] {
         if !u.starts_with("https://") {
             return Err(format!("https URLs only: {}", u));
@@ -7091,7 +7103,7 @@ fn stt_download(
                 let file = d.join(name);
                 if !file.is_file() {
                     dl_log(&d, &format!("downloading {}", url));
-                    ps_fetch(&url, &file)?;
+                    fetch_file(&url, &file)?;
                 }
                 // Ook een eerder gedownload (gecached) archief verifieren:
                 // pas na een geldige checksum wordt er uitgepakt.
@@ -10247,6 +10259,31 @@ mod tests {
         assert!(ok.success());
         assert_eq!(clipboard_file_paths(), vec![f.to_string_lossy().into_owned()]);
         let _ = std::fs::remove_file(&f);
+    }
+
+    // Handmatig, met netwerk: de macOS-engine via fetch_file (curl), sha256 en
+    // extract_tar_bz2, en dan starten (#231). Controleert ook dat het uitpakken de
+    // uitvoerrechten bewaart en de dylibs via @loader_path/../lib gevonden worden.
+    // cargo test --lib -- --ignored the_macos_stt_engine
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore]
+    fn the_macos_stt_engine_downloads_unpacks_and_runs() {
+        let d = std::env::temp_dir().join(format!("taurus-stt-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let file = d.join("engine.tar.bz2");
+        fetch_file(
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-osx-universal2-shared-no-tts.tar.bz2",
+            &file,
+        )
+        .unwrap();
+        verify_sha256(&file, "d01e2bb576c8c7e6124c5866040ab51f372d35b98114a6f2c97354eaf4f8db03").unwrap();
+        extract_tar_bz2(&file, &d).unwrap();
+        let exe = find_under(&d, &|n| n == "sherpa-onnx-offline", 3).expect("engine");
+        let out = std::process::Command::new(&exe).arg("--help").output().unwrap();
+        let all = String::from_utf8_lossy(&out.stderr).to_string() + &String::from_utf8_lossy(&out.stdout);
+        assert!(all.contains("Speech recognition"), "{all}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[cfg(target_os = "macos")]
