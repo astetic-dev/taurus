@@ -6168,7 +6168,27 @@ fn clipboard_file_paths() -> Vec<String> {
     out
 }
 
-#[cfg(not(windows))]
+// macOS: Finder zet per gekopieerd bestand een pasteboard-item met een
+// public.file-url, plus een afbeelding van het icoon. Zonder deze lijst won die
+// afbeelding, en werd een gekopieerd bestand een pasted-*.png (#212). Finder
+// geeft soms een file-reference-URL (file:///.file/id=...), vandaar filePathURL.
+#[cfg(target_os = "macos")]
+fn clipboard_file_paths() -> Vec<String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
+    use objc2_foundation::NSURL;
+    let mut out = Vec::new();
+    let pb = NSPasteboard::generalPasteboard();
+    let Some(items) = pb.pasteboardItems() else { return out };
+    for item in items.iter() {
+        let Some(s) = item.stringForType(unsafe { NSPasteboardTypeFileURL }) else { continue };
+        let Some(url) = NSURL::URLWithString(&s) else { continue };
+        let Some(path) = url.filePathURL().and_then(|u| u.path()) else { continue };
+        out.push(path.to_string());
+    }
+    out
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn clipboard_file_paths() -> Vec<String> {
     Vec::new()
 }
@@ -10034,6 +10054,24 @@ mod tests {
         // Niets gevonden -> None (resolve_program valt dan terug op de kale naam).
         assert!(resolve_in_paths("bestaatniet", &paths).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Raakt het echte klembord, dus niet in de gewone run:
+    // cargo test --lib -- --ignored a_finder_copied_file
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore]
+    fn a_finder_copied_file_comes_off_the_clipboard_as_a_path() {
+        let f = std::env::temp_dir().join(format!("taurus clip {}.log", std::process::id()));
+        std::fs::write(&f, "x").unwrap();
+        let f = f.canonicalize().unwrap();
+        let ok = std::process::Command::new("osascript")
+            .args(["-e", &format!("set the clipboard to (POSIX file \"{}\")", f.display())])
+            .status()
+            .unwrap();
+        assert!(ok.success());
+        assert_eq!(clipboard_file_paths(), vec![f.to_string_lossy().into_owned()]);
+        let _ = std::fs::remove_file(&f);
     }
 
     #[cfg(not(windows))]

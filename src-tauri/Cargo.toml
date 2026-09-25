@@ -92,3 +92,10 @@ windows = { version = "0.61", features = [
   "Win32_Networking_WinSock",
 ] }
 
+
+# macOS-only: in Finder gekopieerde bestanden van het klembord lezen
+# (NSPasteboard, public.file-url) voor "Plak object" (#212). Versies zoals tao/wry
+# ze al in de tree hebben, zodat er geen extra versie bijkomt.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
