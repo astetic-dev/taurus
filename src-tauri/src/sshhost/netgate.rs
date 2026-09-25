@@ -99,7 +99,29 @@ pub fn current_networks() -> Vec<NetInfo> {
     out
 }
 
-#[cfg(not(windows))]
+// macOS: het netwerk is de gateway van de standaardroute plus de DHCP-domeinnaam
+// (#220). Zwakker dan het GUID van Windows -- twee netwerken met hetzelfde
+// routeradres en domein zijn hier hetzelfde -- maar dit is een poort tegen
+// ongelukken, geen grens.
+//
+// GEMETEN: het MAC-adres van de gateway was de eerste keus, maar een proces dat
+// een app start ziet de ARP-tabel leeg (`arp -an` geeft niets, `netstat -rn`
+// toont link#16), terwijl dezelfde opdracht vanuit een shell hem wel toont. LAN-
+// verbindingen werken wel. De Wi-Fi-naam (SSID) vraagt locatietoestemming.
+#[cfg(target_os = "macos")]
+pub fn current_networks() -> Vec<NetInfo> {
+    let Some(r) = mac::default_route() else { return Vec::new() };
+    let trusted = read_trusted();
+    let id = mac::network_id(&r.gateway, r.domain.as_deref());
+    let name = match &r.domain {
+        Some(d) => format!("{} · {} ({})", r.port_name, r.gateway, d),
+        None => format!("{} · {}", r.port_name, r.gateway),
+    };
+    let is_trusted = trusted.iter().any(|x| x == &id);
+    vec![NetInfo { id, name, trusted: is_trusted, category: String::new() }]
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 pub fn current_networks() -> Vec<NetInfo> {
     Vec::new()
 }
@@ -138,6 +160,7 @@ pub fn trusted_ipv4() -> Option<std::net::Ipv4Addr> {
 // `trusted_ipv4()` altijd None gaf en de aankondiging op elke machine stilzwijgend
 // achterwege bleef. Geen foutmelding, want "geen vertrouwd netwerk" is een geldige
 // toestand; precies het soort stilte waar je maanden overheen kijkt.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn same_guid(a: &str, b: &str) -> bool {
     let norm = |s: &str| s.trim().trim_start_matches('{').trim_end_matches('}').to_ascii_lowercase();
     let (a, b) = (norm(a), norm(b));
@@ -261,14 +284,107 @@ fn adapter_ipv4s() -> Vec<(String, std::net::Ipv4Addr)> {
     out
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn trusted_ipv4() -> Option<std::net::Ipv4Addr> {
+    if !on_trusted_network() {
+        return None;
+    }
+    let r = mac::default_route()?;
+    mac::run("ipconfig", &["getifaddr", &r.interface])?.trim().parse().ok()
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 pub fn trusted_ipv4() -> Option<std::net::Ipv4Addr> {
     None
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    pub struct Route {
+        pub gateway: String,
+        pub interface: String,
+        pub domain: Option<String>,
+        pub port_name: String,
+    }
+
+    pub fn network_id(gateway: &str, domain: Option<&str>) -> String {
+        match domain {
+            Some(d) => format!("gw:{}/{}", gateway, d.to_ascii_lowercase()),
+            None => format!("gw:{}", gateway),
+        }
+    }
+
+    pub fn run(program: &str, args: &[&str]) -> Option<String> {
+        let o = std::process::Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        o.status.success().then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    }
+
+    pub fn default_route() -> Option<Route> {
+        let route = run("route", &["-n", "get", "default"])?;
+        let field = |k: &str| {
+            route.lines().find_map(|l| l.trim().strip_prefix(k).map(|v| v.trim().to_string()))
+        };
+        let gateway = field("gateway:")?;
+        let interface = field("interface:")?;
+        // Geen DHCP (vast adres) is geen fout: dan telt alleen de gateway.
+        let domain = run("ipconfig", &["getpacket", &interface]).and_then(|t| dhcp_domain(&t));
+        let port_name = run("networksetup", &["-listallhardwareports"])
+            .and_then(|t| port_name_for(&t, &interface))
+            .unwrap_or_else(|| interface.clone());
+        Some(Route { gateway, interface, domain, port_name })
+    }
+
+    // "domain_name (string): home" uit `ipconfig getpacket`.
+    pub fn dhcp_domain(packet: &str) -> Option<String> {
+        packet
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("domain_name (string):"))
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    }
+
+    // "Hardware Port: Wi-Fi\nDevice: en1" -> "Wi-Fi".
+    pub fn port_name_for(listing: &str, device: &str) -> Option<String> {
+        let mut port = None;
+        for l in listing.lines() {
+            if let Some(p) = l.strip_prefix("Hardware Port:") {
+                port = Some(p.trim().to_string());
+            } else if l.strip_prefix("Device:").map(str::trim) == Some(device) {
+                return port;
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_network_id_is_gateway_and_dhcp_domain() {
+        let packet = "siaddr = 192.168.2.254\nserver_identifier (ip): 192.168.2.254\ndomain_name (string): Home\nrouter (ip_mult): {192.168.2.254}\n";
+        let d = mac::dhcp_domain(packet);
+        assert_eq!(d.as_deref(), Some("Home"));
+        assert_eq!(mac::network_id("192.168.2.254", d.as_deref()), "gw:192.168.2.254/home");
+        // Vast adres, geen DHCP: alleen de gateway.
+        assert_eq!(mac::dhcp_domain("siaddr = 0.0.0.0\n"), None);
+        assert_eq!(mac::network_id("10.0.0.1", None), "gw:10.0.0.1");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_hardware_port_is_found_by_device() {
+        let l = "Hardware Port: Ethernet\nDevice: en0\nEthernet Address: a\n\nHardware Port: Wi-Fi\nDevice: en1\n";
+        assert_eq!(mac::port_name_for(l, "en1").as_deref(), Some("Wi-Fi"));
+        assert_eq!(mac::port_name_for(l, "en9"), None);
+    }
 
     // Geen enkel netwerk vertrouwd = niet luisteren. Dit is de default na
     // installatie, en het moet de veilige kant op vallen.

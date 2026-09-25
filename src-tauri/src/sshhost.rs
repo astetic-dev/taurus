@@ -635,13 +635,29 @@ fn sane_size(v: u32, fallback: u16) -> u16 {
     }
 }
 
-// Wat sshd op Windows doet: alles door cmd.exe. Zonder commando is het een shell.
+// Wat sshd doet: op Windows alles door cmd.exe, elders door de login-shell van
+// de gebruiker (#220). Zonder commando is het een shell.
 fn shell_command(cmd: Option<&str>, cwd: Option<&str>) -> CommandBuilder {
-    let mut c = CommandBuilder::new("cmd.exe");
-    if let Some(line) = cmd {
-        c.arg("/C");
-        c.arg(line);
-    }
+    #[cfg(windows)]
+    let mut c = {
+        let mut c = CommandBuilder::new("cmd.exe");
+        if let Some(line) = cmd {
+            c.arg("/C");
+            c.arg(line);
+        }
+        c
+    };
+    #[cfg(not(windows))]
+    let mut c = {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let mut c = CommandBuilder::new(shell);
+        c.arg("-l");
+        if let Some(line) = cmd {
+            c.arg("-c");
+            c.arg(line);
+        }
+        c
+    };
     let home = crate::platform::home_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| ".".into());
@@ -1621,12 +1637,14 @@ mod tests {
     // met -EncodedCommand doorheen.
     #[test]
     fn exec_runs_through_cmd() {
-        let shell = format!("{:?}", shell_command(None, None));
-        assert!(shell.contains("cmd.exe"), "{shell}");
-        assert!(!shell.contains("/C"), "shell mag geen commando meekrijgen: {shell}");
+        // Windows: cmd.exe /C; elders de login-shell met -c (#220).
+        let (shell_bin, flag) = if cfg!(windows) { ("cmd.exe", "/C") } else { ("sh", "-c") };
+        let shell = argv(&shell_command(None, None));
+        assert!(shell.contains(shell_bin), "{shell}");
+        assert!(!shell.split(' ').any(|a| a == flag), "shell mag geen commando meekrijgen: {shell}");
 
-        let exec = format!("{:?}", shell_command(Some("powershell -NoProfile -Enc AAA"), None));
-        assert!(exec.contains("/C"), "{exec}");
+        let exec = argv(&shell_command(Some("powershell -NoProfile -Enc AAA"), None));
+        assert!(exec.split(' ').any(|a| a == flag), "{exec}");
         assert!(exec.contains("powershell"), "{exec}");
     }
 
@@ -1718,7 +1736,8 @@ mod tests {
             None,
             Power::Sandboxed,
         ));
-        assert!(cmd.contains("/C"), "{cmd}");
+        let flag = if cfg!(windows) { "/C" } else { "-c" };
+        assert!(cmd.split(' ').any(|a| a == flag), "{cmd}");
         assert!(cmd.contains("powershell"), "{cmd}");
     }
 }
