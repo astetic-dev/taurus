@@ -2010,6 +2010,9 @@ try { $r = Invoke-WebRequest -Uri https://api.anthropic.com/ -Method Head -Timeo
 // scp zit naast ssh in System32; zelfde voorkeur voor het systeempad, want een
 // Git-for-Windows scp gedraagt zich anders rond Windows-paden.
 fn scp_program() -> String {
+    if cfg!(not(windows)) {
+        return "scp".into();
+    }
     if let Ok(root) = std::env::var("SystemRoot") {
         let p = std::path::PathBuf::from(&root).join("System32\\OpenSSH\\scp.exe");
         if p.is_file() {
@@ -3273,6 +3276,8 @@ fn session_state(path: String, uuid: String, agent: Option<String>) -> SessionSt
 
 // Welk uitvoerbaar bestand hoort bij deze agent? Leeg/"claude" -> claude.exe,
 // "agy" -> agy.exe (de Gemini-agent-CLI), "grok" -> grok.exe (Grok Build).
+// Buiten Windows de kale naam: daar heet de binary gewoon `claude` (#206).
+#[cfg(windows)]
 fn agent_exe(agent: &str) -> &'static str {
     match agent {
         "agy" => "agy.exe",
@@ -3281,11 +3286,21 @@ fn agent_exe(agent: &str) -> &'static str {
     }
 }
 
+#[cfg(not(windows))]
+fn agent_exe(agent: &str) -> &'static str {
+    match agent {
+        "agy" => "agy",
+        "grok" => "grok",
+        _ => "claude",
+    }
+}
+
 // Zoek <base>.exe, dan .cmd, dan .bat in de opgegeven PATH-string (PATHEXT-
 // volgorde: een native exe wint altijd van een shim). Een npm-installatie van
 // Claude Code zet alleen een claude.cmd op PATH (#40); CreateProcess kan een
 // .cmd/.bat niet direct starten, dus die komt terug als cmd.exe + "/c <pad>"-
 // prefix waar de agent-args achteraan komen.
+#[cfg(windows)]
 fn resolve_in_paths(base: &str, paths: &str) -> Option<(String, Vec<String>)> {
     for ext in ["exe", "cmd", "bat"] {
         for p in std::env::split_paths(paths) {
@@ -3297,6 +3312,22 @@ fn resolve_in_paths(base: &str, paths: &str) -> Option<(String, Vec<String>)> {
                 } else {
                     ("cmd.exe".to_string(), vec!["/c".into(), full])
                 });
+            }
+        }
+    }
+    None
+}
+
+// Buiten Windows: het eerste uitvoerbare bestand met die naam in PATH. Een
+// npm-shim is daar gewoon een script met een shebang, dus geen prefix nodig.
+#[cfg(not(windows))]
+fn resolve_in_paths(base: &str, paths: &str) -> Option<(String, Vec<String>)> {
+    use std::os::unix::fs::PermissionsExt;
+    for p in std::env::split_paths(paths) {
+        let cand = p.join(base);
+        if let Ok(m) = std::fs::metadata(&cand) {
+            if m.is_file() && m.permissions().mode() & 0o111 != 0 {
+                return Some((cand.to_string_lossy().into_owned(), Vec::new()));
             }
         }
     }
@@ -5266,6 +5297,9 @@ fn attach_remote_session(
 // ssh.exe uit System32 heeft de voorkeur boven wat er toevallig in PATH staat:
 // een Git-for-Windows of WSL-ssh in PATH gedraagt zich anders rond paden en pty.
 fn ssh_program() -> String {
+    if cfg!(not(windows)) {
+        return "ssh".into();
+    }
     if let Ok(root) = std::env::var("SystemRoot") {
         let p = std::path::PathBuf::from(&root).join("System32\\OpenSSH\\ssh.exe");
         if p.is_file() {
@@ -7771,7 +7805,69 @@ fn ssh_kill_session(app: AppHandle, state: State<AppState>, id: String) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// Een app die uit Finder of het Dock start krijgt het minimale PATH van launchd
+// (/usr/bin:/bin:/usr/sbin:/sbin), niet dat uit het shellprofiel. Dan vindt hij
+// ~/.local/bin/claude of Homebrew niet (#206). Daarom vragen we het PATH één keer
+// aan de login-shell van de gebruiker en zetten het vóór het geërfde PATH, zodat
+// elke spawn (agents, git, ssh) het ziet. `-i` erbij, want veel mensen zetten
+// PATH in .zshrc; de markers scheiden het van wat een profiel zelf print. Met
+// plafond: een profiel dat blijft hangen mag de start niet tegenhouden.
+#[cfg(not(windows))]
+fn adopt_login_shell_path() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let child = std::process::Command::new(&shell)
+        .args(["-l", "-i", "-c", "printf '__TAURUS_PATH__%s__END__' \"$PATH\""])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else { return };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+        }
+    }
+    let mut out = String::new();
+    if let Some(mut so) = child.stdout.take() {
+        let _ = so.read_to_string(&mut out);
+    }
+    let Some(login) = out
+        .split("__TAURUS_PATH__")
+        .nth(1)
+        .and_then(|r| r.split("__END__").next())
+    else {
+        return;
+    };
+    let current = std::env::var("PATH").unwrap_or_default();
+    std::env::set_var("PATH", merge_path(login, &current));
+}
+
+// Login-PATH eerst (volgorde van het profiel), dan wat de app al had en daar nog
+// niet in stond. Lege en dubbele onderdelen vallen weg.
+#[cfg(not(windows))]
+fn merge_path(login: &str, current: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    login
+        .split(':')
+        .chain(current.split(':'))
+        .filter(|p| !p.is_empty() && seen.insert(*p))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 pub fn run() {
+    // Vóór alles wat threads start: set_var is niet thread-veilig.
+    #[cfg(not(windows))]
+    adopt_login_shell_path();
     // Audio-thread voor STT: cpal-streams zijn !Send, dus één eigen thread
     // bezit de stream; commands praten er via een kanaal mee.
     let (stt_tx, stt_rx) = std::sync::mpsc::channel();
@@ -9309,7 +9405,7 @@ mod tests {
     #[test]
     fn wrap_remote_builds_the_ssh_argument_list() {
         let (prog, args, _) = wrap_remote(&test_host(), "/home/a/p", "claude".into(), vec![], MuxTarget::Existing("")).unwrap();
-        assert!(prog.to_lowercase().ends_with("ssh.exe"), "onverwacht programma: {}", prog);
+        assert!(prog.to_lowercase().ends_with(if cfg!(windows) { "ssh.exe" } else { "ssh" }), "onverwacht programma: {}", prog);
         assert_eq!(args[0], "-t", "zonder pty tekent de agent-TUI niet");
         // Standaardpoort hoort niet als -p mee.
         assert!(!args.contains(&"-p".to_string()));
@@ -9912,11 +10008,12 @@ mod tests {
 
     #[test]
     fn grok_has_his_own_binary_locally_and_remotely() {
-        assert_eq!(agent_exe("grok"), "grok.exe");
+        assert_eq!(agent_exe("grok"), if cfg!(windows) { "grok.exe" } else { "grok" });
         assert_eq!(remote_agent_program("grok", "linux"), "grok");
         assert_eq!(remote_agent_program("grok", "windows"), "grok.exe");
     }
 
+    #[cfg(windows)]
     #[test]
     fn resolve_in_paths_prefers_exe_and_wraps_shims() {
         let dir = std::env::temp_dir().join(format!("taurus-test-resolve-{}", std::process::id()));
@@ -9938,6 +10035,37 @@ mod tests {
 
         // Niets gevonden -> None (resolve_program valt dan terug op de kale naam).
         assert!(resolve_in_paths("bestaatniet", &paths).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn login_path_goes_first_without_duplicates() {
+        assert_eq!(
+            merge_path("/Users/a/.local/bin:/usr/bin:", "/usr/bin:/bin:/usr/bin"),
+            "/Users/a/.local/bin:/usr/bin:/bin"
+        );
+        assert_eq!(merge_path("", "/usr/bin:/bin"), "/usr/bin:/bin");
+    }
+
+    // Buiten Windows telt alleen een UITVOERBAAR bestand met de kale naam (#206).
+    #[cfg(not(windows))]
+    #[test]
+    fn resolve_in_paths_finds_an_executable_by_its_bare_name() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("taurus-test-resolve-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths = std::env::join_paths([dir.join("leeg"), dir.clone()]).unwrap();
+        let paths = paths.to_string_lossy().into_owned();
+        let f = dir.join("fakeagent");
+        std::fs::write(&f, "#!/bin/sh\n").unwrap();
+        // Niet uitvoerbaar: telt niet.
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(resolve_in_paths("fakeagent", &paths).is_none());
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (prog, pre) = resolve_in_paths("fakeagent", &paths).unwrap();
+        assert_eq!(prog, f.to_string_lossy());
+        assert!(pre.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
