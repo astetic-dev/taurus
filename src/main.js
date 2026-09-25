@@ -3,15 +3,15 @@ const { invoke } = window.__TAURI__.core;
 // buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
 // was twee avonden lang de onbekende. Zie je hier een ander nummer dan
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
-const UI_BUILD = "ui-5";
+const UI_BUILD = "ui-6";
 const { listen } = window.__TAURI__.event;
 
 /* ============ i18n ============ */
 const I18N = {
   nl: {
-    brand_sub: "Agent Launcher", projects: "Agents",
-    foot_projects: "✎ Agents", foot_settings: "⚙ Instellingen", foot_reload: "⟳ Herlaad",
-    empty_pick: "Kies of maak links een agent om je werkproces te starten.",
+    brand_sub: "Agent Launcher", projects: "Specialisten",
+    foot_projects: "✎ Specialisten", foot_settings: "⚙ Instellingen", foot_reload: "⟳ Herlaad",
+    empty_pick: "Kies of maak links een specialist om je werkproces te starten.",
     empty_oneoff: "…of blader hieronder naar een eenmalige agent.",
     browse_folder: "📁 Blader naar een map…",
     no_claude_md: "ℹ Geen CLAUDE.md in deze map — agent start zonder projectinstructies.",
@@ -37,9 +37,9 @@ const I18N = {
     mode_bypass: "Geen enkele controle (eenmalig te aanvaarden, beleid kan het blokkeren)",
     mode_default: "Standaard",
     mode_sandbox: "Sandbox (beperkte rechten)",
-    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
+    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity", agent_grok: "Grok Build",
     launch_model: "Model", model_ph: "standaard",
-    model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exact model-ID mag ook.",
+    model_hint: "Leeg = de standaard van de agent. Een alias volgt vanzelf het nieuwste model; een exacte versie mag ook — die staan in models.json in de configmap.",
     model_fable: "nieuwste Fable", model_opus: "nieuwste Opus", model_sonnet: "nieuwste Sonnet",
     model_haiku: "nieuwste Haiku", model_opusplan: "Opus in plan-modus, daarna Sonnet",
     launch_host: "Draait op", host_local: "Deze computer",
@@ -63,11 +63,11 @@ const I18N = {
     agents_none: "Geen agent aan het werk — niets om mee te verbinden. Start er een met ＋ Nieuwe agent.",
     agents_leftovers: "{n} lege sessie(s) die Taurus liet staan",
     agents_clean: "Opruimen",
-    agent_local: "in Taurus daar",
+    agent_local: "in de Taurus daar",
     agent_local_hint: "Deze agent draait in de Taurus op die machine. Zichtbaar, maar er is geen sessie-id om mee te kijken.",
     joined_help: "Je zit in de sessie van {who}. Wat je typt komt daar aan — zolang er niets gebeurt blijft het scherm zoals het is.",
     joined_agent: "Je kijkt mee met een agent op {who}. Wat je typt komt daar aan — zolang er niets gebeurt blijft het scherm zoals het is.",
-    agent_peer_old: "Taurus daar is te oud",
+    agent_peer_old: "De Taurus daar is te oud",
     agent_peer_old_hint: "Op die machine draait Taurus {v}; meekijken met een agent kan vanaf 0.5.6. Werk hem daar bij, dan verschijnt de knop vanzelf.",
     session_attach: "Aanhaken",
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
@@ -87,7 +87,7 @@ const I18N = {
     persist_silent: "Stil hervatten wat openstond",
     persist_clean: "Schoon beginnen",
     restore_title: "Vorige sessies openen?",
-    restore_lead: "Aangevinkt is wat openstond toen Taurus sloot. Daaronder staat wat er eerder is geweest — die blijft bewaard, ook als je hem nu niet opent.",
+    restore_lead: "Aangevinkt is wat openstond toen de Taurus sloot. Daaronder staat wat er eerder is geweest — die blijft bewaard, ook als je hem nu niet opent.",
     restore_none: "Niets openen", restore_go: "Openen",
     restore_more: "De {read} nieuwste van {total} gesprekken die Claude nog heeft.",
     resume_no_host: "machine bestaat niet meer",
@@ -103,7 +103,7 @@ const I18N = {
     help_withdraw: "Intrekken",
     help_answered_toast: "Er is iemand meegekomen in je sessie.",
     ctx_help: "✋ Vraag om hulp bij deze agent",
-    found_firewall: "Taurus heeft nog geen eigen firewall-uitzondering. Zonder die regels ziet niemand je, en kan niemand aankloppen.",
+    found_firewall: "De Taurus heeft nog geen eigen firewall-uitzondering. Zonder die regels ziet niemand je, en kan niemand aankloppen.",
     found_firewall_fix: "Firewall-regels aanmaken (vraagt om beheerdersrechten)",
     found_firewall_blocked: "Windows blokkeert taurus.exe met {n} eigen regel(s) - waarschijnlijk van een weggeklikte Defender-vraag. Zo'n blokkade wint van elke uitzondering, dus die moet eerst weg.",
     found_firewall_unblock: "Blokkade weghalen en regels aanmaken (vraagt om beheerdersrechten)",
@@ -131,7 +131,7 @@ const I18N = {
     attach_refresh: "↻ Opnieuw ophalen",
     attach_loading: "Sessies ophalen…",
     attach_no_hosts: "Nog geen machines. Voeg er een toe met 🖥.",
-    attach_not_restartable: "Aangehaakte sessie: Taurus heeft dit commando niet gebouwd en kan het niet herstarten of verplaatsen.",
+    attach_not_restartable: "Aangehaakte sessie: de Taurus heeft dit commando niet gebouwd en kan het niet herstarten of verplaatsen.",
     dropper_remote_hint: "De agent draait elders: bestanden gaan met scp naar de input-map op die machine.",
     dropper_sending: "Bestand overzetten naar de host…",
     dropper_sent: "Op de host gezet",
@@ -148,14 +148,14 @@ const I18N = {
     row_expand: "Openklappen", row_collapse: "Dichtklappen",
     agent_command: "Eigen commando…",
     ctx_move: "⇄ Synchroniseer naar andere machine…",
-    move_title: "Agent synchroniseren naar een andere machine", move_target: "Doelmachine",
+    move_title: "Specialist synchroniseren naar een andere machine", move_target: "Doelmachine",
     move_target_path: "Werkmap op de doelmachine", move_start: "Synchroniseren",
     move_surveying: "Werkmap doormeten…", move_core: "Projectbestanden (gaan altijd mee)",
     move_files: "bestanden", move_total: "Wordt overgezet", move_kind_work: "werkmap",
     move_kind_bulk: "opnieuw op te bouwen", move_copying: "Synchroniseren…",
     move_progress: "Synchroniseren — {name} ({n}/{total}, {pct}%)",
-    move_done: "Agent gesynchroniseerd", move_need_path: "Vul een werkmap op de doelmachine in.",
-    move_no_path: "Deze agent heeft geen werkmap.", move_no_target: "Voeg eerst een machine toe.",
+    move_done: "Specialist gesynchroniseerd", move_need_path: "Vul een werkmap op de doelmachine in.",
+    move_no_path: "Deze specialist heeft geen werkmap.", move_no_target: "Voeg eerst een machine toe.",
     move_target_newer: "Daar staat al een map, en die is RECENTER bijgewerkt ({when}). Wat je aanvinkt vervangt wat daar staat. Weet je het zeker?",
     move_target_exists_info: "Daar staat al een map (laatst gewijzigd {when}). Wat je aanvinkt vervangt wat daar staat.",
     move_host_to_host_todo: "Van de ene machine naar de andere kan nog niet — haal hem eerst hierheen.",
@@ -168,48 +168,48 @@ const I18N = {
     c_trimsel: "Selectie opschonen bij kopiëren",
     c_links: "Klikbare links", c_links_new: "(nieuwe sessies)", c_search: "Zoeken in scrollback — Ctrl+Shift+F",
     c_tabs: "Tab-sneltoetsen (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude-status op de tab (✶ Orbiting…)",
-    c_groups: "Tabs uit dezelfde map bundelen vanaf", c_groups_unit: "tabs",
+    c_groups: "Tabs uit dezelfde map bundelen vanaf", c_groups_unit: "tabs in die map",
     c_recap: "Recap tonen bij hover over een tab",
     grp_tab_members: "{n} sessies", grp_waiting: "wacht", grp_working: "bezig",
     grp_adhoc: "Losse sessies",
     recap_none: "(nog niets van deze agent te zien)", recap_exited: "afgesloten",
     c_mouse: "Agent mag de muis gebruiken (anders selecteert/scrolt de muis lokaal)",
     cancel: "Annuleer", save: "Opslaan",
-    manage_projects: "Processen beheren…", add_agent: "＋ Agent toevoegen",
+    manage_projects: "Processen beheren…", add_agent: "＋ Specialist toevoegen",
     // Nieuwe agent (#157) en bewerken/verwijderen (#158)
-    new_agent_title: "Nieuwe agent", new_agent_create: "Maak",
+    new_agent_title: "Nieuwe specialist", new_agent_create: "Maak",
     // De zeven ICM-rollen (#159)
-    na_kind: "Wat voor agent?", na_process: "Nieuw proces",
+    na_kind: "Wat voor specialist?", na_process: "Nieuw proces",
     na_kind_plain: "Map die je al hebt",
     na_kind_plain_sub: "een werkproces", na_kind_free: "Ander ICM-adres",
     group_processes: "Processen", grp_processes: "Processen",
     fold_hide: "Inklappen", fold_show: "Uitklappen",
     build_of: "Build van {when}",
     proc_find: "Zoek in processen", proc_filter_ph: "Filter op naam of pad…",
-    na_kind_free_sub: "specialist, geen rol",
+    na_kind_free_sub: "zonder rol",
     na_where: "Waar werkt hij?", na_standing: "Staand — eigen werkplek",
     na_embedded_in: "In: {label}",
     na_subject: "Waar gaat dit over? (één woord)", na_subject_ph: "bijv. meetings — leeg mag",
     na_name: "Naam", na_name_ph: "leeg = de naam uit de bron",
     na_psource: "Bron (optioneel)", na_psource_ph: "GitHub-adres, of leeg laten",
-    na_psource_hint: "Leeg = je wijst hieronder een map aan die er al is. Vul je een GitHub-adres in, dan haalt Taurus het werkproces op en houdt hij de versie bij.",
+    na_psource_hint: "Leeg = je wijst hieronder een map aan die er al is. Vul je een GitHub-adres in, dan haalt de Taurus het werkproces op en houdt hij de versie bij.",
     na_pfound: "{name} · {branch} @ {sha} · {kb} KB — komt in de werkmap hieronder",
     na_pwarn: "⚠ Geen {files} in de wortel: dit lijkt geen ICM-werkproces. Je kunt het gewoon ophalen — dit is een waarschuwing, geen blokkade.",
     na_pdeploying: "Werkproces ophalen…",
     na_pwhere: "Waar draait dit?", na_pstanding: "Op zichzelf",
     na_pinside: "Onderdeel van {label}",
-    na_name_hint: "Zo heet deze agent — op de knop, en in de CLAUDE.md die Taurus schrijft. Leeg = de naam die de bron zelf meegeeft.",
+    na_name_hint: "Zo heet deze specialist — op de knop, en in de CLAUDE.md die Taurus schrijft. Leeg = de naam die de bron zelf meegeeft.",
     na_source: "Bron", na_source_ph: "https://github.com/eigenaar/repo",
     na_read: "Lezen", na_reading: "Ophalen en lezen…",
     na_dest: "Komt in", na_deploy: "Uitrollen",
     na_dest_hint: "Voorstel — pas het aan of kies met 📁 een andere plek.",
     na_dest_pick: "Kies met 📁 waar deze mag komen.",
     na_deploying: "Uitrollen…",
-    na_shape_skill: "skill", na_shape_workspace: "werkmap",
+    na_shape_skill: "skill", na_shape_workspace: "werkmap", na_shape_plugin: "plugin",
     na_p_shape: "vorm", na_p_version: "versie", na_p_claude: "bevat",
     na_p_size: "grootte", na_p_role: "vak",
     na_claude_kept: "eigen CLAUDE.md — die blijft ongemoeid",
-    na_claude_gen: "geen CLAUDE.md — Taurus schrijft er een",
+    na_claude_gen: "geen CLAUDE.md — de Taurus schrijft er een",
     na_need_source: "✗ Vul een GitHub-adres in.",
     na_need_read: "✗ Lees de bron eerst.",
     na_wrote: "✓ {n} bestanden geschreven in {dest}",
@@ -219,13 +219,13 @@ const I18N = {
     up_stays_v: "alles wat hier al gemaakt is",
     up_go: "Bijwerken", up_skip: "Laat maar", up_working: "Bijwerken…",
     up_done: "✓ {name} bijgewerkt naar {sha}",
-    up_dirty: "✗ Je hebt in deze map zelf iets gewijzigd. Bijwerken zou dat overschrijven, dus dat doet Taurus niet.",
-    up_diverged: "✗ Deze map loopt uit de pas met de bron. Taurus werkt alleen bij als het een simpele vooruitspoeling is.",
+    up_dirty: "✗ Je hebt in deze map zelf iets gewijzigd. Bijwerken zou dat overschrijven, dus dat doet de Taurus niet.",
+    up_diverged: "✗ Deze map loopt uit de pas met de bron. De Taurus werkt alleen bij als het een simpele vooruitspoeling is.",
     up_avail: "nieuwe versie beschikbaar",
     up_found: "↑ {name}: er is een nieuwere versie van de bron — klik het pijltje op de kaart",
     // Instellingen -> Agents (#166)
-    tab_agents: "Agents", grp_roles: "Rollen",
-    roles_hint: "De rol is van Taurus, de invulling van de repo. Wissel de bron en je houdt dezelfde veldmap, dus je geschiedenis blijft op één plek.",
+    tab_agents: "Specialisten", grp_roles: "Rollen",
+    roles_hint: "De rol is van de Taurus, de invulling van de repo. Wissel de bron en je houdt dezelfde veldmap, dus je geschiedenis blijft op één plek.",
     role_use: "gebruik", role_as_skill: "ook als skill",
     role_src_ph: "GitHub-adres of een map op deze computer",
     role_no_source: "geen bron — daarom niet aan te vinken",
@@ -266,7 +266,11 @@ const I18N = {
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
     ctx_restart: "↻ Herstart (resume gesprek)", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
-    preview_none: "(geen .html/.md in de werkmap)", preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten", preview_toobig: "Bestand te groot om te previewen.",
+    preview_none: "(geen .html/.md in de werkmap)",
+    preview_group_session: "Sinds deze tab open is", preview_group_today: "Eerder vandaag", preview_group_older: "Ouder",
+    preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten", preview_toobig: "Bestand te groot om te previewen.",
+    submit_saved: "{n} item(s) klaargezet: {name}",
+    submit_remote: "Een selectie kan nog niet naar een sessie op een andere machine",
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
     ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
     restarting: "herstarten — resume", restart_failed: "herstart mislukt",
@@ -292,7 +296,7 @@ const I18N = {
     help_search: "Zoeken in de scrollback met Ctrl+Shift+F. Geldt voor nieuwe sessies.",
     help_tabshortcuts: "Sneltoetsen voor tabs: Ctrl+Tab wisselt, Ctrl+1..9 springt naar een tab, Ctrl+T opent een nieuwe, Ctrl+W sluit de huidige.",
     help_tabstatus: "Toont Claude's huidige bezigheid live op het tabblad.\nVoorbeeld: '✶ Orbiting…' terwijl Claude werkt; een stille groene stip = klaar/wachtend.",
-    help_groups: "Vanaf dit aantal tabs worden sessies uit dezelfde map onder een tab gebundeld.\nHover (of klik) op zo'n tab om de sessies eronder uit te klappen.\nDe gebundelde tab flitst als een van zijn sessies op je wacht, dus je mist niets.",
+    help_groups: "Heeft een map dit aantal tabs, dan schuiven ze samen onder een tab. Mappen met minder houden hun eigen tabs.\nHover (of klik) op zo'n tab om de sessies eronder uit te klappen.\nDe gebundelde tab flitst als een van zijn sessies op je wacht, dus je mist niets.\n0 = nooit bundelen.",
     help_recap: "Toont bij hover het laatste wat die agent zei, ook van tabs die niet in beeld staan.\nGelezen uit het terminalvenster van die sessie zelf; er wordt niets naar de agent gestuurd.",
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
     skin_default: "Standaard (donker)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
@@ -309,7 +313,7 @@ const I18N = {
     dropper_no_session: "Geen actieve terminal om het pad in te plaatsen",
     dropper_save_failed: "✗ Opslaan in input-map mislukt:",
     dropper_paste_failed: "✗ Plakken van object mislukt:",
-    reload: "Herlaad", new_project: "Nieuwe agent", add_file: "Bestand toevoegen",
+    reload: "Herlaad", new_project: "Nieuwe specialist", add_file: "Bestand toevoegen",
     edit: "Bewerken", delete: "Verwijderen", confirm_delete: "Verwijderen?", yes: "Ja", no: "Nee",
     grp_voice: "Spraak", tts_enable: "Spreek uit wanneer een agent klaar is",
     tts_voice: "Stem", tts_rate: "Spreeksnelheid", tts_test: "Test", rate_slow: "langzaam", rate_fast: "snel",
@@ -364,9 +368,9 @@ const I18N = {
     join_tab: "Meekijken",
   },
   en: {
-    brand_sub: "Agent Launcher", projects: "Agents",
-    foot_projects: "✎ Agents", foot_settings: "⚙ Settings", foot_reload: "⟳ Reload",
-    empty_pick: "Pick or create an agent on the left to start your work process.",
+    brand_sub: "Agent Launcher", projects: "Specialists",
+    foot_projects: "✎ Specialists", foot_settings: "⚙ Settings", foot_reload: "⟳ Reload",
+    empty_pick: "Pick or create a specialist on the left to start your work process.",
     empty_oneoff: "…or browse for a one-time agent below.",
     browse_folder: "📁 Browse for a folder…",
     no_claude_md: "ℹ No CLAUDE.md in this folder — the agent starts without project instructions.",
@@ -390,9 +394,9 @@ const I18N = {
     mode_bypass: "No checks at all (accept once; policy can block it)",
     mode_default: "Default",
     mode_sandbox: "Sandbox (restricted)",
-    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity",
+    launch_agent: "Agent", agent_claude: "Claude Code", agent_agy: "Antigravity", agent_grok: "Grok Build",
     launch_model: "Model", model_ph: "default",
-    model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact model ID works too.",
+    model_hint: "Empty = the agent's default. An alias always follows the newest model; an exact version works too — those live in models.json in the config folder.",
     model_fable: "newest Fable", model_opus: "newest Opus", model_sonnet: "newest Sonnet",
     model_haiku: "newest Haiku", model_opusplan: "Opus in plan mode, Sonnet after",
     launch_host: "Runs on", host_local: "This computer",
@@ -414,9 +418,9 @@ const I18N = {
     machine_agents: "⇱ agents",
     machine_agents_hint: "Show which agents are running on this machine.",
     agents_none: "No agent at work — nothing to connect to. Start one with ＋ New agent.",
-    agents_leftovers: "{n} empty session(s) Taurus left behind",
+    agents_leftovers: "{n} empty session(s) the Taurus left behind",
     agents_clean: "Clean up",
-    agent_local: "in Taurus there",
+    agent_local: "in the Taurus there",
     agent_local_hint: "This agent runs in the Taurus on that machine. Visible, but there is no session id to read along with.",
     joined_help: "You are in {who}'s session. What you type arrives there — while nothing happens, the screen stays as it is.",
     joined_agent: "You are reading along with an agent on {who}. What you type arrives there — while nothing happens, the screen stays as it is.",
@@ -440,7 +444,7 @@ const I18N = {
     persist_silent: "Silently resume what was open",
     persist_clean: "Start clean",
     restore_title: "Reopen previous sessions?",
-    restore_lead: "Ticked is what was open when Taurus closed. Below that is what came before — it stays in the history whether you open it now or not.",
+    restore_lead: "Ticked is what was open when the Taurus closed. Below that is what came before — it stays in the history whether you open it now or not.",
     restore_none: "Open nothing", restore_go: "Open",
     restore_more: "The {read} most recent of {total} conversations Claude still has.",
     resume_no_host: "machine no longer exists",
@@ -456,7 +460,7 @@ const I18N = {
     help_withdraw: "Withdraw",
     help_answered_toast: "Someone has joined your session.",
     ctx_help: "✋ Ask for help with this agent",
-    found_firewall: "Taurus has no firewall exception of its own yet. Without those rules nobody sees you, and nobody can knock.",
+    found_firewall: "The Taurus has no firewall exception of its own yet. Without those rules nobody sees you, and nobody can knock.",
     found_firewall_fix: "Create firewall rules (asks for administrator rights)",
     found_firewall_blocked: "Windows blocks taurus.exe with {n} rule(s) of its own - most likely from a dismissed Defender prompt. A block beats any exception, so that has to go first.",
     found_firewall_unblock: "Remove the block and create the rules (asks for administrator rights)",
@@ -484,7 +488,7 @@ const I18N = {
     attach_refresh: "↻ Refresh",
     attach_loading: "Fetching sessions…",
     attach_no_hosts: "No machines yet. Add one with 🖥.",
-    attach_not_restartable: "Attached session: Taurus did not build this command and cannot restart or move it.",
+    attach_not_restartable: "Attached session: the Taurus did not build this command and cannot restart or move it.",
     dropper_remote_hint: "The agent runs elsewhere: files go to that machine's input folder over scp.",
     dropper_sending: "Copying file to the host…",
     dropper_sent: "Placed on the host",
@@ -501,14 +505,14 @@ const I18N = {
     row_expand: "Expand", row_collapse: "Collapse",
     agent_command: "Own command…",
     ctx_move: "⇄ Synchronize to another machine…",
-    move_title: "Synchronize agent to another machine", move_target: "Target machine",
+    move_title: "Synchronize specialist to another machine", move_target: "Target machine",
     move_target_path: "Working directory on the target machine", move_start: "Synchronize",
     move_surveying: "Measuring working directory…", move_core: "Project files (always included)",
     move_files: "files", move_total: "Will be transferred", move_kind_work: "work folder",
     move_kind_bulk: "rebuildable", move_copying: "Synchronizing…",
     move_progress: "Synchronizing — {name} ({n}/{total}, {pct}%)",
-    move_done: "Agent synchronized", move_need_path: "Enter a working directory on the target machine.",
-    move_no_path: "This agent has no working directory.", move_no_target: "Add a machine first.",
+    move_done: "Specialist synchronized", move_need_path: "Enter a working directory on the target machine.",
+    move_no_path: "This specialist has no working directory.", move_no_target: "Add a machine first.",
     move_target_newer: "A folder is already there, and it was changed MORE RECENTLY ({when}). What you tick replaces what is there. Are you sure?",
     move_target_exists_info: "A folder is already there (last changed {when}). What you tick replaces what is there.",
     move_host_to_host_todo: "Machine to machine is not supported yet — bring it here first.",
@@ -521,48 +525,48 @@ const I18N = {
     c_trimsel: "Tidy up a copied selection",
     c_links: "Clickable links", c_links_new: "(new sessions)", c_search: "Search scrollback — Ctrl+Shift+F",
     c_tabs: "Tab shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W)", c_status: "Live Claude status on the tab (✶ Orbiting…)",
-    c_groups: "Group tabs from the same folder from", c_groups_unit: "tabs",
+    c_groups: "Group tabs from the same folder from", c_groups_unit: "tabs in that folder",
     c_recap: "Show a recap when hovering a tab",
     grp_tab_members: "{n} sessions", grp_waiting: "waiting", grp_working: "working",
     grp_adhoc: "Ad-hoc sessions",
     recap_none: "(nothing from this agent yet)", recap_exited: "exited",
     c_mouse: "Let the agent use the mouse (otherwise the mouse selects/scrolls locally)",
     cancel: "Cancel", save: "Save",
-    manage_projects: "Manage processes…", add_agent: "＋ Add agent",
+    manage_projects: "Manage processes…", add_agent: "＋ Add specialist",
     // New agent (#157) and edit/delete (#158)
-    new_agent_title: "New agent", new_agent_create: "Create",
+    new_agent_title: "New specialist", new_agent_create: "Create",
     // The seven ICM roles (#159)
-    na_kind: "What kind of agent?", na_process: "New process",
+    na_kind: "What kind of specialist?", na_process: "New process",
     na_kind_plain: "A folder you have",
     na_kind_plain_sub: "a work process", na_kind_free: "Another ICM address",
     group_processes: "Processes", grp_processes: "Processes",
     fold_hide: "Collapse", fold_show: "Expand",
     build_of: "Built {when}",
     proc_find: "Find a process", proc_filter_ph: "Filter by name or path…",
-    na_kind_free_sub: "specialist, no role",
+    na_kind_free_sub: "no role",
     na_where: "Where does it work?", na_standing: "Standing — its own workspace",
     na_embedded_in: "In: {label}",
     na_subject: "What is this about? (one word)", na_subject_ph: "e.g. meetings — may be empty",
     na_name: "Name", na_name_ph: "empty = the name from the source",
     na_psource: "Source (optional)", na_psource_ph: "GitHub address, or leave empty",
-    na_psource_hint: "Empty = you point at a folder that already exists below. Give a GitHub address and Taurus fetches the work process and watches its version.",
+    na_psource_hint: "Empty = you point at a folder that already exists below. Give a GitHub address and the Taurus fetches the work process and watches its version.",
     na_pfound: "{name} · {branch} @ {sha} · {kb} KB — lands in the working folder below",
     na_pwarn: "⚠ No {files} in the root: this does not look like an ICM work process. You can still fetch it — this is a warning, not a block.",
     na_pdeploying: "Fetching the work process…",
     na_pwhere: "Where does it run?", na_pstanding: "On its own",
     na_pinside: "Part of {label}",
-    na_name_hint: "What this agent is called — on the button, and in the CLAUDE.md Taurus writes. Empty = the name the source brings itself.",
+    na_name_hint: "What this specialist is called — on the button, and in the CLAUDE.md the Taurus writes. Empty = the name the source brings itself.",
     na_source: "Source", na_source_ph: "https://github.com/owner/repo",
     na_read: "Read", na_reading: "Fetching and reading…",
     na_dest: "Goes in", na_deploy: "Deploy",
     na_dest_hint: "A proposal — edit it, or pick another place with 📁.",
     na_dest_pick: "Pick where this may go with 📁.",
     na_deploying: "Deploying…",
-    na_shape_skill: "skill", na_shape_workspace: "workspace",
+    na_shape_skill: "skill", na_shape_workspace: "workspace", na_shape_plugin: "plugin",
     na_p_shape: "shape", na_p_version: "version", na_p_claude: "contains",
     na_p_size: "size", na_p_role: "slot",
     na_claude_kept: "its own CLAUDE.md — left untouched",
-    na_claude_gen: "no CLAUDE.md — Taurus writes one",
+    na_claude_gen: "no CLAUDE.md — the Taurus writes one",
     na_need_source: "✗ Fill in a GitHub address.",
     na_need_read: "✗ Read the source first.",
     na_wrote: "✓ {n} files written in {dest}",
@@ -572,13 +576,13 @@ const I18N = {
     up_stays_v: "everything already made here",
     up_go: "Update", up_skip: "Not now", up_working: "Updating…",
     up_done: "✓ {name} updated to {sha}",
-    up_dirty: "✗ You changed something in this folder yourself. Updating would overwrite it, so Taurus does not.",
-    up_diverged: "✗ This folder has diverged from its source. Taurus only updates when it is a plain fast-forward.",
+    up_dirty: "✗ You changed something in this folder yourself. Updating would overwrite it, so the Taurus does not.",
+    up_diverged: "✗ This folder has diverged from its source. The Taurus only updates when it is a plain fast-forward.",
     up_avail: "newer version available",
     up_found: "↑ {name}: the source has a newer version — click the arrow on the card",
     // Settings -> Agents (#166)
-    tab_agents: "Agents", grp_roles: "Roles",
-    roles_hint: "The role belongs to Taurus, the implementation to the repository. Swap the source and you keep the same field folder, so your history stays in one place.",
+    tab_agents: "Specialists", grp_roles: "Roles",
+    roles_hint: "The role belongs to the Taurus, the implementation to the repository. Swap the source and you keep the same field folder, so your history stays in one place.",
     role_use: "use", role_as_skill: "also as a skill",
     role_src_ph: "GitHub address or a folder on this computer",
     role_no_source: "no source — so it cannot be ticked",
@@ -619,7 +623,11 @@ const I18N = {
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
     ctx_restart: "↻ Restart (resume conversation)", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
-    preview_none: "(no .html/.md in the working folder)", preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview", preview_toobig: "File too large to preview.",
+    preview_none: "(no .html/.md in the working folder)",
+    preview_group_session: "Since this tab opened", preview_group_today: "Earlier today", preview_group_older: "Older",
+    preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview", preview_toobig: "File too large to preview.",
+    submit_saved: "{n} item(s) ready: {name}",
+    submit_remote: "A selection cannot go to a session on another machine yet",
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
     ended: "[session ended — right-click tab to restart, or close]",
     restarting: "restarting — resume", restart_failed: "restart failed",
@@ -645,7 +653,7 @@ const I18N = {
     help_search: "Search the scrollback with Ctrl+Shift+F. Applies to new sessions.",
     help_tabshortcuts: "Tab shortcuts: Ctrl+Tab switches, Ctrl+1..9 jumps to a tab, Ctrl+T opens a new one, Ctrl+W closes the current.",
     help_tabstatus: "Shows Claude's current activity live on the tab.\nExample: '✶ Orbiting…' while Claude works; a steady green dot = done/waiting.",
-    help_groups: "From this many tabs, sessions from the same folder collapse into one tab.\nHover (or click) such a tab to expand its sessions below it.\nThe grouped tab flashes when one of its sessions is waiting for you, so nothing is missed.",
+    help_groups: "Once one folder holds this many tabs, they collapse into a single tab. Folders with fewer keep their own tabs.\nHover (or click) such a tab to expand its sessions below it.\nThe grouped tab flashes when one of its sessions is waiting for you, so nothing is missed.\n0 = never group.",
     help_recap: "On hover, shows the last thing that agent said — including tabs that are not on screen.\nRead from that session's own terminal view; nothing is sent to the agent.",
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
     skin_default: "Default (dark)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
@@ -662,7 +670,7 @@ const I18N = {
     dropper_no_session: "No active terminal to insert the path into",
     dropper_save_failed: "✗ Could not save into the input folder:",
     dropper_paste_failed: "✗ Could not paste object:",
-    reload: "Reload", new_project: "New agent", add_file: "Add file",
+    reload: "Reload", new_project: "New specialist", add_file: "Add file",
     edit: "Edit", delete: "Delete", confirm_delete: "Delete?", yes: "Yes", no: "No",
     grp_voice: "Voice", tts_enable: "Speak when an agent is ready",
     tts_voice: "Voice", tts_rate: "Speaking rate", tts_test: "Test", rate_slow: "slow", rate_fast: "fast",
@@ -885,14 +893,18 @@ function wireGarble() {
 
 /* ============ agents + modellen ============ */
 // Welke agent-CLIs Taurus kan starten. De losse gemini-CLI is end-of-life en
-// staat hier bewust niet bij; "agy" is de ondersteunde Gemini-agent.
-const AGENTS = ["claude", "agy"];
+// staat hier bewust niet bij; "agy" is de ondersteunde Gemini-agent, "grok" is
+// Grok Build (de TUI van xAI, `grok.exe`).
+const AGENTS = ["claude", "agy", "grok"];
 // Een vastgepinde modellijst veroudert bij elke modelrelease (#92), dus pinnen
-// we niets meer: claude krijgt ALIASSEN, die de CLI zelf naar het nieuwste model
-// in die lijn vertaalt, en agy's lijst vragen we op bij de CLI (`agy models`).
-// Zo verschijnt een nieuw model zonder dat Taurus mee hoeft te updaten.
+// we niets in de CODE: claude krijgt ALIASSEN, die de CLI zelf naar het nieuwste
+// model in die lijn vertaalt, en de lijst van agy en grok vragen we op bij de CLI
+// (`agy models`, `grok models`). Zo verschijnt een nieuw model zonder dat Taurus
+// mee hoeft te updaten.
 // `claude --model` accepteert zo'n alias of een exact model-ID; vrije tekst
-// blijft toegestaan, dus een pin op een specifieke versie kan nog steeds.
+// blijft toegestaan, dus een pin op een specifieke versie kan nog steeds. Dat
+// was alleen niet te ZIEN -- vandaar models.json in de configmap, waar exacte
+// versies in staan die niet uit een CLI te halen zijn (zie modelPins hieronder).
 const CLAUDE_ALIASES = [
   { value: "fable", key: "model_fable" },
   { value: "opus", key: "model_opus" },
@@ -916,6 +928,9 @@ const CLAUDE_LEGACY_MODELS = {
 // i18n-sleutel voor het label naast de waarde.
 const MODEL_SUGGESTIONS = {
   claude: CLAUDE_ALIASES,
+  // grok's eigen lijst (`grok models`) is kort en bestaat uit versies; dit is de
+  // terugval zolang grok niet geinstalleerd is of nog geen antwoord gaf.
+  grok: ["grok-4.6", "grok-4.5"],
   agy: [
     "Gemini 3.5 Flash (Medium)",
     "Gemini 3.5 Flash (High)",
@@ -940,7 +955,34 @@ const liveModels = new Map();
 // label="Gemini 3.6 Flash (Low)"`). Dat moest expliciet worden nagemeten omdat
 // agy een ONBEKEND --model zonder foutmelding slikt en stil op het default-model
 // terugvalt -- een verkeerde vorm zou dus nooit zichtbaar falen (#92).
-const LIVE_MODEL_AGENTS = new Set(["agy"]);
+// grok mag hier ook in: `grok models` bestaat en geeft versienamen. Anders dan
+// agy weigert grok een onbekend model wel zichtbaar, dus een verkeerde vorm valt
+// daar meteen op.
+const LIVE_MODEL_AGENTS = new Set(["agy", "grok"]);
+
+// ---- vastgepinde modellen uit models.json ----
+//
+// claude kan zijn modellen niet opsommen (er is geen `claude models`), maar
+// `claude --model` neemt wel een exacte modelnaam. Die namen komen uit
+// models.json in de configmap: een los bestandje dat je kunt uitdelen zonder een
+// nieuwe build van Taurus, en dat we bij ELKE vulling van de lijst
+// opnieuw lezen -- zet iemand er tijdens deze sessie een model bij, dan staat het
+// er meteen in. Wat je zelf intypt en start wordt er achteraan bijgeschreven.
+let modelPins = {};
+async function refreshModelPins() {
+  try {
+    const p = await invoke("read_model_pins");
+    if (p && typeof p === "object") modelPins = p;
+  } catch (_) { /* geen bestand of stuk: dan zijn er geen pins */ }
+}
+// Onthoud een zelf ingetypt model. Nooit blokkerend: een suggestielijst is geen
+// reden om een sessie niet te starten.
+function rememberModel(agent, model) {
+  if (!agent || !(model || "").trim()) return;
+  invoke("remember_model_pin", { agent, model: model.trim() })
+    .then(() => refreshModelPins())
+    .catch(() => {});
+}
 
 // Vraag de agent-CLI om zijn modellen. Geeft true als er een nieuwe lijst is,
 // zodat de aanroeper de datalist opnieuw kan vullen.
@@ -956,10 +998,17 @@ async function refreshLiveModels(agent) {
   liveModels.set(agent, null);
   return false;
 }
+// De lijst die onder het modelveld hangt: eerst wat de agent zelf zegt (de
+// aliassen van claude, of de live lijst van agy/grok), daarna de pins uit
+// models.json. Pins achteraan en ontdubbeld, zodat een uitgedeeld bestand de
+// aliassen niet wegduwt maar wel exacte versies toevoegt.
 function modelSuggestionsFor(agent) {
   const live = liveModels.get(agent);
-  if (live && live.length) return live;
-  return MODEL_SUGGESTIONS[agent] || MODEL_SUGGESTIONS.claude;
+  const basis = (live && live.length) ? live : (MODEL_SUGGESTIONS[agent] || MODEL_SUGGESTIONS.claude);
+  const pins = Array.isArray(modelPins[agent]) ? modelPins[agent] : [];
+  if (!pins.length) return basis;
+  const gezien = new Set(basis.map(suggestionValue));
+  return basis.concat(pins.filter((p) => typeof p === "string" && p.trim() && !gezien.has(p)));
 }
 function suggestionValue(s) { return typeof s === "string" ? s : s.value; }
 // Vertaal de gekozen/ingetypte modelnaam naar de --model-waarde voor de agent.
@@ -984,6 +1033,10 @@ function fillModelDatalist(dl, agent) {
 // het veld nooit wacht op een procesaanroep.
 function updateModelDatalist(dl, agent) {
   fillModelDatalist(dl, agent);
+  // Twee bronnen die later binnen kunnen komen: models.json van schijf (elke
+  // keer opnieuw, zodat een wijziging tijdens deze sessie meetelt) en de lijst
+  // van de CLI. Allebei vullen de lijst nog een keer als er iets veranderd is.
+  refreshModelPins().then(() => fillModelDatalist(dl, agent));
   refreshLiveModels(agent).then((fresh) => { if (fresh) fillModelDatalist(dl, agent); });
 }
 
@@ -1020,6 +1073,11 @@ const MODE_OPTIONS = {
     { value: "auto", key: "mode_auto" },
   ],
 };
+// grok staat er bewust NIET bij: grok 1.0.13 accepteert exact dezelfde zes
+// waarden achter --permission-mode als claude (GEMETEN uit `grok --help`:
+// default, acceptEdits, auto, dontAsk, bypassPermissions, plan), dus de terugval
+// hieronder geeft hem al de goede lijst. Een eigen kopie zou alleen maar uit
+// elkaar kunnen lopen met de whitelist in agent_permission_mode aan de Rust-kant.
 function modesFor(agent) { return MODE_OPTIONS[agent] || MODE_OPTIONS.claude; }
 // Geldige modus voor deze agent? Anders terug naar "default" (bv. claude "plan"
 // bestaat niet voor agy).
@@ -1062,9 +1120,10 @@ const DEFAULT_SETTINGS = {
   // Een kopie levert de TEKST, niet de rechthoek waar hij in stond (#177).
   trimSelection: true,
   webLinks: true, search: true, tabShortcuts: true, tabStatus: true,
-  // Tabs bundelen zodra het er te veel worden (#90). Onder de drempel verandert
-  // er niets; daarboven vouwen sessies uit dezelfde bron samen.
-  tabGroups: true, tabGroupAt: 10, tabRecap: true,
+  // Tabs uit dezelfde bron bundelen (#90). Het getal is de groepsgrootte PER MAP,
+  // niet een drempel over alle tabs samen (#196): een map schuift samen zodra hij
+  // zoveel sessies heeft, en de rest houdt gewone tabs.
+  tabGroups: true, tabGroupSize: 3, tabRecap: true,
   fullPaths: true,
   // Drie standen sinds #129: ask (default) / silent / clean. Het oude
   // persistSessions-vinkje wordt nog gelezen zodat een bestaande config klopt.
@@ -1083,8 +1142,22 @@ const DEFAULT_SETTINGS = {
 };
 let settings = { ...DEFAULT_SETTINGS };
 
+// Tot #196 telde het getal ALLE tabs; nu telt het de tabs in een map. Wie zelf een getal
+// had gezet bedoelde de map -- zo staat het immers op het label -- dus dat getal verhuist
+// ongewijzigd mee. Wie op de oude standaard stond zou met "tien tabs in dezelfde map"
+// nooit meer iets gebundeld zien, en krijgt daarom de nieuwe standaard.
+const OUDE_TABGROUPAT_STANDAARD = 10;
 function loadSettings() {
-  try { const raw = localStorage.getItem("taurus.settings"); if (raw) settings = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }; } catch (_) {}
+  let opgeslagen = null;
+  try { const raw = localStorage.getItem("taurus.settings"); if (raw) opgeslagen = JSON.parse(raw); } catch (_) {}
+  if (opgeslagen) settings = { ...DEFAULT_SETTINGS, ...opgeslagen };
+  if (opgeslagen && opgeslagen.tabGroupSize === undefined) {
+    const oud = opgeslagen.tabGroupAt;
+    settings.tabGroupSize = Number.isFinite(oud) && oud > 0 && oud !== OUDE_TABGROUPAT_STANDAARD
+      ? Math.max(2, oud)
+      : DEFAULT_SETTINGS.tabGroupSize;
+  }
+  delete settings.tabGroupAt;
 }
 function saveSettings() { localStorage.setItem("taurus.settings", JSON.stringify(settings)); }
 
@@ -2768,13 +2841,16 @@ function tabGroupKey(s) {
   return s.projectId || "";
 }
 
-// De rijen voor de tabbalk: losse sessies, of groepen als het er te veel worden.
+// De rijen voor de tabbalk: losse sessies, en een groep voor elke map die er genoeg heeft.
 // De volgorde volgt de tabvolgorde; een groep staat op de plek van zijn eerste lid.
+//
+// De groepsgrootte geldt PER MAP (#196), niet over alle tabs samen. Een bak met minder
+// sessies dan die grootte blijft dus gewone tabs -- elk op zijn eigen plek, want een rij
+// met twee leden zou als niet-groep maar een van de twee tonen.
 function tabRows() {
   const alle = [...sessions.values()];
-  if (!settings.tabGroups || alle.length <= settings.tabGroupAt) {
-    return alle.map((s) => ({ groep: false, leden: [s] }));
-  }
+  const grootte = settings.tabGroups ? Math.max(2, settings.tabGroupSize) : 0;
+  if (!grootte) return alle.map((s) => ({ groep: false, leden: [s] }));
   const perBron = new Map();
   for (const s of alle) {
     const k = tabGroupKey(s);
@@ -2785,10 +2861,11 @@ function tabRows() {
   const gezien = new Set();
   for (const s of alle) {
     const k = tabGroupKey(s);
+    const leden = perBron.get(k);
+    if (leden.length < grootte) { rijen.push({ groep: false, leden: [s] }); continue; }
     if (gezien.has(k)) continue;
     gezien.add(k);
-    const leden = perBron.get(k);
-    rijen.push({ groep: leden.length > 1, leden, key: k });
+    rijen.push({ groep: true, leden, key: k });
   }
   return rijen;
 }
@@ -3243,15 +3320,16 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     gen: ++genSeq,
     exited: false, working: false, awaiting: false, announced: false, status: null, lastSpin: 0, buf: "",
     decoder: new TextDecoder("utf-8"), previewMode: null, lastSel: "",
+    // Waarvandaan de preview-lijst "sinds deze tab open is" rekent. Wat de agent in
+    // deze run schreef staat daarmee bovenaan, los van wat er verder in de map ligt.
+    startedAt: Date.now(),
   };
   sessions.set(id, session);
 
   term.onData((d) => session.mirror
     ? invoke("ssh_mirror_write", { id: session.mirror, data: d })
     : invoke("write_session", { id, data: d }));
-  term.onResize(({ cols, rows }) => session.mirror
-    ? invoke("ssh_mirror_resize", { id: session.mirror, cols, rows })
-    : invoke("resize_session", { id, cols, rows }));
+  term.onResize(({ cols, rows }) => sendSize(session, cols, rows));
   // Kopieren bij selectie via xterm's onSelectionChange (vuurt betrouwbaar; een
   // DOM mouseup op het paneel komt niet door xterm's eigen muis-afhandeling).
   // We leggen de laatste niet-lege selectie vast en kopieren met een korte
@@ -3296,7 +3374,13 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
   el.querySelector(".preview-file").addEventListener("change", (e) => renderPreview(session, e.target.value));
   // Raw/rendered wisselen (alleen zinvol voor .md); hertekent het huidige bestand.
   el.querySelector(".preview-raw").addEventListener("click", () => { session.previewRaw = !session.previewRaw; if (session.previewPath) renderPreview(session, session.previewPath); });
-  el.querySelector(".preview-refresh").addEventListener("click", () => loadHtmlList(session));
+  // Vernieuwen leest opnieuw in wat je NU leest (de agent schrijft dezelfde pagina
+  // vaak opnieuw). Alleen als er nog niets openstaat pakt hij het nieuwste bestand.
+  el.querySelector(".preview-refresh").addEventListener("click", async () => {
+    const huidig = session.previewPath;
+    await loadHtmlList(session, huidig);
+    if (huidig) await renderPreview(session, huidig);
+  });
   el.querySelector(".preview-mode").addEventListener("click", () => { session.previewMode = session.previewMode === "split" ? "full" : "split"; applyLayout(session); refitTerm(session); });
   el.querySelector(".preview-close").addEventListener("click", () => closePreview(session));
 
@@ -3335,9 +3419,7 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
         const w0 = (qi - first) * cols; // offset-venster van de bevraagde rij
         const w1 = w0 + cols;
 
-        // Drive-letter paths may use either separator (C:\dir\f.html or C:/dir/f.html);
-        // accept both so forward-slash absolute paths stay clickable too.
-        const re = /([A-Za-z]:[\\/][^\s"'<>|]+?\.(?:html?|md)|[\w.\-\\/]+\.(?:html?|md))/gi;
+        const re = padRe();
         const links = [];
         let m;
         while ((m = re.exec(full)) !== null) {
@@ -3393,6 +3475,10 @@ async function startSession() {
     // al een agent draait), dus stoppen en hervatten mogen die naam niet meer uit
     // (host, map) terugrekenen.
     session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows })) || "";
+    // Een model dat je zelf intypte staat de volgende keer in de suggestielijst.
+    // Pas NA een geslaagde start: een modelnaam die de agent weigert hoort niet
+    // in de lijst terecht te komen.
+    if (!command.trim()) rememberModel(agent, resolveModelArg(agent, model));
     // Wat je een rol opdraagt hoort bewaard te blijven: het antwoord komt in zijn
     // werkplek, en zonder dit was de vraag weg zodra de tab sloot. Alleen voor de
     // rollen, alleen lokaal (een remote map schrijven is een ander verhaal), en
@@ -3540,7 +3626,7 @@ async function resumeBlocker(meta) {
     if (!er) return t("resume_no_folder").replace("{path}", meta.path);
   }
   let st = { exists: false, ageSecs: 0 };
-  try { st = await invoke("session_state", { path: meta.path, uuid: meta.uuid }); } catch (_) {}
+  try { st = await invoke("session_state", { path: meta.path, uuid: meta.uuid, agent: meta.agent || "" }); } catch (_) {}
   if (!st.exists) return t("resume_no_transcript");
   // Ouderdom blokkeert NIET. Dat was de oude auto-hervat-heuristiek, en #129 zegt
   // er zelf het juiste over: leeftijd is geen bewijs dat een sessie waardeloos is.
@@ -3761,16 +3847,39 @@ async function closeSession(id) {
 }
 
 /* ============ HTML-preview ============ */
+// Paden naar iets dat de preview kan tonen, zoals ze in de terminal staan. Een
+// schijfletter mag beide scheidingstekens (C:\map\f.html en C:/map/f.html), zodat
+// een pad met slashes even goed herkend wordt. Een verse regex per aanroep: met
+// /g draagt hij anders zijn lastIndex mee naar de volgende lezer.
+const padRe = () => /([A-Za-z]:[\\/][^\s"'<>|]+?\.(?:html?|md)|[\w.\-\\/]+\.(?:html?|md))/gi;
+// Een pad uit de terminal absoluut maken tegen de werkmap van de sessie, en de
+// leestekens eraf halen die er in een zin achteraan plakken.
+function absPreviewPath(s, rawPath) {
+  const p = String(rawPath).trim().replace(/[)\].,;:'"]+$/, "");
+  if (/^([A-Za-z]:[\\/]|\\\\)/.test(p)) return p;
+  return s.path.replace(/[\\/]+$/, "") + "\\" + p.replace(/^[.][\\/]/, "").replace(/\//g, "\\");
+}
 function applyLayout(s) {
   s.el.classList.toggle("split", s.previewMode === "split");
   s.el.classList.toggle("full", s.previewMode === "full");
+}
+// De maat gaat via EEN pad naar de pty, en alleen als hij echt veranderd is.
+// fit() vuurt zelf onResize, dus zonder cache ging dezelfde maat er twee keer uit:
+// twee keer SIGWINCH, en een TUI als Claude Code hertekent daarop zijn hele beeld
+// (inclusief het diff-paneel) twee keer.
+function sendSize(s, cols, rows) {
+  if (!cols || !rows) return;
+  const key = cols + "x" + rows;
+  if (s.sentSize === key) return;
+  s.sentSize = key;
+  if (s.mirror) invoke("ssh_mirror_resize", { id: s.mirror, cols, rows });
+  else invoke("resize_session", { id: s.id, cols, rows });
 }
 function refitTerm(s) {
   if (s.previewMode === "full") return;
   requestAnimationFrame(() => {
     try { s.fit.fit(); } catch (_) {}
-    if (s.mirror) invoke("ssh_mirror_resize", { id: s.mirror, cols: s.term.cols, rows: s.term.rows });
-    else invoke("resize_session", { id: s.id, cols: s.term.cols, rows: s.term.rows });
+    sendSize(s, s.term.cols, s.term.rows);
   });
 }
 async function openPreview(id) {
@@ -3779,38 +3888,249 @@ async function openPreview(id) {
   if (!s) return;
   if (current !== id) showView(id);
   s.previewMode = settings.htmlView || "split";
+  // Meteen refitten, in dezelfde stap als de layout. Wachten tot het bestand
+  // ingelezen is laat de terminal een moment op zijn OUDE breedte staan in een
+  // half zo breed paneel; de agent hertekent dan een tel later en zet zijn
+  // diff-paneel opeens middenin het venster (#194).
   applyLayout(s);
-  await loadHtmlList(s);
   refitTerm(s);
+  await loadHtmlList(s);
 }
 function closePreview(s) { s.previewMode = null; applyLayout(s); refitTerm(s); }
-async function loadHtmlList(s) {
+// De keuzelijst is de inhoud van de werkmap, en die staat vooral vol met de
+// werkprocesbeschrijving zelf: rules.md, identity.md, CLAUDE.md -- bestanden die de
+// agent LEEST. Wat je wilt zien is wat hij net GESCHREVEN heeft, en dat is niet aan
+// de extensie te zien (zijn uitvoer is even vaak .md als .html). Wel aan de klok:
+// daarom groeperen we op wanneer een bestand geschreven is, met de tijd erbij.
+// De agent zet zijn werk lang niet altijd IN de werkmap: hij schrijft zijn rapport
+// in een projectmap ernaast en noemt het pad in de terminal ("Open in browser:
+// C:/.../_index/dashboard.html"). Die paden vissen we uit het transcript, zodat de
+// keuzelijst ook kan aanbieden wat hij deze sessie maakte waar het ook staat. Lange
+// paden wrappen over meerdere rijen, dus we lezen per LOGISCHE regel -- net als de
+// klikbare links, anders houd je een staartfragment over.
+function terminalPaths(s, maxRows, maxPaths) {
+  const uit = [];
+  const gezien = new Set();
+  // Een full-screen TUI tekent in het alt-scherm, en dat heeft geen scrollback: daar
+  // staat alleen wat nu zichtbaar is. De scrollback zit in de normale buffer. We
+  // lezen ze allebei, het alt-scherm als laatste, want dat is het meest recent.
+  const b = s.term.buffer;
+  const buffers = b.active === b.normal ? [b.normal] : [b.normal, b.active];
+  for (const buf of buffers) {
+    let regel = "";
+    for (let r = Math.max(0, buf.length - (maxRows || 2000)); r < buf.length; r++) {
+      const ln = buf.getLine(r);
+      if (!ln) continue;
+      regel += ln.translateToString(false);
+      const next = buf.getLine(r + 1);
+      if (next && next.isWrapped) continue; // de regel loopt door op de volgende rij
+      const re = padRe();
+      let m;
+      while ((m = re.exec(regel)) !== null) {
+        const pad = absPreviewPath(s, m[1]);
+        const sleutel = pad.toLowerCase();
+        if (gezien.has(sleutel)) continue;
+        gezien.add(sleutel);
+        uit.push(pad);
+      }
+      regel = "";
+    }
+  }
+  return uit.slice(-(maxPaths || 60));
+}
+function previewGroups(s, files) {
+  const dag = new Date(); dag.setHours(0, 0, 0, 0);
+  const groepen = [
+    { label: t("preview_group_session"), vanaf: s.startedAt || 0, items: [] },
+    { label: t("preview_group_today"), vanaf: dag.getTime(), items: [] },
+    { label: t("preview_group_older"), vanaf: -Infinity, items: [] },
+  ];
+  for (const f of files) {
+    const ms = f.mtime * 1000;
+    const g = groepen.find((x) => ms >= x.vanaf) || groepen[groepen.length - 1];
+    g.items.push(f);
+  }
+  return groepen.filter((g) => g.items.length);
+}
+// Het pad in de map plus het tijdstip. Het pad staat voorop: daar zoek je op, en een
+// keuzelijst springt naar de eerste letters die je typt.
+function previewLabel(f) {
+  const d = new Date(f.mtime * 1000);
+  const dag = new Date(); dag.setHours(0, 0, 0, 0);
+  const wanneer = d.getTime() >= dag.getTime()
+    ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `${f.rel}  ·  ${wanneer}`;
+}
+// Laat de lijst zien wat er in beeld staat. Een bestand van buiten de werkmap, of
+// dieper dan list_html kijkt, staat er niet in; dan zetten we het er zelf bij. Een
+// lijst die een andere naam toont dan de pagina die je leest, liegt.
+function selectInList(s, path) {
+  const sel = s.el.querySelector(".preview-file");
+  const hit = [...sel.options].find((o) => o.value.toLowerCase() === path.toLowerCase());
+  if (hit) { sel.value = hit.value; return; }
+  const o = document.createElement("option");
+  o.value = path; o.textContent = path;
+  sel.insertBefore(o, sel.firstChild);
+  sel.value = path;
+}
+// `want` = het bestand dat de aanroeper zo toont. Dan kiest deze functie niet zelf het
+// nieuwste en tekent hij ook niets: anders lees je eerst een pagina waar je niet om
+// vroeg, en een tel later pas de goede.
+async function loadHtmlList(s, want) {
   const sel = s.el.querySelector(".preview-file");
   const frame = s.el.querySelector(".preview-frame");
   let files = [];
   try { files = await invoke("list_html", { dir: s.path }); } catch (_) {}
+  // Wat de agent buiten de werkmap schreef staat niet in die scan. Van de paden uit
+  // het transcript houden we daarom over wat bestaat en wat in DEZE sessie
+  // geschreven is -- dat laatste scheelt de tientallen bestanden die hij alleen las.
+  // Niet bij een sessie op een andere machine: die paden bestaan hier niet.
+  if (!s.hostId) {
+    const bekend = new Set(files.map((f) => f.path.toLowerCase()));
+    let extra = [];
+    try { extra = await invoke("stat_files", { base: s.path, paths: terminalPaths(s) }); } catch (_) {}
+    for (const f of extra) {
+      if (bekend.has(f.path.toLowerCase())) continue;
+      if (f.mtime * 1000 < (s.startedAt || 0)) continue;
+      bekend.add(f.path.toLowerCase());
+      files.push(f);
+    }
+    files.sort((a, b) => b.mtime - a.mtime);
+  }
   sel.innerHTML = "";
-  if (!files.length) {
+  if (!files.length && !want) {
     const o = document.createElement("option"); o.value = ""; o.textContent = t("preview_none"); sel.appendChild(o);
     frame.srcdoc = `<body style="font-family:sans-serif;color:#888;padding:24px">${escapeHtml(t("preview_none"))}</body>`;
     return;
   }
-  for (const f of files) { const o = document.createElement("option"); o.value = f.path; o.textContent = f.name; sel.appendChild(o); }
+  for (const g of previewGroups(s, files)) {
+    const og = document.createElement("optgroup");
+    og.label = g.label;
+    for (const f of g.items) {
+      const o = document.createElement("option");
+      o.value = f.path; o.textContent = previewLabel(f);
+      og.appendChild(o);
+    }
+    sel.appendChild(og);
+  }
+  if (want) { selectInList(s, want); return; }
   sel.value = files[0].path;
   await renderPreview(s, files[0].path);
 }
 // Forwarded to the sandboxed preview: external-link clicks (and programmatic
 // postMessage from the page) are relayed to the parent, which opens them in the
 // default browser. Keeps the iframe sandbox tight (no allow-same-origin needed).
-const PREVIEW_BRIDGE = `<script>
+//
+// Een link naar een BUURPAGINA gaat dezelfde weg op. Navigeren binnen de sandbox
+// kan niet -- srcdoc heeft geen eigen origin, dus een relatieve URL is nergens
+// tegen op te lossen -- maar de ouder kan het doelbestand wel inlezen en opnieuw
+// tonen. Waar die link heen mag wijzen rekent de Rust-kant uit
+// (resolve_preview_link): deze pagina is gegenereerd en onvertrouwd, en kan ook
+// zonder klik een bericht sturen.
+//
+// `fragment` is waarop de pagina moet openen als je er via zo'n link binnenkomt.
+// Aan het srcdoc-ATTRIBUUT valt het niet te plakken, dus het reist mee in de brug --
+// en de brug zet het van binnenuit op de sandbox-URL.
+function previewBridge(fragment) {
+  return `<script>
+  var NAAR = ${JSON.stringify(fragment || "")};
+  // Een anker is niet de enige manier waarop een pagina een deep link opvat: een
+  // gegenereerd dashboard leest location.hash en opent die kaart in een modal --
+  // er is dan geen element met dat id om naartoe te scrollen. Alleen springen is
+  // dus te weinig; de hash moet er ook echt staan. Dit stukje staat vóór de pagina
+  // in het srcdoc, en dus vóór haar eigen scripts.
+  // (In dit commentaar geen backticks -- het zit in een template-literal.)
+  //
+  // GEMETEN in Chromium in precies deze opstelling (sandbox=allow-scripts, srcdoc,
+  // origin null): toewijzen werpt niets, is meteen terug te lezen, herlaadt het
+  // document NIET (about:srcdoc#... is een navigatie binnen het document, de brug
+  // draait dus eenmalig) en vuurt hashchange na load. Of de browser daarbij zelf
+  // naar het anker springt is niet gemeten -- springNaar hieronder doet dat
+  // expliciet, en blijft nodig.
+  if (NAAR) { try { if (location.hash.slice(1) !== NAAR) location.hash = NAAR; } catch (_) {} }
+  function springNaar(id) {
+    if (!id) return false;
+    var el = document.getElementById(id);
+    // GEMETEN in Chromium, in precies deze opstelling (sandbox=allow-scripts,
+    // srcdoc, geen eigen origin): scrollIntoView met behavior:'smooth' doet hier
+    // NIETS -- scrollY blijft 0 -- terwijl scrollTo en scrollIntoView zonder
+    // smooth gewoon werken. Ankers in de preview sprongen daardoor nooit; dat
+    // zag je niet, want er komt ook geen fout. Dus geen smooth.
+    if (el) { el.scrollIntoView(); return true; }
+    return false;
+  }
+  // Binnengekomen via een link met een anker: springen zodra het doel er staat.
+  // Drie momenten, en dat is geen slordigheid maar GEMETEN: op DOMContentLoaded
+  // springt hij wel, maar zodra het document klaar is zet de browser de
+  // scrollpositie terug op 0. Vandaar nog een poging bij load, en een derde er
+  // vlak achter voor een pagina die zijn inhoud zelf opbouwt.
+  if (NAAR) {
+    var probeer = function () { springNaar(NAAR); };
+    document.addEventListener('DOMContentLoaded', probeer);
+    window.addEventListener('load', function () { probeer(); setTimeout(probeer, 200); });
+  }
+  // TERUGKANAAL. Een gegenereerd rapport heeft vinkjes; tot nu toe kon het die
+  // alleen op het KLEMBORD zetten en moest een mens ze plakken. Hiermee stuurt de
+  // pagina een selectie terug: de ouder maakt er een JSON-bestand van in de
+  // input-map van de sessie (dezelfde bestemming als de dropzone) en zet het pad
+  // in de prompt. Wat er precies mag bepaalt de Rust-kant (preview_submit) --
+  // deze pagina is gegenereerd en onvertrouwd.
+  //
+  // Voor de pagina is het een regel:
+  //   launcher.submit({ items: [...] }, 'selectie')
+  // en het antwoord komt terug als event, zodat de knop "verstuurd" kan worden:
+  //   addEventListener('launcher:submitted', function (e) { e.detail.naam ... })
+  //   addEventListener('launcher:submit-mislukt', function (e) { e.detail.fout ... })
+  //
+  // De naam launcher is MERKLOOS, en dat is met opzet: een gegenereerde pagina weet
+  // niet onder welk merk hij bekeken wordt, en hoort in elke build van deze launcher
+  // te werken -- ook een gebrande, waar het merk een andere naam draagt. Hetzelfde
+  // object staat daarom ook onder de merknaam (window.taurus), zodat een pagina die
+  // daarvoor geschreven is blijft werken. Nieuwe paginas nemen de merkloze naam, en
+  // wie ook oudere builds wil bedienen test er de merknaam bij:
+  //   var api = window.launcher || window.taurus;
+  // (In dit commentaar geen backticks -- het zit in een template-literal.)
+  var brug = {
+    submit: function (data, soort) {
+      var json;
+      // Zelf serialiseren en als TEKST versturen: dan kan een DOM-node of een
+      // functie in de payload geen structured-clone-fout geven die de pagina niet
+      // ziet, en heeft de ouder meteen iets waarvan de grootte te meten is.
+      try { json = JSON.stringify(data); } catch (e) { return false; }
+      if (typeof json !== 'string') return false;
+      parent.postMessage({ type: 'launcher-submit', soort: String(soort || ''), json: json }, '*');
+      return true;
+    }
+  };
+  window.launcher = brug;
+  window.taurus = brug;
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || typeof d.type !== 'string') return;
+    // De oude merknamen worden er nog bij gevuurd: een knop die op
+    // 'taurus:submitted' wacht hoort niet stil te blijven na deze wijziging.
+    var namen = null, detail = null;
+    if (d.type === 'launcher-submit-ok' || d.type === 'taurus-submit-ok') {
+      namen = ['launcher:submitted', 'taurus:submitted'];
+      detail = { naam: d.naam, aantal: d.aantal };
+    } else if (d.type === 'launcher-submit-mislukt' || d.type === 'taurus-submit-mislukt') {
+      namen = ['launcher:submit-mislukt', 'taurus:submit-mislukt'];
+      detail = { fout: d.fout };
+    }
+    if (!namen) return;
+    for (var i = 0; i < namen.length; i++) {
+      window.dispatchEvent(new CustomEvent(namen[i], { detail: detail }));
+    }
+  });
   document.addEventListener('click', function (ev) {
     var a = ev.target && ev.target.closest && ev.target.closest('a[href]');
     if (!a) return;
     // Het RUWE href-attribuut bekijken, niet a.href: die lost '#'/relatief op naar
     // de app-origin (http://...localhost/#) en matchte dan als "externe" link ->
     // localhost opende in de browser. Alleen echte http(s)-links gaan extern; een
-    // anker (#...) blijft in het document; al het andere (relatief/mailto) doet niets
-    // binnen de sandbox.
+    // anker (#...) blijft in het document; een relatieve link gaat als verzoek naar
+    // de ouder, die hem inleest en toont; de rest doet niets binnen de sandbox.
     var href = a.getAttribute('href') || '';
     if (/^(https?:\\/\\/|mailto:)/i.test(href)) {
       ev.preventDefault();
@@ -3820,15 +4140,26 @@ const PREVIEW_BRIDGE = `<script>
       parent.postMessage({ type: 'taurus-open-external', url: href }, '*');
     } else if (href.charAt(0) === '#') {
       // Anker: expliciet scrollen -- fragment-navigatie is binnen een sandboxed
-      // srcdoc-iframe niet overal betrouwbaar.
-      var el = document.getElementById(href.slice(1));
-      if (el) { ev.preventDefault(); el.scrollIntoView({ behavior: 'smooth' }); }
-      else { ev.preventDefault(); }
+      // srcdoc-iframe niet overal betrouwbaar. De hash zetten we er wel bij, zodat
+      // een pagina die op location.hash of hashchange routeert ook binnen de
+      // preview reageert. Een leeg fragment slaan we over: href="#" is op veel
+      // pagina's een knop, en die hoort geen hashchange te worden.
+      ev.preventDefault();
+      var frag = href.slice(1);
+      if (frag) { try { if (location.hash.slice(1) !== frag) location.hash = frag; } catch (_) {} }
+      springNaar(frag);
+    } else if (/^[a-z][a-z0-9.+-]*:/i.test(href)) {
+      ev.preventDefault(); // ander schema (javascript:, data:, file:): niets doen
     } else {
-      ev.preventDefault(); // relatief e.d.: niet laten navigeren binnen de sandbox
+      // Alleen preventDefault, geen stopImmediatePropagation: hiervoor liep een
+      // relatieve link ook gewoon door naar de handlers van de pagina zelf, en
+      // dat blijft zo. Alleen de navigatie komt erbij.
+      ev.preventDefault();
+      parent.postMessage({ type: 'taurus-open-local', href: href }, '*');
     }
   }, true);
 <\/script>`;
+}
 
 // Thema-CSS voor de markdown-render (de srcdoc-iframe erft de app-CSS niet).
 const MD_STYLE = `<style>
@@ -3937,19 +4268,20 @@ function mdToHtml(src) {
 
 // Toon een .html-preview (ruw) of een .md-bestand (gerenderd of raw). .md wordt
 // altijd escape-eerst gerenderd; ruwe HTML in de .md draait dus nooit als script.
-async function renderPreview(s, path) {
+async function renderPreview(s, path, fragment) {
   if (!path) return;
   s.previewPath = path;
   const frame = s.el.querySelector(".preview-frame");
   const isMd = /\.md$/i.test(path);
+  const brug = previewBridge(fragment);
   try {
     const raw = await invoke("read_file", { path });
     if (isMd && !s.previewRaw) {
-      frame.srcdoc = PREVIEW_BRIDGE + MD_STYLE + `<body>${mdToHtml(raw)}</body>`;
+      frame.srcdoc = brug + MD_STYLE + `<body>${mdToHtml(raw)}</body>`;
     } else if (isMd) {
       frame.srcdoc = MD_STYLE + `<body><pre class="md-code"><code>${escapeHtml(raw)}</code></pre></body>`;
     } else {
-      frame.srcdoc = PREVIEW_BRIDGE + raw;
+      frame.srcdoc = brug + raw;
     }
   } catch (e) {
     // De 2 MB-grens wordt in Rust bewaakt (vóór lezen/IPC, #72); vertaal die
@@ -3961,21 +4293,79 @@ async function renderPreview(s, path) {
     }
   }
 }
+// Volg een link naar een buurpagina, geklikt binnen de preview. De sandbox kan
+// zelf niet navigeren, dus we lezen het doelbestand in en tonen het opnieuw --
+// met het anker eruit, zodat je op de goede regel binnenkomt.
+//
+// `bron` is het venster dat het bericht stuurde; die moet van DEZE preview zijn.
+// Anders zou een pagina in een andere tab de zichtbare preview kunnen omgooien.
+//
+// Waar de link heen mag wijzen bepaalt de Rust-kant. Wijst hij eroverheen of
+// bestaat het bestand niet, dan gebeurt er niets -- precies zoals het was voordat
+// relatieve links werkten.
+async function openPreviewLink(s, href, bron) {
+  const frame = s.el.querySelector(".preview-frame");
+  if (!frame || (bron && bron !== frame.contentWindow)) return;
+  if (!s.previewPath) return;
+  const hash = href.indexOf("#");
+  const fragment = hash >= 0 ? href.slice(hash + 1) : "";
+  let doel;
+  try {
+    doel = await invoke("resolve_preview_link", { root: s.path, fromFile: s.previewPath, href });
+  } catch (_) { return; }
+  // De keuzelijst meeverzetten, zodat te zien is waar je nu bent en je met
+  // dezelfde lijst terug kunt. Staat het bestand er niet in (list_html kijkt drie
+  // mappen diep en toont er tachtig), dan tonen we het toch.
+  selectInList(s, doel);
+  await renderPreview(s, doel, fragment);
+}
+
+// Een selectie uit de preview: wordt een bestand in input\ en daarna een pad in de
+// prompt -- precies wat er gebeurt als je een bestand in de dropzone laat vallen.
+// Bewust NIET verzenden met Enter: de laatste toets blijft van jou, en zo komt er
+// geen tekst uit een gegenereerde pagina in een agent terecht die jij niet zag.
+//
+// `bron` moet het venster van DEZE preview zijn; een pagina in een ander tabblad
+// hoort niets in deze sessie te kunnen zetten.
+async function submitFromPreview(s, msg, bron) {
+  const frame = s.el.querySelector(".preview-frame");
+  if (!frame || (bron && bron !== frame.contentWindow)) return;
+  const antwoord = (type, extra) => { if (bron) bron.postMessage(Object.assign({ type }, extra), "*"); };
+  // Een sessie op een andere machine heeft zijn input-map daar, en die weg loopt
+  // via scp (zie dropToRemote). Dat kan dit nog niet, en stil niets doen zou de
+  // pagina laten denken dat het gelukt is.
+  if (s.hostId) {
+    toast(t("submit_remote"), "err");
+    antwoord("launcher-submit-mislukt", { fout: t("submit_remote") });
+    return;
+  }
+  try {
+    const r = await invoke("preview_submit", {
+      root: s.path,
+      fromFile: s.previewPath || "",
+      soort: msg.soort || "",
+      json: msg.json,
+    });
+    addDropperEntry(r.pad);
+    insertPathIntoTerminal(r.pad, true);
+    toast(t("submit_saved").replace("{name}", r.naam).replace("{n}", r.aantal));
+    antwoord("launcher-submit-ok", { naam: r.naam, aantal: r.aantal });
+  } catch (err) {
+    toast("✗ " + err, "err");
+    antwoord("launcher-submit-mislukt", { fout: String(err) });
+  }
+}
+
 // Open de preview op een specifiek bestand (klik op een pad in de terminal).
 async function openPreviewFile(s, rawPath) {
-  let p = String(rawPath).trim().replace(/[)\].,;:'"]+$/, "");
-  if (!/^([A-Za-z]:[\\/]|\\\\)/.test(p)) {
-    p = s.path.replace(/[\\/]+$/, "") + "\\" + p.replace(/^[.][\\/]/, "").replace(/\//g, "\\");
-  }
+  const p = absPreviewPath(s, rawPath);
   if (current !== s.id) showView(s.id);
   s.previewMode = settings.htmlView || "split";
+  // Zie openPreview: de nieuwe maat hoort bij de layout-wissel, niet pas erna.
   applyLayout(s);
-  await loadHtmlList(s);
-  const sel = s.el.querySelector(".preview-file");
-  const hit = [...sel.options].find((o) => o.value.toLowerCase() === p.toLowerCase());
-  if (hit) sel.value = hit.value;
-  await renderPreview(s, p);
   refitTerm(s);
+  await loadHtmlList(s, p);
+  await renderPreview(s, p);
 }
 
 /* ============ status uit output ============ */
@@ -4130,6 +4520,7 @@ async function restartSession(id) {
   // (zelfde id!) worden vanaf nu genegeerd (#71).
   s.gen = ++genSeq;
   s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
+  s.startedAt = Date.now(); // nieuwe run, dus opnieuw rekenen wat "van deze sessie" is
   if (current !== id) showView(id); else renderTabs();
   try {
     await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), hostId: s.hostId || "", muxName: s.muxName || "", cols: s.term.cols, rows: s.term.rows });
@@ -4483,7 +4874,7 @@ function openSettings() {
   els.setTabs.checked = settings.tabShortcuts;
   els.setTabStatus.checked = settings.tabStatus;
   els.setTabRecap.checked = settings.tabRecap;
-  els.setTabGroupAt.value = settings.tabGroups ? settings.tabGroupAt : 0;
+  els.setTabGroupSize.value = settings.tabGroups ? settings.tabGroupSize : 0;
   els.setFullPaths.checked = settings.fullPaths;
   renderRoleRows();
   els.setConfirmExit.checked = settings.confirmExit !== false;
@@ -4737,9 +5128,11 @@ function saveSettingsFromForm() {
   settings.tabRecap = els.setTabRecap.checked;
   // 0 = uit. Een aparte aanvinkvakje ernaast zou twee besturingselementen voor
   // een keuze zijn; nul is hier de natuurlijke "nooit bundelen".
-  const drempel = parseInt(els.setTabGroupAt.value, 10);
-  settings.tabGroupAt = Number.isFinite(drempel) && drempel > 0 ? drempel : DEFAULT_SETTINGS.tabGroupAt;
-  settings.tabGroups = Number.isFinite(drempel) && drempel > 0;
+  // Een groep van een is geen groep: alles boven nul telt vanaf twee.
+  const grootte = parseInt(els.setTabGroupSize.value, 10);
+  const bundelen = Number.isFinite(grootte) && grootte > 0;
+  settings.tabGroups = bundelen;
+  settings.tabGroupSize = bundelen ? Math.max(2, grootte) : DEFAULT_SETTINGS.tabGroupSize;
   settings.fullPaths = els.setFullPaths.checked;
   saveRoles();
   settings.confirmExit = els.setConfirmExit.checked;
@@ -5078,7 +5471,7 @@ async function naReadSource() {
   els.naProbe.innerHTML =
     `<div class="na-plead"><b>${escapeHtml(naProbe.name)}</b>${naProbe.description ? " — " + escapeHtml(naProbe.description) : ""}</div>` +
     (role ? row(t("na_p_role"), t("role_" + role.id)) : "") +
-    row(t("na_p_shape"), t(naProbe.shape === "skill" ? "na_shape_skill" : "na_shape_workspace")) +
+    row(t("na_p_shape"), t(naProbe.shape === "skill" ? "na_shape_skill" : naProbe.shape === "plugin" ? "na_shape_plugin" : "na_shape_workspace")) +
     row(t("na_p_version"), `${naProbe.branch} @ ${(naProbe.sha || "").slice(0, 7)}${when ? ", " + when : ""}`) +
     row(t("na_p_claude"), t(naProbe.hasClaudeMd ? "na_claude_kept" : "na_claude_gen")) +
     row(t("na_p_size"), `${naProbe.sizeKb} KB`);
@@ -5173,7 +5566,10 @@ async function naDeploy() {
   let rep = null;
   try {
     rep = await invoke("git_deploy", {
-      source: naProbe.url,
+      // naProbe.url is de GENORMALISEERDE klon-URL (zonder submap-pad); de
+      // oorspronkelijke tekst uit het veld draagt een eventuele /browse/-submap
+      // nog wel. git_deploy leidt zelf opnieuw af wat te klonen is.
+      source: els.naSource.value.trim(),
       dest,
       hostId: "",
       role: role ? role.id : "",
@@ -5303,6 +5699,7 @@ function renderNewAgentAgent() {
   els.naAgent.innerHTML =
     `<option value="claude"${!hasOverride && (naDraft.agent || "claude") === "claude" ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>` +
     `<option value="agy"${!hasOverride && naDraft.agent === "agy" ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>` +
+    `<option value="grok"${!hasOverride && naDraft.agent === "grok" ? " selected" : ""}>${escapeHtml(t("agent_grok"))}</option>` +
     `<option value="${AGENT_COMMAND}"${hasOverride ? " selected" : ""}>${escapeHtml(t("agent_command"))}</option>`;
   updateModelDatalist(els.naModelList, naDraft.agent);
   fillModeSelect(els.naMode, naDraft.agent, naDraft.mode || "default");
@@ -5345,7 +5742,9 @@ async function saveNewAgent() {
     let rep = null;
     try {
       rep = await invoke("git_deploy", {
-        source: naProcProbe.url,
+        // Zelfde reden als bij de rol-deploy: naProcProbe.url mist een eventuele
+        // /browse/-submap, het veld zelf niet.
+        source: els.naPsource.value.trim(),
         dest: path,
         hostId: host,
         // Geen rol en geen veld: een proces staat waar jij het zet.
@@ -5498,6 +5897,7 @@ function renderEditor() {
           <select class="e-agent">
             <option value="claude"${(!hasOverride && (r.agent || "claude") === "claude") ? " selected" : ""}>${escapeHtml(t("agent_claude"))}</option>
             <option value="agy"${(!hasOverride && r.agent === "agy") ? " selected" : ""}>${escapeHtml(t("agent_agy"))}</option>
+            <option value="grok"${(!hasOverride && r.agent === "grok") ? " selected" : ""}>${escapeHtml(t("agent_grok"))}</option>
             <option value="${AGENT_COMMAND}"${hasOverride ? " selected" : ""}>${escapeHtml(t("agent_command"))}</option>
           </select></div>
         <div class="e-field"><span class="e-cap">${escapeHtml(t("cap_model"))}</span>
@@ -6251,7 +6651,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabs: document.querySelector("#set-tabshortcuts"),
     setTabStatus: document.querySelector("#set-tabstatus"),
     setTabRecap: document.querySelector("#set-tabrecap"),
-    setTabGroupAt: document.querySelector("#set-tabgroupat"),
+    setTabGroupSize: document.querySelector("#set-tabgroupsize"),
     setFullPaths: document.querySelector("#set-fullpaths"),
     setConfirmExit: document.querySelector("#set-confirm-exit"),
     exitModal: document.querySelector("#exit-modal"),
@@ -6587,6 +6987,18 @@ window.addEventListener("DOMContentLoaded", () => {
     if (d && d.type === "taurus-open-external" && typeof d.url === "string"
         && /^(https?:\/\/|mailto:)/i.test(d.url)) {
       window.__TAURI__.opener.openUrl(d.url).catch(() => {});
+    }
+    // Link naar een buurpagina: die tonen we in dezelfde preview. Alleen voor de
+    // zichtbare sessie -- een preview van een andere tab hoort niets om te gooien.
+    if (d && d.type === "taurus-open-local" && typeof d.href === "string") {
+      const s = sessions.get(current);
+      if (s) openPreviewLink(s, d.href, e.source);
+    }
+    // Terugkanaal: een selectie uit de preview. Alleen voor de zichtbare sessie,
+    // om dezelfde reden als hierboven.
+    if (d && (d.type === "launcher-submit" || d.type === "taurus-submit") && typeof d.json === "string") {
+      const s = sessions.get(current);
+      if (s) submitFromPreview(s, d, e.source);
     }
   });
 

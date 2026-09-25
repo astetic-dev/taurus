@@ -60,9 +60,10 @@ consistently. That's what Taurus is for.
   "ready" alerts), and can announce it out loud ("Porter is ready").
 - **Live status** — optionally shows Claude's current activity verb on the tab
   (✶ Orbiting…).
-- **Per-project agent, model & mode** — launch `claude` (Claude Code) or `agy`
-  (a Gemini-backed agent CLI), optionally pinned to a model, in `default`, `plan`
-  or `auto` (`--permission-mode`); all set per project, overridable per session.
+- **Per-project agent, model & mode** — launch `claude` (Claude Code), `agy`
+  (a Gemini-backed agent CLI) or `grok` (Grok Build), optionally pinned to a
+  model version, in `default`, `plan` or `auto` (`--permission-mode`); all set
+  per project, overridable per session.
 - **Restart / resume** — right-click a tab to restart and resume the same
   conversation; optionally **remember sessions and resume them on startup**.
   (`agy` has no session ids, so a restart resumes the folder's most recent
@@ -99,7 +100,21 @@ consistently. That's what Taurus is for.
 - **HTML preview** — click an `.html` path in the terminal (or right-click a tab →
   *HTML preview*); it renders in a sandboxed pane beside (or instead of) the
   terminal. External links open in your default browser; `mailto:` opens your
-  mail client.
+  mail client. **Links to neighbouring pages work**: a generated report that links
+  to `dashboard.html#CARD-0004` opens that page and jumps to the block. The file
+  picker above the preview follows along, so it is also the way back. Where such a
+  link may point is decided on the Rust side, bounded to the session folder — a
+  link outside it does nothing.
+- **The page can send something back** — a page in the preview may post a
+  selection to the launcher: one line, `launcher.submit({ items: [...] }, 'selection')`.
+  That name is deliberately brand-free, so the same generated page works in a
+  white-labelled build too; the brand name (`taurus`) is an alias of the same
+  object, and the answer arrives as a `launcher:submitted` event. It lands as
+  a JSON file in the session's `input\` folder, where the agent picks it up, and
+  the page hears back whether it did. Bounded on the Rust side: that folder only,
+  JSON only, with a size and count limit. A page that routes on `location.hash`
+  works as well — the bridge sets the hash inside the sandbox, so a deep link
+  opens the card it points at and not just the anchor it scrolls to.
 - **Markdown preview** — `.md` files render inline too: GFM **tables** (with
   alignment), **task lists**, strikethrough, code blocks, working in-document
   anchors — with a **`</>` raw/rendered toggle**. Rendering is escape-first
@@ -108,8 +123,8 @@ consistently. That's what Taurus is for.
 
 ### Comfort & polish
 
-- **Settings in tabs** (General / Theme / HTML preview / Terminal / Voice) with
-  per-setting hover help.
+- **Settings in tabs** (General / Theme / HTML preview / Terminal / Voice /
+  Specialists / Network) with per-setting hover help.
 - Search the scrollback (Ctrl+Shift+F), copy-on-select, right-click paste,
   Ctrl+Shift+C/V, clickable links, font zoom (Ctrl+= / − / 0), tab shortcuts
   (Ctrl+Tab, Ctrl+1..9, Ctrl+T/W), agent-mouse toggle — all toggleable.
@@ -153,7 +168,7 @@ Output:
 ## Configuration
 
 Projects live in `%APPDATA%\Taurus\projects.json` (per user, created on first run).
-Edit them with the in-app **Agents** editor, or by hand. Format:
+Edit them with the in-app **Specialists** editor, or by hand. Format:
 
 ```json
 [
@@ -172,16 +187,30 @@ Edit them with the in-app **Agents** editor, or by hand. Format:
 ]
 ```
 
-- `agent` (optional) — which agent CLI to launch: `claude` (default, Claude Code)
-  or `agy` (a Gemini-backed agent CLI). Selectable per project in the editor and
-  overridable per session on the launch form. Resume limitation: `agy` has no
-  session ids, so restarts resume the folder's most recent conversation.
+- `agent` (optional) — which agent CLI to launch: `claude` (default, Claude Code),
+  `agy` (a Gemini-backed agent CLI) or `grok` (Grok Build). Selectable per project
+  in the editor and overridable per session on the launch form. Resume limitation:
+  `agy` has no session ids, so restarts resume the folder's most recent
+  conversation; `claude` and `grok` both resume by session id.
 - `model` (optional) — model the agent starts with (free text, e.g. `opus`,
-  `sonnet`, `gemini-2.5-pro`). Empty means the agent's own default. Passed as
-  `--model`.
+  `sonnet`, `grok-4.6`). Empty means the agent's own default. Passed as
+  `--model`. An alias such as `opus` always follows the newest model in that
+  line; type a full model name (`claude-opus-4-8`) to pin a version. Suggestions
+  come from the aliases, from `agy models` / `grok models`, and from
+  `%APPDATA%\Taurus\models.json` — a file you can edit or hand out without
+  rebuilding Taurus, re-read every time the list is filled. Whatever you type
+  yourself is appended to it after a successful start.
 - `command` (optional) — run a different program instead of the agent for this
   project (no agent flags). Takes precedence over `agent`/`model`. Use double
   quotes around a program path or argument that contains spaces.
+- **Where a specialist comes from** — a specialist's `source` is a GitHub URL, the
+  bare `owner/repo` shorthand, or a local folder. Running your own Bitbucket
+  Server? Set `TAURUS_BITBUCKET_HOST=bitbucket.example.com` and its URLs are
+  accepted too, including a *browse* URL copied straight from the address bar:
+  Taurus clones the repo and deploys just that subfolder, so a skill can stay
+  where a shared marketplace repo already keeps it. Without that variable,
+  github.com is the only host that passes the check — which host you trust is a
+  choice, not the result of a regular expression.
 - A fresh install starts with an **empty** list (no baked-in paths). UI settings
   (language, font, toggles) are kept in the WebView2 local storage.
 
@@ -313,4 +342,8 @@ Want to show Taurus (or record a video) without exposing real projects?
   (Windows TTS + the sherpa-onnx STT sidecar) and the DROPZONE file operations.
 - Previews render in a **sandboxed iframe** (no same-origin, scripts contained);
   Markdown is rendered escape-first by a small built-in renderer, so documents
-  can't inject HTML/JS into the app.
+  can't inject HTML/JS into the app. A previewed page cannot navigate on its own:
+  every link is relayed to the parent, and for a relative one the target is
+  resolved in Rust — relative only, `..` collapsed lexically rather than through
+  `canonicalize` (which follows symlinks), the result checked component-wise
+  against the session folder, and limited to what the preview can display.
