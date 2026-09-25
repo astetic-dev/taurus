@@ -5102,7 +5102,8 @@ fn apply_known_titles(view: &mut MachineAgents, titles: &HashMap<String, String>
     }
 }
 
-#[tauri::command]
+// `(async)`: ssh-ronde (tot 10 s); niet op de main thread.
+#[tauri::command(async)]
 fn remote_agents(host_id: String) -> Result<MachineAgents, String> {
     let host = lookup_host(&host_id)?
         .ok_or_else(|| "Agents opsommen kan alleen op een andere machine.".to_string())?;
@@ -5219,7 +5220,8 @@ fn stop_remote_session_at(host_id: String, path: String) -> Result<(), String> {
     stop_remote_session(host_id, name)
 }
 
-#[tauri::command]
+// `(async)`: ssh-ronde; niet op de main thread.
+#[tauri::command(async)]
 fn stop_remote_session(host_id: String, session: String) -> Result<(), String> {
     let host = lookup_host(&host_id)?
         .ok_or_else(|| "Een sessie stoppen kan alleen op een andere machine.".to_string())?;
@@ -6502,7 +6504,8 @@ fn push_voices(out: &mut Vec<String>, engine: &str, script: &str) {
 // natuurlijke stemmen en andere talen zoals het Nederlandse 'Microsoft Frank', dat
 // alleen in OneCore staat), SAPI als backup. Niet filteren op "Natural" -- dan
 // zouden juist die stemmen wegvallen.
-#[tauri::command]
+// `(async)`: wacht op PowerShell; niet op de main thread.
+#[tauri::command(async)]
 fn list_tts_voices() -> Vec<String> {
     let mut out = Vec::new();
     push_voices(
