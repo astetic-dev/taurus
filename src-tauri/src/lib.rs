@@ -2648,6 +2648,8 @@ fn pull_workspace(
             "Terughalen uit WSL kan nog niet: de scp-server draait op Windows en komt niet in het bestandssysteem van WSL.".into(),
         );
     }
+    // ~ expanderen: op macOS stelt het verplaatsscherm ~/<map> voor (#226).
+    let local_path = expand_home(&local_path);
     std::fs::create_dir_all(&local_path)
         .map_err(|e| format!("kon {} niet aanmaken:\n{}", local_path, e))?;
 

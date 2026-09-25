@@ -8,6 +8,8 @@ const { listen } = window.__TAURI__.event;
 // macOS (WKWebView) of niet. Eén vlag voor de plekken waar de webview of het OS
 // anders is dan op Windows (#199).
 const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent || "");
+// Wat "eigen commando" voorinvult: een shell die op dit platform bestaat.
+const DEFAULT_OWN_COMMAND = IS_MAC ? "zsh" : "cmd.exe";
 
 /* ============ i18n ============ */
 const I18N = {
@@ -2708,7 +2710,8 @@ function renderTargetWarning() {
 function suggestTargetPath(project, targetHostId) {
   const leaf = (project.path || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "workspace";
   const h = hostById(targetHostId);
-  if (!h) return `C:\\Users\\${(navigator.userAgent, "")}`.replace(/\\+$/, "") || leaf;
+  // Naar deze machine. Op macOS onder de thuismap; pull_workspace zet ~ om.
+  if (!h) return IS_MAC ? `~/${leaf}` : `C:\\Users\\${(navigator.userAgent, "")}`.replace(/\\+$/, "") || leaf;
   const base = (h.default_project || "").replace(/[\\/]+$/, "");
   if (!base) return effectiveWindows(h) ? `C:\\${leaf}` : `/home/${h.user || "user"}/${leaf}`;
   return effectiveWindows(h) ? `${base}\\${leaf}` : `${base}/${leaf}`;
@@ -5990,7 +5993,7 @@ function renderEditor() {
         // Agent blijft staan als terugvalwaarde; de backend negeert hem toch
         // zolang er een override is. Een placeholder zodat het veld niet leeg
         // opent en de rij meteen als override herkenbaar is.
-        editRows[i].command = editRows[i].command || "cmd.exe";
+        editRows[i].command = editRows[i].command || DEFAULT_OWN_COMMAND;
       } else {
         editRows[i].agent = e.target.value;
         editRows[i].command = "";
@@ -6916,7 +6919,7 @@ window.addEventListener("DOMContentLoaded", () => {
   els.naPath.addEventListener("change", naCheckPath);
   els.naAgent.addEventListener("change", () => {
     if (els.naAgent.value === AGENT_COMMAND) {
-      naDraft.command = els.naCommand.value.trim() || "cmd.exe";
+      naDraft.command = els.naCommand.value.trim() || DEFAULT_OWN_COMMAND;
       els.naCommand.value = naDraft.command;
     } else {
       naDraft.agent = els.naAgent.value;
