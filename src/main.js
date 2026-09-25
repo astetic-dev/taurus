@@ -742,6 +742,8 @@ if (IS_MAC) {
     ph_path: "/Users/… of /Volumes/…",
     help_fullpaths: "Vraagt Claude volledige bestandspaden te printen, zodat ze klikbaar worden.\nVoorbeeld: /Users/jij/project/index.html i.p.v. alleen index.html.",
     ctx_explorer: "📂 Toon map in Finder",
+    voice_natural: "macOS-stemmen",
+    voice_install_hint: "Meer stemmen of talen nodig? Voeg ze toe via Systeeminstellingen → Toegankelijkheid → Gesproken materiaal → Systeemstem → Beheer stemmen.",
     ssh_hint: "Een sessie draait als jouw Mac-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
   });
   Object.assign(I18N.en, {
@@ -755,6 +757,8 @@ if (IS_MAC) {
     ph_path: "/Users/… or /Volumes/…",
     help_fullpaths: "Asks Claude to print full file paths so they become clickable.\nExample: /Users/you/project/index.html instead of just index.html.",
     ctx_explorer: "📂 Show folder in Finder",
+    voice_natural: "macOS voices",
+    voice_install_hint: "Need more voices or languages? Add them in System Settings → Accessibility → Spoken Content → System voice → Manage Voices.",
     ssh_hint: "A session runs as your Mac account, with your rights. Every connection asks permission first; everything is recorded in an audit trail.",
   });
 }
@@ -4945,8 +4949,10 @@ function openSettings() {
         const ln = p.length >= 3 ? langName(p[1]) : "";
         return `<option value="${escapeHtml(v)}">${escapeHtml(ln ? `${name} — ${ln}` : name)}</option>`;
       };
-      const nat = vs.filter((v) => v.startsWith("winrt|"));
-      const cls = vs.filter((v) => !v.startsWith("winrt|"));
+      // winrt (Windows) en say (macOS, #222) zijn de natuurlijke stemmen.
+      const isNat = (v) => v.startsWith("winrt|") || v.startsWith("say|");
+      const nat = vs.filter(isNat);
+      const cls = vs.filter((v) => !isNat(v));
       let html = `<option value=""></option>`;
       if (nat.length) html += `<optgroup label="${escapeHtml(t("voice_natural"))}">${nat.map(opt).join("")}</optgroup>`;
       if (cls.length) html += `<optgroup label="${escapeHtml(t("voice_classic"))}">${cls.map(opt).join("")}</optgroup>`;
@@ -6842,6 +6848,9 @@ window.addEventListener("DOMContentLoaded", () => {
     dropperList: document.querySelector("#dropper-list"),
     dropperPaste: document.querySelector("#dropper-paste"),
   });
+  // Spraak naar tekst heeft (nog) geen macOS-engine (#222): geen Download aanbieden
+  // die niet kan werken.
+  if (IS_MAC) document.querySelector("#stt-rows")?.classList.add("hidden");
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);

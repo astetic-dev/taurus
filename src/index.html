@@ -314,6 +314,8 @@
               <label class="srow"><span data-i18n="tts_rate">Spreeksnelheid</span>
                 <span class="v-row rate-row"><span class="rate-lbl" data-i18n="rate_slow">langzaam</span><input id="set-tts-rate" type="range" min="-10" max="10" step="1" class="rate-slider" /><span class="rate-lbl" data-i18n="rate_fast">snel</span><button id="set-tts-test" class="icon-btn" type="button" data-i18n="tts_test">Test</button></span>
               </label>
+              <!-- STT staat op macOS voorlopig uit (#222); main.js verbergt dit blok daar. -->
+              <div id="stt-rows">
               <div class="hint" data-i18n="stt_head">Spraak naar tekst — F9 inhouden (of klik 🎙)</div>
               <label class="srow"><span data-i18n="stt_model">Model</span>
                 <span class="v-row"><select id="set-stt-model"></select><button id="set-stt-download" class="icon-btn" type="button" data-i18n="stt_download">Download</button></span>
@@ -323,6 +325,7 @@
               <label class="srow"><span data-i18n="stt_registry">Modellenbibliotheek-URL</span>
                 <span class="v-row"><input id="set-stt-registry" type="text" placeholder="https://…/voice-registry.json" /><button id="set-stt-refresh" class="icon-btn" type="button" data-i18n="stt_refresh">Vernieuw lijst</button></span>
               </label>
+              </div>
             </div>
           </div>
 
