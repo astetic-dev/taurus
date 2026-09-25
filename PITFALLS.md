@@ -48,3 +48,8 @@ Measured on a Windows host and under WSL.
 
 - **Isolated test instance.** Launch the debug exe with `WEBVIEW2_USER_DATA_FOLDER=<fresh dir>` (otherwise it joins the running instance's browser process) and `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223`. Move `%APPDATA%\Taurus\sessions.json` aside first and restore it afterwards, otherwise the test instance resumes live sessions. Drive it over CDP (`Runtime.evaluate`).
 - **Window screenshots of WebView2** need `PrintWindow` with `PW_RENDERFULLCONTENT`; `CopyFromScreen` renders the webview black. Capture only the Taurus window.
+
+## macOS (#199)
+
+- **A synchronous `#[tauri::command]` runs on the main thread, and a blocking wait there deadlocks on macOS.** `blocking_pick_folder()` / `blocking_pick_file()` wait in `mpsc::recv()` for an answer that arrives via the main thread. The NSOpenPanel is drawn by a separate process, so browsing still works, but anything that needs the app (e.g. "New Folder") gives a spinning wheel forever. Measured with `sample <pid> 3`: all main-thread samples in `pick_folder -> recv -> semaphore_wait_trap`. Any command that waits (dialogs, child processes, channels) gets `#[tauri::command(async)]`.
+- **Build and start as an `.app` via `open`.** A binary started straight from `target/` does not join the GUI session properly: `npx tauri build --debug --bundles app && open src-tauri/target/debug/bundle/macos/Taurus.app`.
