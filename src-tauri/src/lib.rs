@@ -9428,7 +9428,6 @@ mod tests {
         assert_eq!(ps_quote(""), "''");
     }
 
-    #[test]
     // ===== Terugkanaal uit de preview =====
 
     // Het soort-woord van de pagina komt in de bestandsnaam. Dit is de enige
@@ -9842,7 +9841,13 @@ mod tests {
         assert!(probe_tcp("127.0.0.1", port, 1000), "open poort moet bereikbaar zijn");
         drop(listener);
         // Dicht: de kernel weigert meteen, dus een korte timeout volstaat.
-        assert!(!probe_tcp("127.0.0.1", port, 300), "gesloten poort mag niet bereikbaar heten");
+        // GEMETEN op macOS: in een parallelle run kan een andere test de net
+        // vrijgegeven poort meteen weer krijgen. Dan geldt een verse poort; pas als
+        // er vijf keer geen enkele dicht blijkt, is probe_tcp zelf fout.
+        let dicht = std::iter::once(port)
+            .chain((0..4).map(|_| TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()))
+            .any(|p| !probe_tcp("127.0.0.1", p, 300));
+        assert!(dicht, "gesloten poort mag niet bereikbaar heten");
     }
 
     #[test]
@@ -10079,7 +10084,6 @@ mod tests {
         assert!(s.ends_with("uuid-1.jsonl"), "{}", s);
     }
 
-    #[test]
     // De zes waarden die claude 2.1.232 accepteert, plus de twee die juist GEEN
     // vlag mogen opleveren. GEMETEN met `claude --permission-mode <x> --version`:
     // een onbekende waarde geeft "argument '<x>' is invalid. Allowed choices are
