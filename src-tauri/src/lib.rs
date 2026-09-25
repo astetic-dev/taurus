@@ -3890,8 +3890,14 @@ fn norm_title(title: &str) -> String {
 }
 
 // Instructie die we (optioneel) aan claude meegeven zodat hij altijd volledige
-// paden toont -> die zijn dan klikbaar in de HTML-preview.
+// paden toont -> die zijn dan klikbaar in de HTML-preview. Per platform: een
+// Windows-voorbeeld op de Mac liet de agent om C:\-paden vragen (#214).
+#[cfg(windows)]
 const FULL_PATH_PROMPT: &str = "When you create, write, save, or reference any file, always print its full absolute Windows path (for example C:\\Users\\you\\dir\\file.html), not just the file name, so it can be opened directly.";
+#[cfg(target_os = "macos")]
+const FULL_PATH_PROMPT: &str = "When you create, write, save, or reference any file, always print its full absolute path (for example /Users/you/dir/file.html), not just the file name, so it can be opened directly.";
+#[cfg(all(unix, not(target_os = "macos")))]
+const FULL_PATH_PROMPT: &str = "When you create, write, save, or reference any file, always print its full absolute path (for example /home/you/dir/file.html), not just the file name, so it can be opened directly.";
 
 // Start een verse sessie of hervat een bestaande? Bepaalt welke vlaggen per agent
 // gebruikt worden (claude --session-id vs --resume; agy verse start vs --continue).
@@ -6001,9 +6007,18 @@ fn preview_submit(
     })
 }
 
+// Map tonen in de bestandsbeheerder van het OS: Verkenner, Finder, of wat
+// xdg-open kiest (#214).
 #[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
-    std::process::Command::new("explorer")
+    let program = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(program)
         .arg(&path)
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -6875,16 +6890,26 @@ fn download_marker_stale(d: &Path) -> bool {
     if pid.is_empty() || !pid.chars().all(|c| c.is_ascii_digit()) {
         return true; // marker van een oude build zonder PID
     }
-    let mut c = std::process::Command::new("tasklist");
-    c.args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"]);
     #[cfg(windows)]
     {
+        let mut c = std::process::Command::new("tasklist");
+        c.args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"]);
         use std::os::windows::process::CommandExt;
         c.creation_flags(0x0800_0000);
+        match c.output() {
+            Ok(o) => !String::from_utf8_lossy(&o.stdout).contains(&format!("\"{}\"", pid)),
+            Err(_) => false, // bij twijfel een lopende download niet overrulen
+        }
     }
-    match c.output() {
-        Ok(o) => !String::from_utf8_lossy(&o.stdout).contains(&format!("\"{}\"", pid)),
-        Err(_) => false, // bij twijfel een lopende download niet overrulen
+    // Buiten Windows: `kill -0` zegt of het proces bestaat, zonder het te raken.
+    #[cfg(not(windows))]
+    match std::process::Command::new("kill")
+        .args(["-0", &pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(st) => !st.success(),
+        Err(_) => false,
     }
 }
 
@@ -10315,30 +10340,41 @@ mod tests {
     }
 
     // Een link tussen twee gegenereerde pagina's in dezelfde map is het hele punt.
+    // Testpaden in Windows-vorm, op andere platforms omgezet naar POSIX:
+    // C:\werk -> /werk, D:\x -> /d/x. Zo lopen dezelfde gevallen op beide (#214).
+    fn wp(s: &str) -> std::path::PathBuf {
+        if cfg!(windows) {
+            return std::path::PathBuf::from(s);
+        }
+        let (drive, rest) = s.split_at(2);
+        let pre = if drive.eq_ignore_ascii_case("C:") { String::new() } else { format!("/{}", drive[..1].to_lowercase()) };
+        std::path::PathBuf::from(format!("{}{}", pre, rest.replace('\\', "/")))
+    }
+
     #[test]
     fn a_link_to_a_neighbouring_page_resolves() {
-        let wortel = Path::new(r"C:\werk\projecten");
-        let vanuit = Path::new(r"C:\werk\projecten\_index\acties.html");
+        let wortel = &wp(r"C:\werk\projecten");
+        let vanuit = &wp(r"C:\werk\projecten\_index\acties.html");
         // Het fragment hoort niet bij de bestandsnaam.
         let got = preview_link_target(wortel, vanuit, "dashboard.html#AST-DHR-AIT-0009").unwrap();
-        assert_eq!(got, Path::new(r"C:\werk\projecten\_index\dashboard.html"));
+        assert_eq!(got, wp(r"C:\werk\projecten\_index\dashboard.html"));
         // Met ./ ervoor, met een submap, en met een gecodeerde spatie.
         assert_eq!(
             preview_link_target(wortel, vanuit, "./dashboard.html").unwrap(),
-            Path::new(r"C:\werk\projecten\_index\dashboard.html")
+            wp(r"C:\werk\projecten\_index\dashboard.html")
         );
         assert_eq!(
             preview_link_target(wortel, vanuit, "mail-log/week-36.html").unwrap(),
-            Path::new(r"C:\werk\projecten\_index\mail-log\week-36.html")
+            wp(r"C:\werk\projecten\_index\mail-log\week-36.html")
         );
         assert_eq!(
             preview_link_target(wortel, vanuit, "mijn%20rapport.md").unwrap(),
-            Path::new(r"C:\werk\projecten\_index\mijn rapport.md")
+            wp(r"C:\werk\projecten\_index\mijn rapport.md")
         );
         // Omhoog mag, zolang je binnen de sessiemap blijft.
         assert_eq!(
             preview_link_target(wortel, vanuit, "../overzicht.html").unwrap(),
-            Path::new(r"C:\werk\projecten\overzicht.html")
+            wp(r"C:\werk\projecten\overzicht.html")
         );
     }
 
@@ -10380,11 +10416,11 @@ mod tests {
     // eroverheen niet.
     #[test]
     fn a_page_outside_the_session_folder_falls_back_to_its_own_folder() {
-        let wortel = Path::new(r"C:\werk\projecten");
-        let vanuit = Path::new(r"D:\rapporten\week36\index.html");
+        let wortel = &wp(r"C:\werk\projecten");
+        let vanuit = &wp(r"D:\rapporten\week36\index.html");
         assert_eq!(
             preview_link_target(wortel, vanuit, "detail.html").unwrap(),
-            Path::new(r"D:\rapporten\week36\detail.html")
+            wp(r"D:\rapporten\week36\detail.html")
         );
         assert!(preview_link_target(wortel, vanuit, "../week35/detail.html").is_none());
     }
@@ -10393,8 +10429,8 @@ mod tests {
     // een leeg scherm.
     #[test]
     fn only_previewable_files_are_offered() {
-        let wortel = Path::new(r"C:\werk");
-        let vanuit = Path::new(r"C:\werk\a.html");
+        let wortel = &wp(r"C:\werk");
+        let vanuit = &wp(r"C:\werk\a.html");
         for goed in ["b.html", "b.HTM", "b.md"] {
             assert!(preview_link_target(wortel, vanuit, goed).is_some(), "{goed}");
         }

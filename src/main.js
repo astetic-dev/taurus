@@ -728,6 +728,22 @@ const I18N = {
     join_tab: "Joined session",
   },
 };
+// macOS: dezelfde teksten zonder Windows-paden en -namen (#214). Alleen wat op
+// de Mac anders is; de rest blijft uit de tabel hierboven komen.
+if (IS_MAC) {
+  Object.assign(I18N.nl, {
+    ph_path: "/Users/… of /Volumes/…",
+    help_fullpaths: "Vraagt Claude volledige bestandspaden te printen, zodat ze klikbaar worden.\nVoorbeeld: /Users/jij/project/index.html i.p.v. alleen index.html.",
+    ctx_explorer: "📂 Toon map in Finder",
+    ssh_hint: "Een sessie draait als jouw Mac-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
+  });
+  Object.assign(I18N.en, {
+    ph_path: "/Users/… or /Volumes/…",
+    help_fullpaths: "Asks Claude to print full file paths so they become clickable.\nExample: /Users/you/project/index.html instead of just index.html.",
+    ctx_explorer: "📂 Show folder in Finder",
+    ssh_hint: "A session runs as your Mac account, with your rights. Every connection asks permission first; everything is recorded in an audit trail.",
+  });
+}
 function t(k) { return (I18N[settings.lang] || I18N.nl)[k] ?? k; }
 function applyI18n() {
   const d = I18N[settings.lang] || I18N.nl;
@@ -1247,17 +1263,21 @@ function tidySelection(text) {
   if (out.length !== text.length) dbg(`trim ${text.length}->${out.length} regels=${lines.length} inspringing=${dedent}`);
   return out;
 }
-function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\"); }
+function isPosixPath(p) { return typeof p === "string" && (p.startsWith("/") || p.startsWith("~")); }
+function isNetwork(p) { return /^x:/i.test(p) || p.startsWith("\\\\") || /^\/Volumes\//.test(p); }
 function locClass(p) { return isNetwork(p) ? "net" : "local"; }
 // Compacte drive-aanduiding achter de agentnaam: "(C:)" / "(X:)" / "(UNC)".
 // Vervangt de bredere LOCAL/NETWORK-regel zodat er meer agents in de lijst passen.
 function driveTag(p) {
   if (p.startsWith("\\\\")) return "(UNC)";
+  if (isPosixPath(p)) return "";
   const d = (p.match(/^([a-z]):/i) || [])[1];
   return d ? `(${d.toUpperCase()}:)` : "";
 }
 function locText(p) {
   if (p.startsWith("\\\\")) return t("loc_net") + " (UNC)";
+  // macOS: /Volumes/... is een ander volume (extern of netwerk), de rest is lokaal.
+  if (isPosixPath(p)) return isNetwork(p) ? t("loc_net") : t("loc_local");
   const d = (p.match(/^([a-z]):/i) || [])[1];
   if (!d) return t("loc_unknown");
   return (isNetwork(p) ? t("loc_net") : t("loc_local")) + ` (${d.toUpperCase()}:)`;
@@ -3857,9 +3877,16 @@ async function closeSession(id) {
 const padRe = () => /([A-Za-z]:[\\/][^\s"'<>|]+?\.(?:html?|md)|[\w.\-\\/]+\.(?:html?|md))/gi;
 // Een pad uit de terminal absoluut maken tegen de werkmap van de sessie, en de
 // leestekens eraf halen die er in een zin achteraan plakken.
+// Een POSIX-werkmap (macOS, Linux) krijgt POSIX-regels: /... is absoluut en er
+// wordt met / gejoind. Voorheen werd /Users/... achter de werkmap geplakt, met
+// een backslash ertussen (#214).
 function absPreviewPath(s, rawPath) {
   const p = String(rawPath).trim().replace(/[)\].,;:'"]+$/, "");
   if (/^([A-Za-z]:[\\/]|\\\\)/.test(p)) return p;
+  if (isPosixPath(s.path)) {
+    if (p.startsWith("/")) return p;
+    return s.path.replace(/\/+$/, "") + "/" + p.replace(/^[.]\//, "");
+  }
   return s.path.replace(/[\\/]+$/, "") + "\\" + p.replace(/^[.][\\/]/, "").replace(/\//g, "\\");
 }
 function applyLayout(s) {
@@ -6362,12 +6389,16 @@ async function addFileViaPicker() {
     if (f) await dropToRemote(f);
     return;
   }
-  const inputDir = cwd.replace(/\//g, "\\").replace(/\\+$/, "") + "\\input";
+  // Scheidingsteken van de werkmap zelf: op macOS maakte "\\input" anders een
+  // map die letterlijk "<naam>\\input" heette (#214).
+  const sep = isPosixPath(cwd) ? "/" : "\\";
+  const norm = (x) => (sep === "/" ? x : x.replace(/\//g, "\\"));
+  const inputDir = norm(cwd).replace(/[\\/]+$/, "") + sep + "input";
   let file = null;
   try { file = await invoke("pick_file", { startDir: inputDir }); } catch (_) { return; }
   if (!file) return; // geannuleerd
-  const nf = file.replace(/\//g, "\\");
-  const parent = nf.slice(0, nf.lastIndexOf("\\"));
+  const nf = norm(file);
+  const parent = nf.slice(0, nf.lastIndexOf(sep));
   if (parent.toLowerCase() === inputDir.toLowerCase()) {
     // Al in de input-map: gewoon het pad in de prompt (en in het overzicht).
     insertPathIntoTerminal(file, true);
