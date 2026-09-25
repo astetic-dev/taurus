@@ -7933,6 +7933,15 @@ fn mac_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu:
             &quit,
         ],
     )?;
+    // Tab-acties als menu-items, zoals Safari en Terminal (#229). Een Cmd-toets
+    // die geen menu-item heeft geeft op macOS een piep, ook als de webview hem ziet.
+    let item = |id: &str, label: &str, key: &str| MenuItem::with_id(app, id, label, true, Some(key));
+    let file = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[&item("tab-new", "New Tab", "Cmd+T")?, &item("tab-close", "Close Tab", "Cmd+W")?],
+    )?;
     let edit = Submenu::with_items(
         app,
         "Edit",
@@ -7955,9 +7964,15 @@ fn mac_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu:
             &PredefinedMenuItem::minimize(app, None)?,
             &PredefinedMenuItem::maximize(app, None)?,
             &PredefinedMenuItem::fullscreen(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &item("tab-prev", "Show Previous Tab", "Cmd+Shift+BracketLeft")?,
+            &item("tab-next", "Show Next Tab", "Cmd+Shift+BracketRight")?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit, &window])
+    for n in 1..=9 {
+        window.append(&item(&format!("tab-{n}"), &format!("Tab {n}"), &format!("Cmd+Digit{n}"))?)?;
+    }
+    Menu::with_items(app, &[&app_menu, &file, &edit, &window])
 }
 
 // Een app die uit Finder of het Dock start krijgt het minimale PATH van launchd
@@ -8036,13 +8051,17 @@ pub fn run() {
     // macOS: een eigen menu in plaats van Tauri's standaardmenu (#216). Zie mac_menu.
     #[cfg(target_os = "macos")]
     let builder = builder.menu(mac_menu).on_menu_event(|app, event| {
-        if event.id() == "quit" {
+        let id = event.id().as_ref();
+        if id == "quit" {
             // Via het venster, zodat Cmd+Q dezelfde vraag stelt als de sluitknop.
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.close();
             } else {
                 app.exit(0);
             }
+        } else if id.starts_with("tab-") {
+            // De frontend kent de tabs; hij doet wat de toets vroeger deed.
+            let _ = app.emit("menu-action", id);
         }
     });
     builder

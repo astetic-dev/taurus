@@ -6162,6 +6162,15 @@ function cycleTab(dir) {
   idx = (idx + dir + order.length) % order.length;
   showView(order[idx]);
 }
+// Eén plek voor de tab-acties: toets (Windows) en menu (macOS) doen hetzelfde.
+function tabAction(id) {
+  if (id === "tab-new") { resetLaunchForm(); showView("new"); }
+  else if (id === "tab-close") { if (current !== "new") closeSession(current); }
+  else if (id === "tab-next") cycleTab(1);
+  else if (id === "tab-prev") cycleTab(-1);
+  else if (/^tab-[1-9]$/.test(id)) selectNthTab(parseInt(id.slice(4)));
+}
+listen("menu-action", (e) => { if (settings.tabShortcuts || e.payload === "tab-close" || e.payload === "tab-new") tabAction(e.payload); });
 function selectNthTab(n) { const ids = tabIds(); if (n >= 1 && n <= ids.length) showView(ids[n - 1]); }
 
 document.addEventListener("keydown", (e) => {
@@ -6202,9 +6211,11 @@ document.addEventListener("keydown", (e) => {
   if (settings.tabShortcuts) {
     // Ctrl+Tab ook op de Mac: dat is daar de gewone tabwissel (Safari, Terminal).
     if ((IS_MAC ? e.ctrlKey && !e.metaKey : ctrl) && e.key === "Tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
-    if (ctrl && (e.key === "t" || e.key === "T")) { e.preventDefault(); resetLaunchForm(); showView("new"); return; }
-    if (ctrl && (e.key === "w" || e.key === "W")) { e.preventDefault(); if (current !== "new") closeSession(current); return; }
-    if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); selectNthTab(parseInt(e.key)); return; }
+    // macOS: ⌘T / ⌘W / ⌘1..9 lopen via het menu (menu-action hieronder, #229).
+    if (IS_MAC) return;
+    if (ctrl && (e.key === "t" || e.key === "T")) { e.preventDefault(); tabAction("tab-new"); return; }
+    if (ctrl && (e.key === "w" || e.key === "W")) { e.preventDefault(); tabAction("tab-close"); return; }
+    if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); tabAction("tab-" + e.key); return; }
   }
 }, true);
 
