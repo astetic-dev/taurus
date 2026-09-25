@@ -1874,6 +1874,15 @@ fn ssh_run(host: &Host, remote_cmd: &str) -> Result<(String, bool), String> {
     Ok((s, out.status.success()))
 }
 
+// Is dit `uname -sm` van een POSIX-host? "linux" is in hosts.json de naam voor
+// de hele POSIX-kant, macOS en de BSD's inbegrepen (zie announced_os() in
+// discovery.rs). Staat Git for Windows op het PATH van een Windows-host, dan
+// antwoordt uname daar met MINGW64_NT/MSYS_NT/CYGWIN_NT -- dat blijft Windows.
+fn uname_is_posix(out: &str) -> bool {
+    let first = out.split_whitespace().next().unwrap_or("").to_lowercase();
+    matches!(first.as_str(), "linux" | "darwin" | "freebsd" | "openbsd" | "netbsd")
+}
+
 // Alles wat we van een host willen weten, in twee ssh-rondes: eerst het OS,
 // daarna een OS-specifieke inventarisatie. Duur genoeg (handshake) om los te
 // staan van de goedkope TCP-check van check_hosts.
@@ -1892,7 +1901,7 @@ fn probe_host(host: Host) -> HostProbe {
             p.error = e;
             return p;
         }
-        Ok((out, ok)) if ok && out.to_lowercase().contains("linux") => {
+        Ok((out, ok)) if ok && uname_is_posix(&out) => {
             p.auth_ok = true;
             p.os = "linux".into();
         }
@@ -9539,6 +9548,18 @@ mod tests {
         }
         assert_eq!(remote_agent_program("agy", "linux"), "agy");
         assert_eq!(remote_agent_program("agy", "windows"), "agy.exe");
+    }
+
+    #[test]
+    fn uname_of_a_mac_is_posix_and_git_for_windows_is_not() {
+        assert!(uname_is_posix("Linux x86_64\n"));
+        assert!(uname_is_posix("Darwin arm64\n"));
+        assert!(uname_is_posix("FreeBSD amd64"));
+        assert!(!uname_is_posix("MINGW64_NT-10.0-26200 x86_64"));
+        assert!(!uname_is_posix("MSYS_NT-10.0 x86_64"));
+        assert!(!uname_is_posix("CYGWIN_NT-10.0 x86_64"));
+        assert!(!uname_is_posix("'uname' is not recognized as an internal or external command"));
+        assert!(!uname_is_posix(""));
     }
 
     #[test]
