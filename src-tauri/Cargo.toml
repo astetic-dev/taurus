@@ -99,3 +99,8 @@ windows = { version = "0.61", features = [
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
+
+# Unix: signalen voor het opruimen van een procesboom (#218). Al in de tree via
+# portable-pty.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

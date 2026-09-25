@@ -5501,6 +5501,7 @@ dependencies = [
  "cpal",
  "flate2",
  "hound",
+ "libc",
  "mdns-sd",
  "objc2-app-kit",
  "objc2-foundation",
