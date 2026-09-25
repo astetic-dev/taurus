@@ -6584,6 +6584,14 @@ fn push_voices(out: &mut Vec<String>, engine: &str, script: &str) {
 // `(async)`: wacht op PowerShell; niet op de main thread.
 #[tauri::command(async)]
 fn list_tts_voices() -> Vec<String> {
+    // macOS: de stemmen van `say` (#222).
+    #[cfg(target_os = "macos")]
+    return std::process::Command::new("say")
+        .args(["-v", "?"])
+        .output()
+        .map(|o| parse_say_voices(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
+    #[allow(unreachable_code)]
     let mut out = Vec::new();
     push_voices(
         &mut out,
@@ -6604,8 +6612,42 @@ fn list_tts_voices() -> Vec<String> {
 // Spreek tekst uit (asynchroon kindproces; blokkeert de UI nooit). Tekst wordt
 // afgekapt en PS-single-quote-ge-escaped; een onbekende stem valt stil terug
 // op de default.
+// `say -v '?'`: "Xander              nl_NL    # Hallo! Mijn naam is Xander." Een
+// naam kan spaties bevatten ("Bad News", "Eddy (Nederlands (Nederland))"), dus de
+// taalcode is het anker: het laatste woord in de vorm xx_YY voor de '#'.
+#[cfg(target_os = "macos")]
+fn parse_say_voices(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .filter_map(|l| {
+            let head = l.split('#').next()?.trim_end();
+            let (name, lang) = head.rsplit_once(char::is_whitespace)?;
+            let ok = lang.len() >= 5 && lang.as_bytes()[2] == b'_';
+            ok.then(|| format!("say|{}|{}", lang.replace('_', "-"), name.trim()))
+        })
+        .collect()
+}
+
 #[tauri::command]
 fn speak_text(text: String, voice: String, rate: i32) -> Result<(), String> {
+    // macOS: `say`, met de tekst als argument -- geen shell, dus niets te escapen
+    // (#222). -10..10 -> 85..265 woorden per minuut; 175 is normaal.
+    #[cfg(target_os = "macos")]
+    {
+        let t: String = text.chars().take(2000).collect();
+        if t.trim().is_empty() {
+            return Ok(());
+        }
+        let wpm = 175 + rate.clamp(-10, 10) * 9;
+        let mut c = std::process::Command::new("say");
+        let name = voice.rsplit('|').next().unwrap_or("").trim();
+        if !name.is_empty() {
+            c.args(["-v", name]);
+        }
+        c.args(["-r", &wpm.to_string(), "--", &t]);
+        return c.spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
+    #[allow(unreachable_code)]
     let t: String = text.chars().take(2000).collect::<String>().replace('\'', "''");
     if t.trim().is_empty() {
         return Ok(());
@@ -7008,6 +7050,14 @@ fn stt_download(
     model_url: String,
     model_sha256: String,
 ) -> Result<(), String> {
+    // De vastgepinde engine is een Windows-build en de download loopt via
+    // PowerShell en tar.exe. Buiten Windows staat STT voorlopig uit (#222).
+    #[cfg(not(windows))]
+    {
+        let _ = (&app, &engine_url, &engine_sha256, &model_url, &model_sha256);
+        return Err("Speech to text is not available on this platform yet.".into());
+    }
+    #[allow(unreachable_code)]
     for u in [&engine_url, &model_url] {
         if !u.starts_with("https://") {
             return Err(format!("https URLs only: {}", u));
@@ -10172,6 +10222,23 @@ mod tests {
         assert!(ok.success());
         assert_eq!(clipboard_file_paths(), vec![f.to_string_lossy().into_owned()]);
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn say_voices_keep_names_with_spaces() {
+        let l = "Albert              en_US    # Hello! My name is Albert.\n\
+                 Bad News            en_US    # The light you see at the end of the tunnel.\n\
+                 Eddy (Nederlands (Nederland)) nl_NL    # Hallo! Ik heet Eddy.\n\
+                 kapot\n";
+        assert_eq!(
+            parse_say_voices(l),
+            vec![
+                "say|en-US|Albert".to_string(),
+                "say|en-US|Bad News".to_string(),
+                "say|nl-NL|Eddy (Nederlands (Nederland))".to_string(),
+            ]
+        );
     }
 
     #[cfg(not(windows))]
