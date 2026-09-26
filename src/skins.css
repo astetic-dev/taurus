@@ -53,7 +53,7 @@ html[data-skin="retro-win"] button,
 html[data-skin="retro-win"] input,
 html[data-skin="retro-win"] select,
 html[data-skin="retro-win"] textarea {
-  font-family: "MS Sans Serif", Tahoma, "Segoe UI", sans-serif;
+  font-family: var(--icon-font,) "MS Sans Serif", Tahoma, "Segoe UI", sans-serif;
 }
 /* Square chrome */
 html[data-skin="retro-win"] .project-card,
@@ -195,7 +195,7 @@ html[data-skin="winxp"] button,
 html[data-skin="winxp"] input,
 html[data-skin="winxp"] select,
 html[data-skin="winxp"] textarea {
-  font-family: Tahoma, "Segoe UI", sans-serif;
+  font-family: var(--icon-font,) Tahoma, "Segoe UI", sans-serif;
 }
 /* Luna tabs: vivid blue "active window" title bar, greyed inactive */
 html[data-skin="winxp"] .tabbar { background: #ece9d8; border-bottom: 1px solid #aebfdf; }
@@ -277,7 +277,7 @@ html[data-skin="retro-mac"] button,
 html[data-skin="retro-mac"] input,
 html[data-skin="retro-mac"] select,
 html[data-skin="retro-mac"] textarea {
-  font-family: Geneva, Charcoal, Verdana, "Segoe UI", sans-serif;
+  font-family: var(--icon-font,) Geneva, Charcoal, Verdana, "Segoe UI", sans-serif;
 }
 /* Crisp 1px black chrome (System 7) */
 html[data-skin="retro-mac"] .project-card,
@@ -366,7 +366,7 @@ html[data-skin="aqua"] button,
 html[data-skin="aqua"] input,
 html[data-skin="aqua"] select,
 html[data-skin="aqua"] textarea {
-  font-family: "Lucida Grande", "Helvetica Neue", "Segoe UI", sans-serif;
+  font-family: var(--icon-font,) "Lucida Grande", "Helvetica Neue", "Segoe UI", sans-serif;
 }
 /* Subtle pinstripe on the main surfaces */
 html[data-skin="aqua"] .sidebar,
@@ -436,7 +436,7 @@ html[data-skin="terminal"] button,
 html[data-skin="terminal"] input,
 html[data-skin="terminal"] select,
 html[data-skin="terminal"] textarea {
-  font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+  font-family: var(--icon-font,) "Cascadia Code", Consolas, "Courier New", monospace;
 }
 /* Phosphor glow + square chrome */
 html[data-skin="terminal"] .brand-title,
