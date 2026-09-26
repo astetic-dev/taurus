@@ -306,6 +306,7 @@ const I18N = {
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
     skin_system: "Systeem (volgt licht/donker)",
     set_icons: "Iconen", icons_emoji: "Standaard", icons_line: "Lijn",
+    brand_toggle: "Klik om het logo in of uit te klappen",
     help_icons: "Welke iconen de knoppen en menu's tonen. Een thema kiest zijn eigen standaard; daarna kun je hier wisselen.", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light",
@@ -665,6 +666,7 @@ const I18N = {
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
     skin_system: "System (follows light/dark)",
     set_icons: "Icons", icons_emoji: "Standard", icons_line: "Line",
+    brand_toggle: "Click to collapse or expand the logo",
     help_icons: "Which icons buttons and menus show. A theme picks its own default; after that you can switch here.", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light",
@@ -938,6 +940,13 @@ function termThemeFromCss(accent) {
     selectionBackground: v("--term-sel", "#33405c"),
   };
 }
+// Ingeklapt logo (#247): klein logo met de naam op één regel.
+function applyBrandMin() {
+  document.querySelector(".sidebar")?.classList.toggle("brand-min", !!settings.brandMin);
+  document.querySelector(".brand")?.setAttribute("aria-expanded", settings.brandMin ? "false" : "true");
+  if (systemSkinOn) placeSidebarGlass();
+}
+
 // Iconensets (#245): per thema een standaard en de sets die erbij passen. Een
 // thema kiezen zet zijn standaard; daarna mag je binnen die lijst wisselen.
 // "line" = het icoonlettertype uit styles.css (data-icons="line").
@@ -6990,6 +6999,13 @@ window.addEventListener("DOMContentLoaded", () => {
     dropperList: document.querySelector("#dropper-list"),
     dropperPaste: document.querySelector("#dropper-paste"),
   });
+  // Logo in- en uitklappen (#247): klik of Enter/spatie, onthouden in settings.
+  {
+    const brand = document.querySelector(".brand");
+    const flip = () => { settings.brandMin = !settings.brandMin; saveSettings(); applyBrandMin(); };
+    brand?.addEventListener("click", flip);
+    brand?.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+  }
   // Een ander thema kiezen zet de iconen op de standaard van dat thema (#245).
   els.setSkin?.addEventListener("change", () => fillIconSelect(normSkin(els.setSkin.value), null));
 
@@ -7208,6 +7224,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   loadSettings();
+  applyBrandMin();
   applyI18n();
   wireGarble();
   wireFileDropper();
