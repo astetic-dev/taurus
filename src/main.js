@@ -1828,7 +1828,7 @@ function renderHostRows() {
         <span class="host-dot ${machineDotClass(m)}"></span>
         <div class="host-main">
           <div class="host-name">${escapeHtml(m.label)}</div>
-          <div class="host-sub">${escapeHtml((pref.user ? pref.user + "@" : "") + pref.hostname)} · ${escapeHtml(pref.os || "?")}</div>
+          <div class="host-sub">${escapeHtml((pref.user ? pref.user + "@" : "") + pref.hostname)} · ${escapeHtml(pref.os_name || pref.os || "?")}</div>
         </div>
         <button class="machine-sess-toggle" title="${escapeHtml(t("machine_agents_hint"))}">${escapeHtml(t("machine_agents"))}</button>
         <button class="machine-connect" title="${escapeHtml(t("machine_new_hint"))}">${escapeHtml(t("machine_new"))}</button>
@@ -1847,7 +1847,7 @@ function renderHostRows() {
         <span class="host-dot ${cls}" title="${escapeHtml(label)}"></span>
         <span class="route-name">${escapeHtml(routeLabel(r))}</span>
         ${r.id === m.preferred && m.routes.length > 1 ? `<span class="route-pref">${escapeHtml(t("route_preferred"))}</span>` : ""}
-        <span class="route-mux">${escapeHtml([r.os, r.mux || "none"].filter(Boolean).join(" · "))}</span>
+        <span class="route-mux">${escapeHtml([r.os_name || r.os, r.mux || "none"].filter(Boolean).join(" · "))}</span>
         <button class="host-test" title="${escapeHtml(t("host_retest"))}">↻</button>
         <button class="host-del" title="${escapeHtml(t("host_del"))}">🗑</button>`;
       row.querySelector(".host-test").addEventListener("click", () => testExistingHost(hosts.findIndex((h) => h.id === r.id)));
@@ -2381,6 +2381,7 @@ async function addAndTestHost() {
     return;
   }
   host.os = p.os;
+  host.os_name = p.os_name || "";
   // tmux in de keuzelijst dekt ook psmux: dat is dezelfde commandotaal, en welke
   // van de twee er staat is een eigenschap van de machine, geen keuze.
   host.mux = wantMux === "tmux" ? (found.includes("tmux") ? "tmux" : "psmux")
@@ -2431,7 +2432,7 @@ async function testExistingHost(i) {
     // reden dat je hertest na het installeren van herdr. Heb je zelf iets
     // vastgezet, dan blijft dat staan; anders draait deze knop je keuze terug.
     const auto = h.mux_auto !== false;
-    hosts[i] = { ...h, os: p.os, mux: auto ? (p.mux || "none") : h.mux };
+    hosts[i] = { ...h, os: p.os, os_name: p.os_name || "", mux: auto ? (p.mux || "none") : h.mux };
     await invoke("save_hosts", { hosts });
     await refreshMachines();
     await tuneHerdrChrome(hosts[i]);
@@ -2455,7 +2456,7 @@ function showProbeReport(p, tuned) {
   const lines = [];
   if (tuned === "ok") lines.push(t("host_herdr_tuned"));
   else if (tuned && tuned.startsWith("err:")) lines.push(t("host_herdr_tune_failed").replace("{err}", tuned.slice(4)));
-  if (p.os) lines.push(`OS: ${p.os}`);
+  if (p.os) lines.push(`OS: ${p.os_name || p.os}`);
   if (p.claude) lines.push(`agent: ${p.claude}`);
   else if (p.authOk) lines.push(t("host_no_claude"));
   if (p.authOk && !p.outbound) lines.push(t("host_no_outbound"));
