@@ -564,3 +564,59 @@ html[data-skin="catppuccin"] {
   --term-fg: #cdd6f4;
   --term-sel: #313244;
 }
+
+/* ============ Systeem (#240) ============ */
+/* De standaard: volgt licht/donker van het OS (prefers-color-scheme) en zijn
+   accentkleur (--os-accent, gezet vanuit system_accent). Kleuren zoals macOS ze
+   noemt: windowBackground, labelColor, secondaryLabelColor, separator. Op
+   Windows dezelfde opbouw, met de systeemletter van Windows. */
+html[data-skin="system"] {
+  --bg: #ffffff;
+  --bg-panel: #f2f2f4;
+  --bg-card: #ffffff;
+  --bg-card-hover: #ececef;
+  --border: #dcdce0;
+  --text: #1d1d1f;
+  --text-dim: #6e6e73;
+  --accent: var(--os-accent, #007aff);
+  --green: #248a3d;
+  --orange: #b25000;
+  --red: #d70015;
+  --term-bg: #ffffff;
+  --term-fg: #1d1d1f;
+  --term-sel: #b3d7ff;
+  --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  html[data-skin="system"] {
+    --bg: #1e1e1e;
+    --bg-panel: #28282a;
+    --bg-card: #2c2c2e;
+    --bg-card-hover: #3a3a3c;
+    --border: #3a3a3c;
+    --text: #f5f5f7;
+    --text-dim: #98989d;
+    --accent: var(--os-accent, #0a84ff);
+    --green: #30d158;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --term-bg: #1e1e1e;
+    --term-fg: #e8e8ea;
+    --term-sel: #3f638b;
+    color-scheme: dark;
+  }
+}
+/* macOS: de zijbalk zweeft als glas (NSGlassEffectView, zie macos_ui.rs) boven
+   de vensterachtergrond. De pagina maakt alleen de zijbalk doorzichtig; de
+   rechterkant blijft ondoorzichtig. `glass` komt pas op <html> als de backend
+   de achter-view echt heeft neergezet. */
+html[data-skin="system"].glass,
+html[data-skin="system"].glass body { background: transparent; }
+html[data-skin="system"].glass .panel { background: var(--bg); }
+html[data-skin="system"].glass .sidebar {
+  background: transparent;
+  border-right: 0;
+  margin: 8px;
+  border-radius: 16px;
+}

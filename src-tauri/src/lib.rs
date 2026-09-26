@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 // Taurus als SSH-host: inkomende sessies met toestemming in de GUI (#121).
 mod discovery;
 mod platform;
+#[cfg(target_os = "macos")]
+mod macos_ui;
 mod sshhost;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -2734,6 +2736,78 @@ fn pick_file(app: AppHandle, start_dir: String) -> Option<String> {
     b.blocking_pick_file()
         .and_then(|p| p.into_path().ok())
         .map(|p| p.to_string_lossy().into_owned())
+}
+
+// ---------- systeemthema (#240) ----------
+
+// De accentkleur van het OS als #rrggbb, of None als die niet te lezen is.
+#[tauri::command(async)]
+fn system_accent() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    return macos_ui::accent_hex();
+    #[cfg(windows)]
+    {
+        let mut c = std::process::Command::new("reg");
+        c.args(["query", r"HKCU\Software\Microsoft\Windows\DWM", "/v", "AccentColor"]);
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        let out = c.output().ok()?;
+        return parse_dwm_accent(&String::from_utf8_lossy(&out.stdout));
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+// `reg query` geeft "AccentColor    REG_DWORD    0xff9d5a00". DWM bewaart hem als
+// 0xAABBGGRR, dus rood zit in de laagste byte.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn parse_dwm_accent(out: &str) -> Option<String> {
+    let hex = out
+        .lines()
+        .find(|l| l.contains("AccentColor"))?
+        .split_whitespace()
+        .last()?
+        .trim_start_matches("0x");
+    let v = u32::from_str_radix(hex, 16).ok()?;
+    Some(format!("#{:02x}{:02x}{:02x}", v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff))
+}
+
+#[derive(serde::Deserialize)]
+struct GlassRect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    radius: f64,
+    // window.innerHeight: de pagina is lager dan de webview (titelbalk).
+    vh: f64,
+}
+
+// Leg de glazen achtergrond van macOS onder de zijbalk, of haal hem weg (None).
+// Geeft terug of hij er nu staat; elders altijd false. `(async)`: with_webview
+// draait op de main thread, en een synchroon command dat daarop wacht zou
+// daar zelf al staan -- de hang van #204.
+#[tauri::command(async)]
+fn set_sidebar_glass(window: tauri::WebviewWindow, rect: Option<GlassRect>) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let r = rect.map(|g| (g.x, g.y, g.w, g.h, g.radius, g.vh));
+        let sent = window.with_webview(move |wv| {
+            // SAFETY: with_webview draait dit op de main thread met de echte WKWebView.
+            let ok = unsafe { macos_ui::set_sidebar_backdrop(wv.inner(), r) };
+            let _ = tx.send(ok);
+        });
+        if sent.is_err() {
+            return false;
+        }
+        return rx.recv().unwrap_or(false);
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (window, rect);
+        false
+    }
 }
 
 #[tauri::command]
@@ -8269,6 +8343,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_projects,
             save_projects,
+            system_accent,
+            set_sidebar_glass,
             get_roles,
             save_roles,
             git_available,
@@ -9908,6 +9984,14 @@ mod tests {
         }
         assert_eq!(remote_agent_program("agy", "linux"), "agy");
         assert_eq!(remote_agent_program("agy", "windows"), "agy.exe");
+    }
+
+    #[test]
+    fn the_windows_accent_is_read_from_abgr() {
+        let out = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\DWM\r\n    AccentColor    REG_DWORD    0xff9d5a00\r\n";
+        // 0xAABBGGRR: rood 00, groen 5a, blauw 9d.
+        assert_eq!(parse_dwm_accent(out).as_deref(), Some("#005a9d"));
+        assert_eq!(parse_dwm_accent("ERROR: not found"), None);
     }
 
     #[test]

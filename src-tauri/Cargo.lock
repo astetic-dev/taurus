@@ -5503,6 +5503,7 @@ dependencies = [
  "hound",
  "libc",
  "mdns-sd",
+ "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "png 0.17.16",
