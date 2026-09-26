@@ -30,8 +30,8 @@ html[data-skin="brand"] .brand-logo {
   margin: 0 0 6px;
   filter: none;
 }
-html[data-skin="brand"] .sidebar.brand-min .brand { flex-direction: row; align-items: center; }
-html[data-skin="brand"] .sidebar.brand-min .brand-logo { width: 28px; margin: 0; }
+html[data-skin="brand"] .sidebar.brand-min .brand { display: grid; grid-template-columns: 30px 1fr; align-items: center; }
+html[data-skin="brand"] .sidebar.brand-min .brand-logo { width: 30px; margin: 0; grid-row: 1 / span 2; }
 
 /* ============ Retro Windows (95/98) ============ */
 html[data-skin="retro-win"] {
