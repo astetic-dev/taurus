@@ -562,6 +562,15 @@ select:-webkit-autofill {
 .sidebar.brand-min .brand-logo { width: 30px; margin: 0; filter: none; grid-row: 1 / span 2; }
 .sidebar.brand-min .brand-title { font-size: 16px; line-height: 1.15; text-align: left; }
 .sidebar.brand-min .brand-sub { font-size: 10px; line-height: 1.2; text-align: left; }
+/* Ingeklapt met een breed woordmerk (#258): het woordmerk op een eigen regel op
+   lage hoogte, naam en ondertitel links eronder. html[data-skin] zodat dit ook
+   boven de merk-skin-regels in skins.css wint. */
+html[data-skin] .sidebar.brand-min .brand.brand-wide {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0;
+}
+html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
+  width: auto; height: auto; max-width: min(130px, 100%); margin: 2px 0 5px; grid-row: auto;
+}
 @media (prefers-reduced-motion: reduce) { .brand-logo { transition: none; } }
 
 /* ---- File-dropper (sidebar) ---- */
