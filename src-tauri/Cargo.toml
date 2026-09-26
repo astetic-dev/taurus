@@ -97,8 +97,11 @@ windows = { version = "0.61", features = [
 # (NSPasteboard, public.file-url) voor "Plak object" (#212). Versies zoals tao/wry
 # ze al in de tree hebben, zodat er geen extra versie bijkomt.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
+# NSGlassEffectView/NSVisualEffectView/NSColor: de glazen zijbalk en de
+# accentkleur van het systeemthema (#240).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem", "NSGlassEffectView", "NSVisualEffectView", "NSView", "NSResponder", "NSColor", "NSColorSpace", "NSGraphics", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL", "NSValue", "NSGeometry", "NSObject", "objc2-core-foundation"] }
 
 # Unix: signalen voor het opruimen van een procesboom (#218). Al in de tree via
 # portable-pty.
