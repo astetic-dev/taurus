@@ -7012,6 +7012,13 @@ window.addEventListener("DOMContentLoaded", () => {
     const flip = () => { settings.brandMin = !settings.brandMin; saveSettings(); applyBrandMin(); };
     brand?.addEventListener("click", flip);
     brand?.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+    // Een breed merklogo (woordmerk uit branding.json) past niet in het vierkante
+    // ingeklapte vakje: 683x46 werd daar 30x2 px (#258). Bij elke (her)laad van
+    // het plaatje opnieuw bepalen, want branding zet de src later.
+    const logo = document.querySelector(".brand-logo");
+    const markWide = () => brand?.classList.toggle("brand-wide", logo.naturalHeight > 0 && logo.naturalWidth / logo.naturalHeight > 2);
+    logo?.addEventListener("load", markWide);
+    if (logo?.complete) markWide();
   }
   // Mac-only instellingen (#249) niet tonen waar ze niets doen.
   if (!IS_MAC) document.querySelectorAll(".mac-only").forEach((el) => el.classList.add("hidden"));
