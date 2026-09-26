@@ -3,7 +3,7 @@ const { invoke } = window.__TAURI__.core;
 // buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
 // was twee avonden lang de onbekende. Zie je hier een ander nummer dan
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
-const UI_BUILD = "ui-6";
+const UI_BUILD = "ui-7";
 const { listen } = window.__TAURI__.event;
 // macOS (WKWebView) of niet. Eén vlag voor de plekken waar de webview of het OS
 // anders is dan op Windows (#199).
