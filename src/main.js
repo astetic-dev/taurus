@@ -332,7 +332,7 @@ const I18N = {
     stt_ready_lbl: "geïnstalleerd", stt_missing_lbl: "niet geïnstalleerd",
     stt_autosend: "Transcript direct versturen (Enter)",
     stt_registry: "Modellenbibliotheek-URL", stt_refresh: "Vernieuw lijst",
-    stt_failed: "✗ Transcriptie mislukt:", stt_rec: "● Opname… (laat F9 los = stop)",
+    stt_failed: "✗ Transcriptie mislukt:", stt_no_mic: "✗ Geen microfoon beschikbaar. Sluit er een aan, of kies er een via Instellingen → Systeem → Geluid → Invoer.", stt_rec: "● Opname… (laat F9 los = stop)",
     rec_idle: "Klik of F9 = dicteren", rec_listening: "● Luisteren…", rec_transcribing: "Transcriberen…",
     tab_network: "Netwerk",
     grp_reachable: "Bereikbaar op het netwerk",
@@ -689,7 +689,7 @@ const I18N = {
     stt_ready_lbl: "installed", stt_missing_lbl: "not installed",
     stt_autosend: "Send transcript immediately (Enter)",
     stt_registry: "Model library URL", stt_refresh: "Refresh list",
-    stt_failed: "✗ Transcription failed:", stt_rec: "● Recording… (release F9 to stop)",
+    stt_failed: "✗ Transcription failed:", stt_no_mic: "✗ No microphone available. Connect one, or choose one in Settings → System → Sound → Input.", stt_rec: "● Recording… (release F9 to stop)",
     rec_idle: "Click or F9 to dictate", rec_listening: "● Listening…", rec_transcribing: "Transcribing…",
     tab_network: "Network",
     grp_reachable: "Reachable on the network",
@@ -747,6 +747,7 @@ if (IS_MAC) {
     voice_natural: "macOS-stemmen",
     stt_head: "Spraak naar tekst — fn+F9 inhouden (of klik 🎙)",
     stt_downloading: "Bezig met downloaden… (zie stt/download.log)",
+    stt_no_mic: "✗ Geen microfoon beschikbaar. Sluit er een aan, of kies er een in Systeeminstellingen → Geluid → Invoer.",
     rec_idle: "Klik of fn+F9 = dicteren", stt_rec: "● Opname… (laat fn+F9 los = stop)",
     voice_install_hint: "Meer stemmen of talen nodig? Voeg ze toe via Systeeminstellingen → Toegankelijkheid → Gesproken materiaal → Systeemstem → Beheer stemmen.",
     ssh_hint: "Een sessie draait als jouw Mac-account, met jouw rechten. Elke verbinding vraagt eerst toestemming; alles wordt vastgelegd in een audit-spoor.",
@@ -765,6 +766,7 @@ if (IS_MAC) {
     voice_natural: "macOS voices",
     stt_head: "Speech to text — hold fn+F9 (or click 🎙)",
     stt_downloading: "Downloading… (see stt/download.log)",
+    stt_no_mic: "✗ No microphone available. Connect one, or choose one in System Settings → Sound → Input.",
     rec_idle: "Click or fn+F9 to dictate", stt_rec: "● Recording… (release fn+F9 to stop)",
     voice_install_hint: "Need more voices or languages? Add them in System Settings → Accessibility → Spoken Content → System voice → Manage Voices.",
     ssh_hint: "A session runs as your Mac account, with your rights. Every connection asks permission first; everything is recorded in an audit trail.",
@@ -3874,6 +3876,12 @@ let toastTimer = null;
 function toast(msg, kind) {
   const el = els.toast;
   if (!el) return;
+  // Wegklikken kan altijd (#238); de timer blijft de terugval.
+  if (!el.dataset.dismiss) {
+    el.dataset.dismiss = "1";
+    el.addEventListener("click", () => { el.classList.add("hidden"); if (toastTimer) clearTimeout(toastTimer); });
+    el.style.cursor = "pointer";
+  }
   el.textContent = msg;
   el.className = "toast" + (kind ? " " + kind : "");
   if (toastTimer) clearTimeout(toastTimer);
@@ -6596,7 +6604,16 @@ async function sttReconcile() {
     }
   } catch (e) {
     sttRecording = false;
-    toast(t("stt_failed") + " " + e, "err");
+    if (starting) {
+      // Niet kunnen STARTEN is (vrijwel altijd) de microfoon, geen transcriptie.
+      // En de wens terugzetten: anders start finally meteen een nieuwe poging, die
+      // weer faalt -- een eindeloze lus met steeds dezelfde melding (#238).
+      sttWantRecording = false;
+      dbg(`stt start FAIL: ${e}`);
+      toast(t("stt_no_mic"), "err");
+    } else {
+      toast(t("stt_failed") + " " + e, "err");
+    }
   } finally {
     sttBusy = false;
     if (!sttRecording) { stopLevelPoll(); setRecordState("idle"); }
