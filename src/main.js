@@ -746,7 +746,6 @@ if (IS_MAC) {
     ctx_explorer: "📂 Toon map in Finder",
     voice_natural: "macOS-stemmen",
     stt_head: "Spraak naar tekst — fn+F9 inhouden (of klik 🎙)",
-    stt_no_mac_engine: "Dit model heeft geen macOS-engine in de modellenlijst.",
     stt_downloading: "Bezig met downloaden… (zie stt/download.log)",
     rec_idle: "Klik of fn+F9 = dicteren", stt_rec: "● Opname… (laat fn+F9 los = stop)",
     voice_install_hint: "Meer stemmen of talen nodig? Voeg ze toe via Systeeminstellingen → Toegankelijkheid → Gesproken materiaal → Systeemstem → Beheer stemmen.",
@@ -765,7 +764,6 @@ if (IS_MAC) {
     ctx_explorer: "📂 Show folder in Finder",
     voice_natural: "macOS voices",
     stt_head: "Speech to text — hold fn+F9 (or click 🎙)",
-    stt_no_mac_engine: "This model has no macOS engine in the model list.",
     stt_downloading: "Downloading… (see stt/download.log)",
     rec_idle: "Click or fn+F9 to dictate", stt_rec: "● Recording… (release fn+F9 to stop)",
     voice_install_hint: "Need more voices or languages? Add them in System Settings → Accessibility → Spoken Content → System voice → Manage Voices.",
@@ -6492,16 +6490,30 @@ function showFileChooser(file, cwd) {
 // De sha256-checksums zijn verplicht: de backend weigert een download zonder
 // geldige pin (#69), want de engine is een exe die uitgevoerd wordt. De pins
 // hieronder zijn geverifieerd tegen de digests van de GitHub-release-assets.
+const SHERPA = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-";
+// De engines van een model als map platform -> {url, sha256}. Een oudere
+// registry-entry heeft losse velden: engineUrl is de Windows-x64-build, en
+// engineUrlMacos (#231) die voor macOS.
+function modelEngines(m) {
+  const out = { ...(m.engines || {}) };
+  if (m.engineUrl && !out["windows-x64"]) out["windows-x64"] = { url: m.engineUrl, sha256: m.engineSha256 || "" };
+  if (m.engineUrlMacos && !out.macos) out.macos = { url: m.engineUrlMacos, sha256: m.engineSha256Macos || "" };
+  return out;
+}
+const STT_PLATFORM_LABEL = { "macos": "macOS", "windows-x64": "Windows x64", "windows-arm64": "Windows ARM", "linux-x64": "Linux x64", "linux-aarch64": "Linux ARM" };
 const DEFAULT_STT_MODELS = [
   {
     name: "Parakeet TDT 0.6b v3 (int8, EN+EU talen)",
-    engineUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-win-x64-shared-MT-Release.tar.bz2",
-    engineSha256: "0043cd9cdd755d35627299e6a02839e95a262508ae9593af6c5c72ffd674b650",
+    // Per platform een engine (#236); de backend kiest welke deze machine krijgt.
+    // Sleutels zoals stt_platform() in lib.rs. Digests van de release-assets.
+    engines: {
+      "windows-x64": { url: SHERPA + "win-x64-shared-MT-Release.tar.bz2", sha256: "0043cd9cdd755d35627299e6a02839e95a262508ae9593af6c5c72ffd674b650" },
+      "macos": { url: SHERPA + "osx-universal2-shared-no-tts.tar.bz2", sha256: "d01e2bb576c8c7e6124c5866040ab51f372d35b98114a6f2c97354eaf4f8db03" },
+      "linux-x64": { url: SHERPA + "linux-x64-shared-no-tts.tar.bz2", sha256: "e5cbfd96f3666c25d2272d468e337764fce6a4d50ed074e4b8e5021bfd7fefc1" },
+      "linux-aarch64": { url: SHERPA + "linux-aarch64-shared-cpu.tar.bz2", sha256: "dca81c3d36c68e84949158a993e2ea99055bcecc96893f93739209fbe2eac649" },
+    },
     modelUrl: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
     modelSha256: "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
-    // macOS-engine (arm64 + x86_64), zelfde model (#231). Digest van het release-asset.
-    engineUrlMacos: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-osx-universal2-shared-no-tts.tar.bz2",
-    engineSha256Macos: "d01e2bb576c8c7e6124c5866040ab51f372d35b98114a6f2c97354eaf4f8db03",
     size: "~486 MB",
   },
 ];
@@ -6602,7 +6614,9 @@ async function refreshSttStatus() {
   // er altijd, dan nam hij ruimte af van de agents en processen voor iets dat
   // niets doet -- afwezig is eerlijker dan aanwezig-en-stil.
   if (els.recordWidget) els.recordWidget.classList.toggle("hidden", !ok);
-  els.sttState.textContent = st.downloading ? t("stt_downloading") : (ok ? t("stt_ready_lbl") : t("stt_missing_lbl"));
+  // Welke engine deze machine krijgt, zodat je ziet dat het platform herkend is (#236).
+  const plat = st.platform ? ` · ${STT_PLATFORM_LABEL[st.platform] || st.platform}` : "";
+  els.sttState.textContent = (st.downloading ? t("stt_downloading") : (ok ? t("stt_ready_lbl") : t("stt_missing_lbl"))) + plat;
   els.sttState.className = "stt-state " + (ok ? "ok" : "miss");
   els.sttDownload.disabled = !!st.downloading || ok;
   if (st.downloading && !els.settingsModal.classList.contains("hidden")) {
@@ -6985,12 +6999,8 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#set-stt-download").addEventListener("click", async () => {
     const m = sttModels.find((x) => x.name === els.sttModelSel.value) || sttModels[0];
     if (!m) return;
-    // Op macOS de macOS-engine van het model; zonder die velden geen Windows-build
-    // downloaden die hier niet kan draaien (#231).
-    const engineUrl = IS_MAC ? m.engineUrlMacos : m.engineUrl;
-    const engineSha256 = IS_MAC ? m.engineSha256Macos : m.engineSha256;
-    if (!engineUrl) { toast("✗ " + t("stt_no_mac_engine"), "err"); return; }
-    try { await invoke("stt_download", { engineUrl, engineSha256: engineSha256 || "", modelUrl: m.modelUrl, modelSha256: m.modelSha256 || "" }); } catch (e) { toast("✗ " + e, "err"); }
+    // De backend kiest de engine voor deze machine uit de lijst (#236).
+    try { await invoke("stt_download", { engines: modelEngines(m), modelUrl: m.modelUrl, modelSha256: m.modelSha256 || "" }); } catch (e) { toast("✗ " + e, "err"); }
     refreshSttStatus();
   });
   document.querySelector("#set-stt-refresh").addEventListener("click", async () => {

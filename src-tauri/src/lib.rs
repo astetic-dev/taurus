@@ -6932,6 +6932,40 @@ struct SttStatus {
     model: bool,
     downloading: bool,
     recording: bool,
+    // Welke engine deze machine krijgt: de sleutel uit stt_platform() (#236).
+    platform: String,
+}
+
+// De sleutel waaronder een model zijn engine voor DEZE machine draagt (#236).
+// macOS heeft één universal2-build; Windows en Linux verschillen per processor.
+fn stt_platform() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(windows) {
+        if cfg!(target_arch = "aarch64") { "windows-arm64" } else { "windows-x64" }
+    } else if cfg!(target_arch = "aarch64") {
+        "linux-aarch64"
+    } else {
+        "linux-x64"
+    }
+}
+
+#[derive(serde::Deserialize, Clone, Debug)]
+struct SttEngine {
+    url: String,
+    sha256: String,
+}
+
+// De engine voor dit platform uit de lijst van een model, of een melding die zegt
+// naar welk platform we zochten.
+fn pick_engine(
+    engines: &std::collections::HashMap<String, SttEngine>,
+    platform: &str,
+) -> Result<SttEngine, String> {
+    engines
+        .get(platform)
+        .cloned()
+        .ok_or_else(|| format!("This model has no speech engine for {platform}."))
 }
 
 fn stt_paths() -> (Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
@@ -6954,6 +6988,7 @@ fn stt_status(state: State<AppState>) -> SttStatus {
             .stt
             .recording
             .load(std::sync::atomic::Ordering::Relaxed),
+        platform: stt_platform().into(),
     }
 }
 
@@ -7087,11 +7122,12 @@ fn extract_tar_bz2(archive: &Path, dest: &Path) -> Result<(), String> {
 #[tauri::command]
 fn stt_download(
     app: AppHandle,
-    engine_url: String,
-    engine_sha256: String,
+    // Per platform een engine; de backend kiest (#236). Zie stt_platform().
+    engines: std::collections::HashMap<String, SttEngine>,
     model_url: String,
     model_sha256: String,
 ) -> Result<(), String> {
+    let SttEngine { url: engine_url, sha256: engine_sha256 } = pick_engine(&engines, stt_platform())?;
     for u in [&engine_url, &model_url] {
         if !u.starts_with("https://") {
             return Err(format!("https URLs only: {}", u));
@@ -10316,6 +10352,19 @@ mod tests {
         let all = String::from_utf8_lossy(&out.stderr).to_string() + &String::from_utf8_lossy(&out.stdout);
         assert!(all.contains("Speech recognition"), "{all}");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_engine_is_picked_for_this_platform_or_named_missing() {
+        let e = |u: &str| SttEngine { url: u.into(), sha256: "0".repeat(64) };
+        let mut m = std::collections::HashMap::new();
+        m.insert("windows-x64".to_string(), e("https://w"));
+        m.insert("macos".to_string(), e("https://m"));
+        assert_eq!(pick_engine(&m, "macos").unwrap().url, "https://m");
+        let err = pick_engine(&m, "linux-aarch64").unwrap_err();
+        assert!(err.contains("linux-aarch64"), "{err}");
+        // Op deze machine hoort het een bekende sleutel te zijn.
+        assert!(["macos", "windows-x64", "windows-arm64", "linux-x64", "linux-aarch64"].contains(&stt_platform()));
     }
 
     #[cfg(target_os = "macos")]
