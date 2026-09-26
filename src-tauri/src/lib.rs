@@ -2781,6 +2781,9 @@ struct GlassRect {
     radius: f64,
     // window.innerHeight: de pagina is lager dan de webview (titelbalk).
     vh: f64,
+    // Glas boven het bureaublad in plaats van boven de vensterachtergrond (#249).
+    #[serde(default, rename = "seeThrough")]
+    see_through: bool,
 }
 
 // Leg de glazen achtergrond van macOS onder de zijbalk, of haal hem weg (None).
@@ -2792,10 +2795,11 @@ fn set_sidebar_glass(window: tauri::WebviewWindow, rect: Option<GlassRect>) -> b
     #[cfg(target_os = "macos")]
     {
         let (tx, rx) = std::sync::mpsc::channel();
+        let see = rect.as_ref().map(|g| g.see_through).unwrap_or(false);
         let r = rect.map(|g| (g.x, g.y, g.w, g.h, g.radius, g.vh));
         let sent = window.with_webview(move |wv| {
             // SAFETY: with_webview draait dit op de main thread met de echte WKWebView.
-            let ok = unsafe { macos_ui::set_sidebar_backdrop(wv.inner(), r) };
+            let ok = unsafe { macos_ui::set_sidebar_backdrop(wv.inner(), r, see) };
             let _ = tx.send(ok);
         });
         if sent.is_err() {

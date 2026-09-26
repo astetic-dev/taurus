@@ -570,6 +570,10 @@ html[data-skin="system"] {
   --term-fg: #1d1d1f;
   --term-sel: #b3d7ff;
   --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* Vlakken op het glas (#249): half doorzichtig, zodat ze het glas meenemen. */
+  --glass-card: rgba(255, 255, 255, 0.5);
+  --glass-card-hover: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(0, 0, 0, 0.1);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -588,6 +592,9 @@ html[data-skin="system"] {
     --term-bg: #1e1e1e;
     --term-fg: #e8e8ea;
     --term-sel: #3f638b;
+    --glass-card: rgba(255, 255, 255, 0.07);
+    --glass-card-hover: rgba(255, 255, 255, 0.14);
+    --glass-border: rgba(255, 255, 255, 0.12);
     color-scheme: dark;
   }
 }
@@ -603,4 +610,8 @@ html[data-skin="system"].glass .sidebar {
   border-right: 0;
   margin: 8px;
   border-radius: 16px;
+  /* Tegels (dropzone), kaarten en knoppen in de zijbalk op het glas (#249). */
+  --bg-card: var(--glass-card);
+  --bg-card-hover: var(--glass-card-hover);
+  --border: var(--glass-border);
 }
