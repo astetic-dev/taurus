@@ -304,9 +304,9 @@ const I18N = {
     help_groups: "Heeft een map dit aantal tabs, dan schuiven ze samen onder een tab. Mappen met minder houden hun eigen tabs.\nHover (of klik) op zo'n tab om de sessies eronder uit te klappen.\nDe gebundelde tab flitst als een van zijn sessies op je wacht, dus je mist niets.\n0 = nooit bundelen.",
     help_recap: "Toont bij hover het laatste wat die agent zei, ook van tabs die niet in beeld staan.\nGelezen uit het terminalvenster van die sessie zelf; er wordt niets naar de agent gestuurd.",
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
-    skin_system: "Systeem (volgt licht/donker)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
+    skin_system: "Systeem (volgt licht/donker)", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
-    skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
+    skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light",
     restore_failed: "Hervatten mislukt voor:",
     copy_failed: "✗ Kopiëren naar klembord mislukt:",
     save_sessions_failed: "✗ Openstaande sessies opslaan mislukt — na een herstart staan je tabs er niet meer:",
@@ -661,9 +661,9 @@ const I18N = {
     help_groups: "Once one folder holds this many tabs, they collapse into a single tab. Folders with fewer keep their own tabs.\nHover (or click) such a tab to expand its sessions below it.\nThe grouped tab flashes when one of its sessions is waiting for you, so nothing is missed.\n0 = never group.",
     help_recap: "On hover, shows the last thing that agent said — including tabs that are not on screen.\nRead from that session's own terminal view; nothing is sent to the agent.",
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
-    skin_system: "System (follows light/dark)", skin_retromac: "Retro Mac", skin_aqua: "macOS Aqua",
+    skin_system: "System (follows light/dark)", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
-    skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light", skin_catppuccin: "Catppuccin",
+    skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light",
     restore_failed: "Could not resume:",
     copy_failed: "✗ Copy to clipboard failed:",
     save_sessions_failed: "✗ Could not save the open sessions — your tabs will not be there after a restart:",
@@ -934,9 +934,13 @@ function termThemeFromCss(accent) {
     selectionBackground: v("--term-sel", "#33405c"),
   };
 }
+// "default" (het oude donkere thema) is opgegaan in Systeem (#240), en
+// Catppuccin in Dracula: gemeten vrijwel dezelfde kleuren (#243).
+function normSkin(name) {
+  return !name || name === "default" ? "system" : name === "catppuccin" ? "dracula" : name;
+}
 function applySkin(name) {
-  // "default" (het oude donkere thema) is opgegaan in Systeem (#240).
-  const skin = !name || name === "default" ? "system" : name;
+  const skin = normSkin(name);
   document.documentElement.setAttribute("data-skin", skin);
   syncSystemSkin(skin === "system");
   // Garble-effect: standaard alleen aan voor merk-skins; branding kan het
@@ -4997,7 +5001,7 @@ function openSettings() {
   els.setPersistMode.value = persistMode();
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
-  els.setSkin.value = settings.skin || brandingSkin || (brandHasTheme ? "brand" : "system");
+  els.setSkin.value = normSkin(settings.skin || brandingSkin || (brandHasTheme ? "brand" : "system"));
   // Spraak: stemmen één keer ophalen, STT-modellenlijst + status verversen.
   els.ttsOn.checked = settings.ttsEnabled;
   els.ttsRate.value = settings.ttsRate | 0;
