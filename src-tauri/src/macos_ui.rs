@@ -50,7 +50,11 @@ pub fn glass_supported() -> bool {
 //
 // SAFETY: `webview` is de WKWebView-pointer die Tauri's with_webview levert, en
 // deze functie draait op de main thread (with_webview garandeert dat).
-pub unsafe fn set_sidebar_backdrop(webview: *mut c_void, rect: Option<(f64, f64, f64, f64, f64, f64)>) -> bool {
+pub unsafe fn set_sidebar_backdrop(
+    webview: *mut c_void,
+    rect: Option<(f64, f64, f64, f64, f64, f64)>,
+    see_through: bool,
+) -> bool {
     let Some(mtm) = MainThreadMarker::new() else { return false };
     let wv: &NSView = &*(webview as *const NSView);
     let Some(parent) = wv.superview() else { return false };
@@ -64,6 +68,7 @@ pub unsafe fn set_sidebar_backdrop(webview: *mut c_void, rect: Option<(f64, f64,
                 v.setHidden(true);
             }
         });
+        set_window_see_through(wv, false);
         return false;
     };
 
@@ -113,5 +118,17 @@ pub unsafe fn set_sidebar_backdrop(webview: *mut c_void, rect: Option<(f64, f64,
         });
         view.setHidden(false);
     });
+    set_window_see_through(wv, see_through);
     true
+}
+
+// Glas buigt en vervaagt wat erachter ligt. Boven de effen vensterachtergrond
+// valt er niets te buigen; met een doorzichtig venster ligt het glas boven het
+// bureaublad (instelling "Doorzichtige zijbalk", #249). Alleen waar de pagina
+// zelf doorzichtig is (de zijbalk); vensters erachter schemeren dan ook door.
+unsafe fn set_window_see_through(wv: &NSView, on: bool) {
+    let Some(win) = wv.window() else { return };
+    let color = if on { NSColor::clearColor() } else { NSColor::windowBackgroundColor() };
+    let _: () = msg_send![&*win, setOpaque: !on];
+    let _: () = msg_send![&*win, setBackgroundColor: &*color];
 }

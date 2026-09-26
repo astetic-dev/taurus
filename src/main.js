@@ -306,6 +306,8 @@ const I18N = {
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
     skin_system: "Systeem (volgt licht/donker)",
     set_icons: "Iconen", icons_emoji: "Standaard", icons_line: "Lijn",
+    set_seethrough: "Doorzichtige zijbalk (glas boven het bureaublad)",
+    help_seethrough: "Alleen op de Mac, in het thema Systeem. De zijbalk wordt glas boven je bureaublad; vensters achter Taurus schemeren er ook vaag doorheen.",
     brand_toggle: "Klik om het logo in of uit te klappen",
     help_icons: "Welke iconen de knoppen en menu's tonen. Een thema kiest zijn eigen standaard; daarna kun je hier wisselen.", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
@@ -666,6 +668,8 @@ const I18N = {
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
     skin_system: "System (follows light/dark)",
     set_icons: "Icons", icons_emoji: "Standard", icons_line: "Line",
+    set_seethrough: "See-through sidebar (glass over the desktop)",
+    help_seethrough: "Mac only, in the System theme. The sidebar becomes glass over your desktop; windows behind Taurus also show faintly through it.",
     brand_toggle: "Click to collapse or expand the logo",
     help_icons: "Which icons buttons and menus show. A theme picks its own default; after that you can switch here.", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
@@ -897,7 +901,7 @@ async function placeSidebarGlass() {
     // de zwevende zijbalk te liggen.
     document.documentElement.classList.add("glass");
     const r = side.getBoundingClientRect();
-    try { ok = await invoke("set_sidebar_glass", { rect: { x: r.left, y: r.top, w: r.width, h: r.height, radius: 16, vh: window.innerHeight } }); } catch (_) {}
+    try { ok = await invoke("set_sidebar_glass", { rect: { x: r.left, y: r.top, w: r.width, h: r.height, radius: 16, vh: window.innerHeight, seeThrough: !!settings.sidebarSeeThrough } }); } catch (_) {}
   } else {
     try { await invoke("set_sidebar_glass", { rect: null }); } catch (_) {}
   }
@@ -5040,6 +5044,7 @@ function openSettings() {
   // anders de "brand"-skin (als er een branding-thema is), anders default.
   els.setSkin.value = normSkin(settings.skin || brandingSkin || (brandHasTheme ? "brand" : "system"));
   fillIconSelect(els.setSkin.value, settings.iconSet);
+  if (els.setSeeThrough) els.setSeeThrough.checked = !!settings.sidebarSeeThrough;
   // Spraak: stemmen één keer ophalen, STT-modellenlijst + status verversen.
   els.ttsOn.checked = settings.ttsEnabled;
   els.ttsRate.value = settings.ttsRate | 0;
@@ -5298,6 +5303,7 @@ function saveSettingsFromForm() {
   settings.confirmExit = els.setConfirmExit.checked;
   settings.persistMode = els.setPersistMode.value;
   settings.skin = els.setSkin.value;
+  if (els.setSeeThrough) settings.sidebarSeeThrough = els.setSeeThrough.checked;
   settings.iconSet = iconSetFor(settings.skin, els.setIcons ? els.setIcons.value : settings.iconSet);
   settings.ttsEnabled = els.ttsOn.checked;
   settings.ttsVoice = els.ttsVoiceSel.value;
@@ -6878,6 +6884,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setPersistMode: document.querySelector("#set-persist-mode"),
     setSkin: document.querySelector("#set-skin"),
     setIcons: document.querySelector("#set-icons"),
+    setSeeThrough: document.querySelector("#set-seethrough"),
     recordWidget: document.querySelector("#record-widget"),
     recordBtn: document.querySelector("#record-btn"),
     recordStatus: document.querySelector("#record-status"),
@@ -7006,6 +7013,8 @@ window.addEventListener("DOMContentLoaded", () => {
     brand?.addEventListener("click", flip);
     brand?.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
   }
+  // Mac-only instellingen (#249) niet tonen waar ze niets doen.
+  if (!IS_MAC) document.querySelectorAll(".mac-only").forEach((el) => el.classList.add("hidden"));
   // Een ander thema kiezen zet de iconen op de standaard van dat thema (#245).
   els.setSkin?.addEventListener("change", () => fillIconSelect(normSkin(els.setSkin.value), null));
 
