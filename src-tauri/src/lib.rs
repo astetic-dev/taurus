@@ -1607,6 +1607,10 @@ struct Host {
     // "linux" | "windows" | "" (nog niet getest).
     #[serde(default)]
     os: String,
+    // Wat de mens ziet: "macOS", "Linux", "Windows", ... (#234). `os` blijft de
+    // schakelaar voor de code; "linux" staat daar voor de hele POSIX-kant.
+    #[serde(default)]
+    os_name: String,
     // Wat houdt de sessie in leven als de verbinding wegvalt:
     // "herdr" | "tmux" | "psmux" | "taurus-agent" | "none". Bij "none" is het
     // transcript de enige persistentie (claude --resume) en sterft een lopende
@@ -1775,6 +1779,7 @@ struct HostProbe {
     reachable: bool,
     auth_ok: bool,
     os: String,
+    os_name: String,
     // Beste multiplexer die op de host gevonden is; "none" als er geen is.
     mux: String,
     // Alles wat er gevonden is, in voorkeursvolgorde. Nodig omdat de gebruiker
@@ -1876,6 +1881,19 @@ fn ssh_run(host: &Host, remote_cmd: &str) -> Result<(String, bool), String> {
 // de hele POSIX-kant, macOS en de BSD's inbegrepen (zie announced_os() in
 // discovery.rs). Staat Git for Windows op het PATH van een Windows-host, dan
 // antwoordt uname daar met MINGW64_NT/MSYS_NT/CYGWIN_NT -- dat blijft Windows.
+// De leesbare naam bij `uname -s` (#234). Onbekend = wat uname zei.
+fn os_label(uname: &str) -> String {
+    let first = uname.split_whitespace().next().unwrap_or("");
+    match first.to_lowercase().as_str() {
+        "darwin" => "macOS".into(),
+        "linux" => "Linux".into(),
+        "freebsd" => "FreeBSD".into(),
+        "openbsd" => "OpenBSD".into(),
+        "netbsd" => "NetBSD".into(),
+        _ => first.to_string(),
+    }
+}
+
 fn uname_is_posix(out: &str) -> bool {
     let first = out.split_whitespace().next().unwrap_or("").to_lowercase();
     matches!(first.as_str(), "linux" | "darwin" | "freebsd" | "openbsd" | "netbsd")
@@ -1902,6 +1920,7 @@ fn probe_host(host: Host) -> HostProbe {
         Ok((out, ok)) if ok && uname_is_posix(&out) => {
             p.auth_ok = true;
             p.os = "linux".into();
+            p.os_name = os_label(&out);
         }
         Ok((out, _)) => {
             // Auth-fouten herkennen we aan de ssh-melding; anders is het Windows.
@@ -1916,6 +1935,7 @@ fn probe_host(host: Host) -> HostProbe {
             }
             p.auth_ok = true;
             p.os = "windows".into();
+            p.os_name = "Windows".into();
         }
     }
 
@@ -7631,6 +7651,7 @@ fn answer_help_request(
         default_project: String::new(),
         via: String::new(),
         os: found.os.clone(),
+        os_name: String::new(),
         mux: "none".into(),
         agent_version: String::new(),
         mux_auto: false,
@@ -8324,6 +8345,7 @@ mod tests {
             key_path: String::new(),
             default_project: String::new(),
             os: "linux".into(),
+            os_name: String::new(),
             mux: "tmux".into(),
             mux_auto: true,
             agent_version: String::new(),
@@ -9853,6 +9875,14 @@ mod tests {
     }
 
     #[test]
+    fn a_mac_host_is_labelled_macos() {
+        assert_eq!(os_label("Darwin arm64\n"), "macOS");
+        assert_eq!(os_label("Linux x86_64"), "Linux");
+        assert_eq!(os_label("FreeBSD amd64"), "FreeBSD");
+        assert_eq!(os_label("SunOS i86pc"), "SunOS");
+    }
+
+    #[test]
     fn uname_of_a_mac_is_posix_and_git_for_windows_is_not() {
         assert!(uname_is_posix("Linux x86_64\n"));
         assert!(uname_is_posix("Darwin arm64\n"));
@@ -9923,6 +9953,7 @@ mod tests {
             key_path: std::env::var("TAURUS_TEST_KEY").unwrap_or_default(),
             default_project: String::new(),
             os: std::env::var("TAURUS_TEST_OS").unwrap_or_else(|_| "windows".into()),
+            os_name: String::new(),
             mux: std::env::var("TAURUS_TEST_MUX").unwrap_or_else(|_| "none".into()),
             mux_auto: true,
             agent_version: String::new(),
@@ -10025,6 +10056,7 @@ mod tests {
             key_path: r"C:\Users\AST\.ssh\id_ed25519".into(),
             default_project: "/home/arjen/proj".into(),
             os: "linux".into(),
+            os_name: String::new(),
             mux: "tmux".into(),
             mux_auto: true,
             agent_version: String::new(),
