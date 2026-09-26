@@ -865,6 +865,7 @@ async function applyBranding() {
   // branding-default-skin, anders de "brand"-skin (als er een thema is), anders
   // gewoon Taurus.
   brandingSkin = (b.skin || "").trim();
+  brandingLoaded = true;
   applySkin(settings.skin || brandingSkin || (brandHasTheme ? "brand" : "system"));
 }
 
@@ -934,6 +935,7 @@ window.addEventListener("focus", () => { if (systemSkinOn) refreshSystemAccent()
 // --term-* variabelen zodat de skin ook in de xterm-terminal doorwerkt.
 let brandingSkin = "";
 let brandHasTheme = false;
+let brandingLoaded = false;
 function termThemeFromCss(accent) {
   const cs = getComputedStyle(document.documentElement);
   const v = (n, fb) => (cs.getPropertyValue(n).trim() || fb);
@@ -976,7 +978,11 @@ function fillIconSelect(skin, value) {
 
 // "default" (het oude donkere thema) is opgegaan in Systeem (#240), en
 // Catppuccin in Dracula: gemeten vrijwel dezelfde kleuren (#243).
+// En de merk-skin zonder branding-thema (branding.json weggehaald) bestaat niet
+// meer: dan ook Systeem, anders blijft de skinkeuze leeg staan (#261). Pas na het
+// laden van branding beslissen, anders flitst een merk-skin bij het opstarten.
 function normSkin(name) {
+  if (name === "brand" && brandingLoaded && !brandHasTheme) return "system";
   return !name || name === "default" ? "system" : name === "catppuccin" ? "dracula" : name;
 }
 function applySkin(name) {
