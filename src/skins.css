@@ -547,24 +547,6 @@ html[data-skin="solarized"] {
   --term-sel: #eee8d5;
 }
 
-/* ---- Catppuccin Mocha (soft pastel, dark) ---- */
-html[data-skin="catppuccin"] {
-  --bg: #1e1e2e;
-  --bg-panel: #181825;
-  --bg-card: #313244;
-  --bg-card-hover: #45475a;
-  --border: #45475a;
-  --text: #cdd6f4;
-  --text-dim: #a6adc8;
-  --accent: #cba6f7;
-  --green: #a6e3a1;
-  --orange: #fab387;
-  --red: #f38ba8;
-  --term-bg: #1e1e2e;
-  --term-fg: #cdd6f4;
-  --term-sel: #313244;
-}
-
 /* ============ Systeem (#240) ============ */
 /* De standaard: volgt licht/donker van het OS (prefers-color-scheme) en zijn
    accentkleur (--os-accent, gezet vanuit system_accent). Kleuren zoals macOS ze
