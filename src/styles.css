@@ -41,18 +41,30 @@
   font-style: normal; font-weight: 600; font-display: swap;
   src: url("fonts/ibm-plex-mono-600.woff2") format("woff2");
 }
+/* Iconensets (#245): "Lijn" tekent de emoji die de UI gebruikt als Lucide-
+   lijnicoon (ISC, zie fonts/LICENSE-Lucide.txt; gebouwd met
+   tools/build-taurus-line-icons.py). Alleen die codepoints (unicode-range), dus
+   alle gewone tekst en symbolen als ✓ ✗ → ⌘ blijven van de gewone letter. Aan
+   door --icon-font vóór de letter van het thema te zetten (data-icons). */
+@font-face {
+  font-family: "Taurus Line Icons";
+  src: url("fonts/taurus-line-icons.woff2") format("woff2");
+  font-display: block;
+  unicode-range: U+1F4C1-1F4C2, U+1F399, U+1F5D1, U+1F441, U+2699, U+1F5A5, U+1F50A, U+270E, U+270B, U+27F3, U+21BB, U+26A0, U+2139, U+2715, U+1F50E, U+2315, U+1F4AC, U+1F465, U+1F5FA, U+1FA7A, U+1F4D0, U+1F6A6, U+2697, U+2712, U+25B6, U+23F8, U+2B21, U+2261, U+2212, U+21F1;
+}
+html[data-icons="line"] { --icon-font: "Taurus Line Icons",; }
 
 * { box-sizing: border-box; }
 
 html, body {
   margin: 0;
   height: 100%;
-  font-family: var(--ui-font);
+  font-family: var(--icon-font,) var(--ui-font);
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
 }
-button, input, select, textarea { font-family: var(--ui-font); }
+button, input, select, textarea { font-family: var(--icon-font,) var(--ui-font); }
 
 .app {
   display: grid;

@@ -304,7 +304,9 @@ const I18N = {
     help_groups: "Heeft een map dit aantal tabs, dan schuiven ze samen onder een tab. Mappen met minder houden hun eigen tabs.\nHover (of klik) op zo'n tab om de sessies eronder uit te klappen.\nDe gebundelde tab flitst als een van zijn sessies op je wacht, dus je mist niets.\n0 = nooit bundelen.",
     help_recap: "Toont bij hover het laatste wat die agent zei, ook van tabs die niet in beeld staan.\nGelezen uit het terminalvenster van die sessie zelf; er wordt niets naar de agent gestuurd.",
     grp_theme: "Thema", set_skin: "Skin", skin_hint: "Of zet een vaste default in branding.json (zie README).",
-    skin_system: "Systeem (volgt licht/donker)", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
+    skin_system: "Systeem (volgt licht/donker)",
+    set_icons: "Iconen", icons_emoji: "Standaard", icons_line: "Lijn",
+    help_icons: "Welke iconen de knoppen en menu's tonen. Een thema kiest zijn eigen standaard; daarna kun je hier wisselen.", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light",
     restore_failed: "Hervatten mislukt voor:",
@@ -661,7 +663,9 @@ const I18N = {
     help_groups: "Once one folder holds this many tabs, they collapse into a single tab. Folders with fewer keep their own tabs.\nHover (or click) such a tab to expand its sessions below it.\nThe grouped tab flashes when one of its sessions is waiting for you, so nothing is missed.\n0 = never group.",
     help_recap: "On hover, shows the last thing that agent said — including tabs that are not on screen.\nRead from that session's own terminal view; nothing is sent to the agent.",
     grp_theme: "Theme", set_skin: "Skin", skin_hint: "Or set a fixed default in branding.json (see README).",
-    skin_system: "System (follows light/dark)", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
+    skin_system: "System (follows light/dark)",
+    set_icons: "Icons", icons_emoji: "Standard", icons_line: "Line",
+    help_icons: "Which icons buttons and menus show. A theme picks its own default; after that you can switch here.", skin_retromac: "Retro Mac", skin_aqua: "Aqua (2001)",
     skin_retrowin: "Retro Windows", skin_winxp: "Windows XP", skin_terminal: "Terminal (CRT)",
     skin_nord: "Nord", skin_dracula: "Dracula", skin_solarized: "Solarized Light",
     restore_failed: "Could not resume:",
@@ -934,6 +938,29 @@ function termThemeFromCss(accent) {
     selectionBackground: v("--term-sel", "#33405c"),
   };
 }
+// Iconensets (#245): per thema een standaard en de sets die erbij passen. Een
+// thema kiezen zet zijn standaard; daarna mag je binnen die lijst wisselen.
+// "line" = het icoonlettertype uit styles.css (data-icons="line").
+const SKIN_ICONS = {
+  system: { def: "line", list: ["line", "emoji"] },
+  terminal: { def: "line", list: ["line", "emoji"] },
+};
+function skinIcons(skin) { return SKIN_ICONS[skin] || { def: "emoji", list: ["emoji", "line"] }; }
+function iconSetFor(skin, wanted) {
+  const s = skinIcons(skin);
+  return s.list.includes(wanted) ? wanted : s.def;
+}
+function applyIcons(set) {
+  if (set === "line") document.documentElement.setAttribute("data-icons", "line");
+  else document.documentElement.removeAttribute("data-icons");
+}
+function fillIconSelect(skin, value) {
+  const sel = els.setIcons;
+  if (!sel) return;
+  sel.innerHTML = skinIcons(skin).list.map((v) => `<option value="${v}">${escapeHtml(t("icons_" + v))}</option>`).join("");
+  sel.value = iconSetFor(skin, value);
+}
+
 // "default" (het oude donkere thema) is opgegaan in Systeem (#240), en
 // Catppuccin in Dracula: gemeten vrijwel dezelfde kleuren (#243).
 function normSkin(name) {
@@ -941,6 +968,7 @@ function normSkin(name) {
 }
 function applySkin(name) {
   const skin = normSkin(name);
+  applyIcons(iconSetFor(skin, settings.iconSet));
   document.documentElement.setAttribute("data-skin", skin);
   syncSystemSkin(skin === "system");
   // Garble-effect: standaard alleen aan voor merk-skins; branding kan het
@@ -5002,6 +5030,7 @@ function openSettings() {
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
   els.setSkin.value = normSkin(settings.skin || brandingSkin || (brandHasTheme ? "brand" : "system"));
+  fillIconSelect(els.setSkin.value, settings.iconSet);
   // Spraak: stemmen één keer ophalen, STT-modellenlijst + status verversen.
   els.ttsOn.checked = settings.ttsEnabled;
   els.ttsRate.value = settings.ttsRate | 0;
@@ -5260,6 +5289,7 @@ function saveSettingsFromForm() {
   settings.confirmExit = els.setConfirmExit.checked;
   settings.persistMode = els.setPersistMode.value;
   settings.skin = els.setSkin.value;
+  settings.iconSet = iconSetFor(settings.skin, els.setIcons ? els.setIcons.value : settings.iconSet);
   settings.ttsEnabled = els.ttsOn.checked;
   settings.ttsVoice = els.ttsVoiceSel.value;
   settings.ttsRate = Math.min(10, Math.max(-10, parseInt(els.ttsRate.value) || 0));
@@ -6838,6 +6868,7 @@ window.addEventListener("DOMContentLoaded", () => {
     exitStatus: document.querySelector("#exit-status"),
     setPersistMode: document.querySelector("#set-persist-mode"),
     setSkin: document.querySelector("#set-skin"),
+    setIcons: document.querySelector("#set-icons"),
     recordWidget: document.querySelector("#record-widget"),
     recordBtn: document.querySelector("#record-btn"),
     recordStatus: document.querySelector("#record-status"),
@@ -6959,6 +6990,8 @@ window.addEventListener("DOMContentLoaded", () => {
     dropperList: document.querySelector("#dropper-list"),
     dropperPaste: document.querySelector("#dropper-paste"),
   });
+  // Een ander thema kiezen zet de iconen op de standaard van dat thema (#245).
+  els.setSkin?.addEventListener("change", () => fillIconSelect(normSkin(els.setSkin.value), null));
 
   document.querySelector("#launch-btn").addEventListener("click", startSession);
   document.querySelector("#add-agent-btn").addEventListener("click", addAgentFromForm);
