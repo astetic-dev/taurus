@@ -21,7 +21,9 @@ give the session a title, choose a mode, and hit **Start** — the agent opens a
 embedded terminal tab. Open several, drag them into the order you want, and let a
 tab flash in its own colour (or speak up) when an agent is done and waiting for you.
 
-> Windows-only for now (uses ConPTY + Windows Terminal-style embedding).
+Runs on **Windows** and, since 0.7.7, on **macOS** (signed and notarised `.dmg`).
+
+![Taurus on macOS](media/screenshot-macos.png)
 
 ## Why Taurus
 
