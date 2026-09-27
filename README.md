@@ -138,15 +138,41 @@ consistently. That's what Taurus is for.
 
 Grab the latest release from the
 [**releases page**](https://github.com/astetic-dev/taurus/releases):
-`*-setup.exe` (installer), `.msi`, or the **portable** exe (no install).
+
+- **Windows:** `*-setup.exe` (installer), `.msi`, or the **portable** `taurus.exe`
+  (no install).
+- **macOS:** `*_arm64.dmg` (Apple Silicon, M1 and later) or `*_universal.dmg` (also
+  runs on Intel Macs). Open it and drag Taurus to Applications. It is signed and
+  notarised, so it opens without a warning.
 
 Requirements:
 
-- WebView2 runtime (preinstalled on Windows 11)
-- The **Claude Code CLI** on your `PATH` — native installer or
-  `npm install -g @anthropic-ai/claude-code` (both work)
+- At least one **agent CLI**, see [Before you start](#before-you-start-install-an-agent)
+- Windows: the WebView2 runtime (preinstalled on Windows 11)
 - For dictation: a microphone + the STT model (one-time download from
   Settings → Voice, ~490 MB, stays on your machine)
+
+### Before you start: install an agent
+
+Taurus launches agents, it does not ship one. You need **at least one** of these
+three, installed so that it runs from a terminal. Taurus finds it on your `PATH`;
+on macOS it reads your login shell's `PATH`, so starting Taurus from Finder or the
+Dock works too.
+
+| Agent | Command | Install | You sign in with |
+|---|---|---|---|
+| Claude Code | `claude` | [code.claude.com/docs/en/setup](https://code.claude.com/docs/en/setup) | a Claude Pro, Max, Team or Enterprise plan, or a Console (API) account. The free plan does not include Claude Code. |
+| Antigravity | `agy` | [antigravity.google/docs/cli/install](https://antigravity.google/docs/cli/install/) | a Google account, or a Gemini API key |
+| Grok Build | `grok` | [docs.x.ai/build/overview](https://docs.x.ai/build/overview) | an xAI account, or an xAI API key |
+
+Each page has a one-line installer for macOS and for Windows PowerShell. After
+installing:
+
+1. Open a **new** terminal, so it picks up the new `PATH`.
+2. Run the command once (`claude`, `agy` or `grok`) and sign in when the browser
+   opens.
+3. Start Taurus and pick that agent for your project. If Taurus was already
+   running while you installed and the agent does not start, restart Taurus.
 
 ## Develop
 
