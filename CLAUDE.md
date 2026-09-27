@@ -10,9 +10,9 @@ work on a branch and open a PR that references the issue.
   (the repo is public on GitHub). This overrides the global Dutch default for this project.
 - **Account: `astetic-dev`** (arjenstet@gmail.com). The `gh` CLI is authenticated as this
   account; the remote is `https://github.com/astetic-dev/taurus.git`.
-- Create issues with `gh issue create --repo astetic-dev/taurus ...`. When a ready-to-file
-  issue body exists as a Markdown file in the repo (e.g. `ISSUE-*.md`), file it with
-  `--body-file`.
+- Create issues with `gh issue create --repo astetic-dev/taurus ...`. Write a long body to a
+  temporary file outside the repo and pass it with `--body-file`; issue drafts, release-note
+  drafts and status notes are never committed (release notes live on the GitHub release).
 
 ## Stack
 - Tauri v2; frontend = vanilla JS under `src/` (`frontendDist: ../src`); Rust under `src-tauri/`.
@@ -41,10 +41,11 @@ These come from working on this project with its owner (Arjen). They hold on eve
   running *inside* it, and a test instance disappearing mid-test looks like a broken build.
   On Windows a running exe is locked, so build into a fresh `target` directory and ask the
   owner to restart their own window.
-- **Commands for the owner go in a `.md` file**, one command per fenced block, with the full
-  path mentioned in the reply. Copying commands out of the terminal chat adds spaces and
-  CRLFs. Test plans that need a second machine go into `TEST-<issue>-<topic>.md` with
-  checkboxes; measure the local half yourself and put it in unit tests.
+- **Commands for the owner go in a `.md` file** that is not committed (e.g. under the
+  gitignored `input/`), one command per fenced block, with the full path mentioned in the
+  reply. Copying commands out of the terminal chat adds spaces and CRLFs. Test plans that
+  need a second machine go into a comment on their issue, with checkboxes; measure the
+  local half yourself and put it in unit tests.
 - **A measured limitation is a fact, not a design requirement.** Taurus works where it can;
   a stricter environment is that user's problem. Report the limitation in one honest line
   and offer the normal path as the normal path. Do build what is correct anyway and costs

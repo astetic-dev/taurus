@@ -1,16 +1,16 @@
-# Start een TESTexemplaar van Taurus naast je draaiende Taurus.
+# Start a TEST instance of Taurus next to your running Taurus.
 #
-# Waarom dit script bestaat: beide exemplaren lezen anders dezelfde
-# %APPDATA%\Taurus, en dan hervat de tweede je LOPENDE sessies en overschrijft
-# hij ze daarna ook nog. TAURUS_CONFIG_DIR verlegt de hele configmap, zodat het
-# testexemplaar zijn eigen projects/hosts/sessions/peers heeft.
+# Why this script exists: otherwise both instances read the same
+# %APPDATA%\Taurus, and the second one resumes your RUNNING sessions and then
+# overwrites them as well. TAURUS_CONFIG_DIR moves the whole config folder, so the
+# test instance has its own projects/hosts/sessions/peers.
 #
-# Het venster heet "... TEST" zodat je ze uit elkaar houdt.
+# The window is titled "... TEST" so you can tell them apart.
 #
-# -Exe wijst naar een andere build. Nodig zodra dit testexemplaar zelf draait: het
-# houdt target\release\taurus.exe vergrendeld, dus een nieuwe build moet dan naar
-# een aparte map (cargo build --release --target-dir target\fixbuild). Zo kun je die
-# starten zonder eerst te kopieren.
+# -Exe points at another build. Needed once this test instance is running itself: it
+# keeps target\release\taurus.exe locked, so a new build has to go to a separate
+# folder (cargo build --release --target-dir target\fixbuild). This way you can start
+# that one without copying it first.
 param(
     [string]$Exe
 )
@@ -18,14 +18,13 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $cfg  = Join-Path $env:APPDATA 'Taurus-TEST'
 
-# Zonder -Exe: pak de NIEUWSTE van de bekende buildplekken, niet blind
-# target\release. Zodra dit testexemplaar draait houdt het die exe vergrendeld, dus
-# gaat een volgende build naar target\fixbuild - en dan startte dit script daarna
-# stil de OUDE build weer. Dat kostte een ronde uitzoeken waarom een wijziging er
-# niet in zat.
-# Elke buildmap onder target\ meenemen, niet een vaste lijst: zodra een
-# testexemplaar draait is zijn exe vergrendeld en gaat de volgende build naar
-# weer een andere map. Met een glob hoeft dit script daar niets van te weten.
+# Without -Exe: take the NEWEST of the known build locations, not blindly
+# target\release. Once this test instance runs it keeps that exe locked, so the next
+# build goes to target\fixbuild - and this script then silently started the OLD
+# build again. That cost a round of finding out why a change was missing.
+# Include every build folder under target\, not a fixed list: once a test instance
+# runs its exe is locked and the next build goes to yet another folder. With a glob
+# this script doesn't need to know about that.
 $candidates = @(
     (Join-Path $root 'src-tauri\target\release\taurus.exe'),
     (Join-Path $root 'src-tauri\target\*\release\taurus.exe')
@@ -35,12 +34,12 @@ if ($Exe) {
 } else {
     $found = @(Get-Item $candidates -EA 0 | Sort-Object LastWriteTime -Descending)
     if ($found.Count -eq 0) {
-        Write-Host "Geen build gevonden. Draai eerst in src-tauri: cargo build --release"
+        Write-Host "No build found. First run in src-tauri: cargo build --release"
         return
     }
     $exe = $found[0].FullName
     if ($found.Count -gt 1) {
-        Write-Host "Meerdere builds gevonden; de nieuwste gekozen:"
+        Write-Host "Several builds found; picked the newest:"
         foreach ($f in $found) {
             Write-Host ("  {0}  {1}  {2}" -f $f.LastWriteTime.ToString('yyyy-MM-dd HH:mm'), $f.VersionInfo.FileVersion, $f.FullName)
         }
@@ -48,33 +47,33 @@ if ($Exe) {
 }
 
 if (-not (Test-Path $exe)) {
-    Write-Host "Geen build gevonden op $exe - draai eerst: cargo build --release (in src-tauri)"
+    Write-Host "No build found at $exe - first run: cargo build --release (in src-tauri)"
     return
 }
 
-# Twee testexemplaren delen anders dezelfde Taurus-TEST-map, en dan doen ze elkaar
-# precies aan wat dit script voorkomt tussen test en echt.
+# Two test instances would otherwise share the same Taurus-TEST folder, and then do
+# to each other exactly what this script prevents between test and real.
 $al = @(Get-Process taurus -EA 0 | Where-Object { $_.Path -and $_.Path -like "$root*" })
 if ($al.Count -gt 0) {
-    Write-Host "Er draait al een testexemplaar (pid $($al.Id -join ', ')). Sluit dat eerst - beide zouden $cfg gebruiken."
+    Write-Host "A test instance is already running (pid $($al.Id -join ', ')). Close it first - both would use $cfg."
     return
 }
 New-Item -ItemType Directory -Force -Path $cfg | Out-Null
 
-# Vangnet: als dit ooit naar de echte map wijst, stop. Een testexemplaar dat je
-# echte sessies overneemt is precies wat we hier voorkomen.
+# Safety net: if this ever points at the real folder, stop. A test instance that
+# takes over your real sessions is exactly what we prevent here.
 if ($cfg -ieq (Join-Path $env:APPDATA 'Taurus')) {
-    throw "TAURUS_CONFIG_DIR wijst naar de ECHTE configmap - gestopt."
+    throw "TAURUS_CONFIG_DIR points at the REAL config folder - stopped."
 }
 
-# De versie erbij, want "welke build draait hier eigenlijk" is precies de vraag die
-# je je stelt als een wijziging er niet in lijkt te zitten.
+# Show the version, because "which build is this, actually" is exactly the question
+# you ask when a change seems to be missing.
 $ver = (Get-Item $exe).VersionInfo.FileVersion
-Write-Host "Configmap : $cfg"
+Write-Host "Config    : $cfg"
 Write-Host "Binary    : $exe"
-Write-Host "Versie    : $ver  ($((Get-Item $exe).LastWriteTime.ToString('yyyy-MM-dd HH:mm')))"
-Write-Host "Sessies   : $(if (Test-Path (Join-Path $cfg 'sessions.json')) { 'eigen sessions.json aanwezig' } else { 'geen - start leeg, raakt je echte sessies niet aan' })"
+Write-Host "Version   : $ver  ($((Get-Item $exe).LastWriteTime.ToString('yyyy-MM-dd HH:mm')))"
+Write-Host "Sessions  : $(if (Test-Path (Join-Path $cfg 'sessions.json')) { 'own sessions.json present' } else { 'none - starts empty, leaves your real sessions alone' })"
 
 $env:TAURUS_CONFIG_DIR = $cfg
 Start-Process $exe
-Write-Host "Gestart. Titelbalk zegt 'TEST'."
+Write-Host "Started. The title bar says 'TEST'."

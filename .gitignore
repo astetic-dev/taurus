@@ -51,3 +51,10 @@ src-tauri/tauri.*.conf.json
 *.njsproj
 *.sln
 *.sw?
+
+# Working drafts stay out of the repo: issue bodies, release notes and test plans live
+# on GitHub (issues, releases, issue comments), not as files in the root (#274).
+/ISSUE-*.md
+/RELEASE-*.md
+/TEST-*.md
+/STATUS.md
