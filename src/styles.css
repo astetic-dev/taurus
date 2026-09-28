@@ -750,6 +750,9 @@ html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
 }
 .ctx-item { padding: 8px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; color: var(--text); }
 .ctx-item:hover { background: var(--bg-card-hover); }
+/* Hernoemen: één invoerveld op de plek van het tab-menu. */
+.rename-pop { padding: 6px; }
+.rename-pop input { width: 240px; padding: 6px 8px; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; outline: none; }
 
 /* ---- Gebundelde tabs en hun uitklappaneel (#90) ---- */
 .tab.tabgroup { cursor: pointer; }

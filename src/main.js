@@ -270,15 +270,15 @@ const I18N = {
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
-    ctx_restart: "↻ Herstart (resume gesprek)", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
+    ctx_rename: "✎ Hernoemen", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
     preview_none: "(geen .html/.md in de werkmap)",
     preview_group_session: "Sinds deze tab open is", preview_group_today: "Eerder vandaag", preview_group_older: "Ouder",
     preview_refresh: "Vernieuwen", preview_mode: "Split / Volledig", preview_close: "Preview sluiten", preview_toobig: "Bestand te groot om te previewen.",
     submit_saved: "{n} item(s) klaargezet: {name}",
     submit_remote: "Een selectie kan nog niet naar een sessie op een andere machine",
     loc_local: "LOKAAL", loc_net: "NETWERK", loc_unknown: "ONBEKEND",
-    ended: "[sessie beëindigd — rechtsklik tab voor herstart, of sluit]",
-    restarting: "herstarten — resume", restart_failed: "herstart mislukt",
+    ended: "[sessie beëindigd]",
+    restarting: "herstarten — resume",
     grp_sessions: "Sessies", set_persist: "Bij opstarten",
     tab_general: "Algemeen", tab_theme: "Thema", tab_html: "HTML-preview", tab_terminal: "Terminal", tab_voice: "Spraak",
     help_default: "Beweeg over een instelling voor uitleg.",
@@ -330,7 +330,6 @@ const I18N = {
     voice_natural: "Windows-stemmen", voice_classic: "Klassiek (SAPI)",
     voice_install_hint: "Meer stemmen of talen nodig? Voeg ze toe via Windows-instellingen → Tijd en taal → Spraak (of taal toevoegen met Text-to-speech).",
     tts_ready: "{title} is klaar",
-    ctx_speak: "🔊 Selectie uitspreken",
     stt_head: "Spraak naar tekst — F9 inhouden (of klik 🎙)",
     stt_model: "Model", stt_download: "Download",
     stt_downloading: "Bezig met downloaden… (zie stt\\download.log)",
@@ -632,15 +631,15 @@ const I18N = {
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
-    ctx_restart: "↻ Restart (resume conversation)", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
+    ctx_rename: "✎ Rename", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
     preview_none: "(no .html/.md in the working folder)",
     preview_group_session: "Since this tab opened", preview_group_today: "Earlier today", preview_group_older: "Older",
     preview_refresh: "Refresh", preview_mode: "Split / Full", preview_close: "Close preview", preview_toobig: "File too large to preview.",
     submit_saved: "{n} item(s) ready: {name}",
     submit_remote: "A selection cannot go to a session on another machine yet",
     loc_local: "LOCAL", loc_net: "NETWORK", loc_unknown: "UNKNOWN",
-    ended: "[session ended — right-click tab to restart, or close]",
-    restarting: "restarting — resume", restart_failed: "restart failed",
+    ended: "[session ended]",
+    restarting: "restarting — resume",
     grp_sessions: "Sessions", set_persist: "On startup",
     tab_general: "General", tab_theme: "Theme", tab_html: "HTML preview", tab_terminal: "Terminal", tab_voice: "Voice",
     help_default: "Hover a setting for an explanation.",
@@ -692,7 +691,6 @@ const I18N = {
     voice_natural: "Windows voices", voice_classic: "Classic (SAPI)",
     voice_install_hint: "Need more voices or languages? Add them via Windows Settings → Time & language → Speech (or add a language with Text-to-speech).",
     tts_ready: "{title} is ready",
-    ctx_speak: "🔊 Speak selection",
     stt_head: "Speech to text — hold F9 (or click 🎙)",
     stt_model: "Model", stt_download: "Download",
     stt_downloading: "Downloading… (see stt\\download.log)",
@@ -4676,24 +4674,7 @@ setInterval(() => {
   if (changed) renderTabs();
 }, 1000);
 
-/* ============ herstart + rechtsklik-menu ============ */
-async function restartSession(id) {
-  const s = sessions.get(id);
-  if (!s) return;
-  closeTabMenu();
-  s.term.reset();
-  s.term.write(`\x1b[2m[${t("restarting")} ${s.uuid.slice(0, 8)}…]\x1b[0m\r\n`);
-  // Nieuwe generatie: verlate pty-events van het zojuist gekilde proces
-  // (zelfde id!) worden vanaf nu genegeerd (#71).
-  s.gen = ++genSeq;
-  s.exited = false; s.working = false; s.awaiting = false; s.announced = false; s.status = null; s.buf = ""; s.decoder = new TextDecoder("utf-8");
-  s.startedAt = Date.now(); // nieuwe run, dus opnieuw rekenen wat "van deze sessie" is
-  if (current !== id) showView(id); else renderTabs();
-  try {
-    await invoke("restart_session", { id, gen: s.gen, path: s.path, title: s.title, sessionId: s.uuid, mode: s.mode || "default", fullPaths: settings.fullPaths, command: s.command || "", agent: s.agent || "claude", model: resolveModelArg(s.agent || "claude", s.model || ""), hostId: s.hostId || "", muxName: s.muxName || "", cols: s.term.cols, rows: s.term.rows });
-  } catch (e) { s.term.write(`\r\n\x1b[31m[${t("restart_failed")}: ${e}]\x1b[0m\r\n`); }
-}
-
+/* ============ rechtsklik-menu ============ */
 let tabMenuEl = null;
 function closeTabMenu() { if (tabMenuEl) { tabMenuEl.remove(); tabMenuEl = null; } }
 // Rechtermuisknop op een agentkaart (#164). Opende hiervoor meteen het
@@ -4937,25 +4918,19 @@ function openTabMenu(x, y, id) {
   const att = s.attached ? " disabled" : "";
   const attWhy = s.attached ? ` title="${escapeHtml(t("attach_not_restartable"))}"` : "";
   m.innerHTML = `
-    <div class="ctx-item${att}"${attWhy} data-act="restart">${t("ctx_restart")}</div>
+    <div class="ctx-item" data-act="rename">${t("ctx_rename")}</div>
     <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
-    <div class="ctx-item" data-act="speak">${t("ctx_speak")}</div>
     <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item${att}"${attWhy} data-act="move">${t("ctx_move")}</div>
     <div class="ctx-item${off}"${why} data-act="help">${t("ctx_help")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
-  m.querySelector('[data-act="restart"]').addEventListener("click", () => { if (!s.attached) restartSession(id); });
+  m.querySelector('[data-act="rename"]').addEventListener("click", () => { closeTabMenu(); openRenameTab(x, y, id); });
   // Hulp vragen kan alleen voor een sessie die HIER draait: je nodigt iemand uit in
   // je eigen terminal. Bij een remote sessie zit het werk al ergens anders (#125).
   m.querySelector('[data-act="help"]').addEventListener("click", () => {
     closeTabMenu();
     if (!s.hostId) askForHelp(s);
-  });
-  m.querySelector('[data-act="speak"]').addEventListener("click", () => {
-    closeTabMenu();
-    const sel = readSelection(s.term);
-    if (sel) speak(tidySelection(sel), true); // force: uitspreken is hier expliciet gevraagd
   });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
   // Verplaatsen werkt op de AGENT achter deze tab; de sessie zelf verhuist niet
@@ -4978,6 +4953,48 @@ function openTabMenu(x, y, id) {
   tabMenuEl = m;
 }
 document.addEventListener("click", closeTabMenu);
+
+// Hernoemen gebeurt in een eigen veldje op de plek van het menu, niet in de tab
+// zelf: renderTabs() tekent de tabbalk opnieuw bij elke statuswissel en zou een
+// invoerveld in de tab halverwege het typen weggooien.
+function openRenameTab(x, y, id) {
+  const s = sessions.get(id);
+  if (!s) return;
+  const pop = document.createElement("div");
+  pop.className = "ctx-menu rename-pop";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = s.title || "";
+  pop.appendChild(input);
+  pop.style.left = x + "px"; pop.style.top = y + "px";
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    pop.remove();
+    const name = input.value.trim();
+    if (save && name && name !== s.title) {
+      s.title = name;
+      renderTabs();
+      persistSessionsToDisk();
+      recordSession(s); // ook de geschiedenis, anders toont die de oude naam
+    }
+    if (current === s.id) s.term.focus();
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
+  pop.addEventListener("click", (e) => e.stopPropagation());
+  document.body.appendChild(pop);
+  const r = pop.getBoundingClientRect();
+  if (r.right > window.innerWidth) pop.style.left = (window.innerWidth - r.width - 6) + "px";
+  if (r.bottom > window.innerHeight) pop.style.top = (window.innerHeight - r.height - 6) + "px";
+  input.focus();
+  input.select();
+}
 
 /* ============ lettergrootte ============ */
 function applyFontToTerms() {
