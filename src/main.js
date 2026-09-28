@@ -270,7 +270,7 @@ const I18N = {
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
-    ctx_clear: "⌫ Invoer wissen",
+    ctx_clear: "⌫ Invoer wissen", dz_clear: "Wis invoer",
     clear_input_tip: "Wis wat er in de invoer van de agent staat, zonder hem te onderbreken (Ctrl+Shift+Backspace)",
     ctx_rename: "✎ Hernoemen", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
     preview_none: "(geen .html/.md in de werkmap)",
@@ -633,7 +633,7 @@ const I18N = {
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
-    ctx_clear: "⌫ Clear input",
+    ctx_clear: "⌫ Clear input", dz_clear: "Clear input",
     clear_input_tip: "Clear what is in the agent's input, without interrupting it (Ctrl+Shift+Backspace)",
     ctx_rename: "✎ Rename", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
     preview_none: "(no .html/.md in the working folder)",
@@ -3360,7 +3360,8 @@ function showView(target) {
   els.terminals.classList.toggle("hidden", !showTerm);
   if (!showTerm) closeSearch();
   // Wissen heeft alleen betekenis als er een sessie in beeld is.
-  document.getElementById("clear-input-btn")?.classList.toggle("hidden", !showTerm);
+  const clearBtn = document.getElementById("clear-input-btn");
+  if (clearBtn) clearBtn.disabled = !showTerm;
   for (const s of sessions.values()) s.el.classList.toggle("hidden", s.id !== target);
   if (showTerm) {
     const s = sessions.get(target);

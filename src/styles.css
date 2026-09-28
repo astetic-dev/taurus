@@ -630,7 +630,12 @@ html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
   font-size: 12px;
   cursor: pointer;
 }
+/* Plakken en invoer wissen naast elkaar: wissen is het antwoord op een plak die misging. */
+.dropper-actions { display: flex; gap: 6px; margin-top: 8px; }
+.dropper-actions .dropper-paste { margin-top: 0; flex: 1; min-width: 0; white-space: nowrap; padding: 7px 4px; gap: 5px; }
 .dropper-paste:hover { color: var(--text); border-color: var(--accent); }
+.dropper-paste:disabled { opacity: .4; cursor: default; }
+.dropper-paste:disabled:hover { color: var(--text-dim); border-color: var(--border); }
 .dropper-paste .dropper-paste-ico { width: 15px; height: 15px; }
 .dropper-paste .dropper-paste-ico svg { width: 100%; height: 100%; display: block; }
 /* Gemeten: een rij is 24px, de gap 5px, dus 88px = precies DRIE hele rijen.

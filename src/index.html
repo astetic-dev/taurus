@@ -96,6 +96,7 @@
               <span class="dz-lbl" data-i18n="dz_prompt">Alleen pad</span>
             </div>
           </div>
+          <div class="dropper-actions">
           <button id="dropper-paste" class="dropper-paste" type="button">
             <span class="dropper-paste-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -105,6 +106,18 @@
             </span>
             <span data-i18n="dz_paste">Plak object</span>
           </button>
+            <!-- Invoer van de agent wissen zonder Ctrl+C, dat een lopende beurt afbreekt (#278).
+                 Hier en niet bovenin: naast plakken zoek je hem als een plak misgaat. -->
+            <button id="clear-input-btn" class="dropper-paste" type="button" data-i18n-title="clear_input_tip" disabled>
+              <span class="dropper-paste-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 5H9l-6 7 6 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z" />
+                  <path d="M17 9l-5 6" /><path d="M12 9l5 6" />
+                </svg>
+              </span>
+              <span data-i18n="dz_clear">Wis invoer</span>
+            </button>
+          </div>
           <div id="dropper-list" class="dropper-list"></div>
         </div>
 
@@ -119,8 +132,6 @@
             <div id="app-version" class="app-version"></div>
             <!-- Machines hoort bij de app en niet bij je specialistenlijst; hier geeft het
                  de sectiekop links de ruimte terug. -->
-            <!-- Invoer van de agent wissen zonder Ctrl+C, dat een lopende beurt afbreekt (#278). -->
-            <button id="clear-input-btn" class="icon-btn hidden" data-i18n-title="clear_input_tip">⌫</button>
             <button id="hosts-btn" class="icon-btn" data-i18n-title="host_manage">🖥</button>
             <button id="settings-btn" class="icon-btn" data-i18n-title="settings">⚙</button>
             <button id="reload-btn" class="icon-btn" data-i18n-title="reload">⟳</button>
