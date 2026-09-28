@@ -270,6 +270,8 @@ const I18N = {
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
+    ctx_clear: "⌫ Invoer wissen",
+    clear_input_tip: "Wis wat er in de invoer van de agent staat, zonder hem te onderbreken (Ctrl+Shift+Backspace)",
     ctx_rename: "✎ Hernoemen", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
     preview_none: "(geen .html/.md in de werkmap)",
     preview_group_session: "Sinds deze tab open is", preview_group_today: "Eerder vandaag", preview_group_older: "Ouder",
@@ -631,6 +633,8 @@ const I18N = {
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
+    ctx_clear: "⌫ Clear input",
+    clear_input_tip: "Clear what is in the agent's input, without interrupting it (Ctrl+Shift+Backspace)",
     ctx_rename: "✎ Rename", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
     preview_none: "(no .html/.md in the working folder)",
     preview_group_session: "Since this tab opened", preview_group_today: "Earlier today", preview_group_older: "Older",
@@ -743,6 +747,7 @@ const I18N = {
 if (IS_MAC) {
   Object.assign(I18N.nl, {
     c_ctrl: "⌘⇧C / ⌘⇧V (⌘C / ⌘V werken altijd)",
+    clear_input_tip: "Wis wat er in de invoer van de agent staat, zonder hem te onderbreken (⌘⇧⌫)",
     c_search: "Zoeken in scrollback — ⌘⇧F",
     c_tabs: "Tab-sneltoetsen (⌃Tab, ⌘1..9, ⌘T/W)",
     help_copyselect: "Zodra je tekst in de terminal selecteert, gaat die automatisch naar het klembord - geen ⌘C nodig.",
@@ -762,6 +767,7 @@ if (IS_MAC) {
   });
   Object.assign(I18N.en, {
     c_ctrl: "⌘⇧C / ⌘⇧V (⌘C / ⌘V always work)",
+    clear_input_tip: "Clear what is in the agent's input, without interrupting it (⌘⇧⌫)",
     c_search: "Search scrollback — ⌘⇧F",
     c_tabs: "Tab shortcuts (⌃Tab, ⌘1..9, ⌘T/W)",
     help_copyselect: "As soon as you select text in the terminal it goes to the clipboard automatically - no ⌘C needed.",
@@ -3353,6 +3359,8 @@ function showView(target) {
   els.launchView.classList.toggle("hidden", showTerm);
   els.terminals.classList.toggle("hidden", !showTerm);
   if (!showTerm) closeSearch();
+  // Wissen heeft alleen betekenis als er een sessie in beeld is.
+  document.getElementById("clear-input-btn")?.classList.toggle("hidden", !showTerm);
   for (const s of sessions.values()) s.el.classList.toggle("hidden", s.id !== target);
   if (showTerm) {
     const s = sessions.get(target);
@@ -4918,6 +4926,7 @@ function openTabMenu(x, y, id) {
   const att = s.attached ? " disabled" : "";
   const attWhy = s.attached ? ` title="${escapeHtml(t("attach_not_restartable"))}"` : "";
   m.innerHTML = `
+    <div class="ctx-item${s.exited ? " disabled" : ""}" data-act="clear">${t("ctx_clear")}</div>
     <div class="ctx-item" data-act="rename">${t("ctx_rename")}</div>
     <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
     <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
@@ -4925,6 +4934,7 @@ function openTabMenu(x, y, id) {
     <div class="ctx-item${off}"${why} data-act="help">${t("ctx_help")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
+  m.querySelector('[data-act="clear"]').addEventListener("click", () => { closeTabMenu(); clearAgentInput(s); });
   m.querySelector('[data-act="rename"]').addEventListener("click", () => { closeTabMenu(); openRenameTab(x, y, id); });
   // Hulp vragen kan alleen voor een sessie die HIER draait: je nodigt iemand uit in
   // je eigen terminal. Bij een remote sessie zit het werk al ergens anders (#125).
@@ -4953,6 +4963,31 @@ function openTabMenu(x, y, id) {
   tabMenuEl = m;
 }
 document.addEventListener("click", closeTabMenu);
+
+// De invoer van de agent leegmaken ZONDER Ctrl+C (#278): Ctrl+C breekt een lopende
+// beurt af. De invoer is van de agent, niet van ons, dus we sturen de toetsen die
+// hij zelf kent: Ctrl+E (einde regel), Ctrl+K (rest van de regel, of de regelovergang)
+// en Ctrl+U (terug naar het begin). Dat wist één regel; een ingeklapte plak
+// ("[Pasted text #1 +59 lines]") telt als één. Gemeten bij Claude Code: herhalen op
+// een lege invoer doet niets, en een lopende beurt loopt gewoon door.
+// Los versturen, met een korte pauze: als één stoot van ~120 bytes negeerde Claude
+// Code ze tijdens een lopende beurt -- vermoedelijk las hij dat als een plak.
+const CLEAR_INPUT_ROUNDS = 20;
+async function clearAgentInput(s) {
+  if (!s || s.exited || s.clearing) return;
+  s.clearing = true;
+  const write = (d) => s.mirror
+    ? invoke("ssh_mirror_write", { id: s.mirror, data: d })
+    : invoke("write_session", { id: s.id, data: d });
+  try {
+    for (let i = 0; i < CLEAR_INPUT_ROUNDS; i++) {
+      await write("\x05\x0b\x15");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  } catch (e) { dbg(`clear input FAIL: ${e}`); }
+  finally { s.clearing = false; }
+  if (current === s.id) s.term.focus();
+}
 
 // Hernoemen gebeurt in een eigen veldje op de plek van het menu, niet in de tab
 // zelf: renderTabs() tekent de tabbalk opnieuw bij elke statuswissel en zou een
@@ -6345,6 +6380,8 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (settings.search && ctrl && e.shiftKey && (e.key === "F" || e.key === "f")) { e.preventDefault(); openSearch(); return; }
+  // Niet doorlaten naar xterm: die zou er zelf een backspace van maken.
+  if (ctrl && e.shiftKey && e.key === "Backspace") { e.preventDefault(); e.stopPropagation(); clearAgentInput(sessions.get(current)); return; }
   if (settings.tabShortcuts) {
     // Ctrl+Tab ook op de Mac: dat is daar de gewone tabwissel (Safari, Terminal).
     if ((IS_MAC ? e.ctrlKey && !e.metaKey : ctrl) && e.key === "Tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
@@ -6828,6 +6865,7 @@ const SIDEBAR_ACTIONS = {
   "add-process-btn": () => openNewAgent("plain"),
   "attach-btn": () => openAttachModal(),
   "hosts-btn": () => openHostModal(),
+  "clear-input-btn": () => clearAgentInput(sessions.get(current)),
   "proc-find": () => toggleProcFilter(),
 };
 document.addEventListener("click", (e) => {
