@@ -285,6 +285,8 @@ const I18N = {
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
+    ctx_clear: "⌫ Invoer wissen", dz_clear: "Wis invoer",
+    clear_input_tip: "Wis wat er in de invoer van de agent staat, zonder hem te onderbreken (Ctrl+Shift+Backspace)",
     ctx_rename: "✎ Hernoemen", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
     preview_none: "(geen .html/.md in de werkmap)",
     preview_group_session: "Sinds deze tab open is", preview_group_today: "Eerder vandaag", preview_group_older: "Ouder",
@@ -345,6 +347,17 @@ const I18N = {
     voice_natural: "Windows-stemmen", voice_classic: "Klassiek (SAPI)",
     voice_install_hint: "Meer stemmen of talen nodig? Voeg ze toe via Windows-instellingen → Tijd en taal → Spraak (of taal toevoegen met Text-to-speech).",
     tts_ready: "{title} is klaar",
+    tts_waiting: "{title} wacht op toestemming",
+    notify_ready: "is klaar", notify_waiting: "wacht op je toestemming",
+    opt_notify: "Melding wanneer klaar", opt_messaging: "Berichten tussen agents", opt_rc: "Remote Control (claude.ai en mobiel)",
+    opt_notify_tip: "Een Windows-melding als deze agent klaar is of op je toestemming wacht, behalve als je al naar die tab kijkt.",
+    opt_messaging_tip: "Andere Claude-sessies op deze computer mogen deze sessie berichten sturen, en deze sessie hen. Uit = berichten worden geweigerd.",
+    opt_rc_tip: "Volg en bestuur deze sessie vanaf claude.ai of de Claude-app, onder dezelfde naam als de tab. Vereist een claude.ai-login.",
+    c_agentmsg: "Agents mogen elkaar berichten sturen",
+    grp_newsessions: "Nieuwe sessies",
+    help_notify_default: "Zet het vinkje Melding wanneer klaar standaard aan op het startformulier. Een kaart waarop je het zelf aanzette houdt het altijd aan.",
+    help_rc_default: "Zet het vinkje Remote Control standaard aan op het startformulier: elke nieuwe Claude-sessie is dan ook te volgen vanaf claude.ai en de Claude-app. Vereist een claude.ai-login.",
+    help_agentmsg: "De standaard voor nieuwe sessies. Aan: andere Claude-sessies op deze computer kunnen deze sessie berichten sturen, en deze sessie hen.\nUit: de sessie weigert berichten en kan zelf niemand zoeken of berichten.\nPer sessie aan te passen op het startformulier.",
     stt_head: "Spraak naar tekst — F9 inhouden (of klik 🎙)",
     stt_model: "Model", stt_download: "Download",
     stt_downloading: "Bezig met downloaden… (zie stt\\download.log)",
@@ -661,6 +674,8 @@ const I18N = {
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
+    ctx_clear: "⌫ Clear input", dz_clear: "Clear input",
+    clear_input_tip: "Clear what is in the agent's input, without interrupting it (Ctrl+Shift+Backspace)",
     ctx_rename: "✎ Rename", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
     preview_none: "(no .html/.md in the working folder)",
     preview_group_session: "Since this tab opened", preview_group_today: "Earlier today", preview_group_older: "Older",
@@ -721,6 +736,17 @@ const I18N = {
     voice_natural: "Windows voices", voice_classic: "Classic (SAPI)",
     voice_install_hint: "Need more voices or languages? Add them via Windows Settings → Time & language → Speech (or add a language with Text-to-speech).",
     tts_ready: "{title} is ready",
+    tts_waiting: "{title} is waiting for permission",
+    notify_ready: "is done", notify_waiting: "is waiting for your permission",
+    opt_notify: "Notify when done", opt_messaging: "Messages between agents", opt_rc: "Remote Control (claude.ai and mobile)",
+    opt_notify_tip: "A Windows notification when this agent is done or waits for your permission, unless you are already looking at its tab.",
+    opt_messaging_tip: "Other Claude sessions on this computer may message this session, and it may message them. Off = messages are refused.",
+    opt_rc_tip: "Follow and steer this session from claude.ai or the Claude app, under the same name as the tab. Needs a claude.ai login.",
+    c_agentmsg: "Agents may message each other",
+    grp_newsessions: "New sessions",
+    help_notify_default: "Ticks Notify when done on the launch form by default. A card on which you ticked it yourself always keeps it on.",
+    help_rc_default: "Ticks Remote Control on the launch form by default: every new Claude session can then also be followed from claude.ai and the Claude app. Needs a claude.ai login.",
+    help_agentmsg: "The default for new sessions. On: other Claude sessions on this computer can message this session, and it can message them.\nOff: the session refuses messages and cannot look up or message anyone itself.\nCan be changed per session on the launch form.",
     stt_head: "Speech to text — hold F9 (or click 🎙)",
     stt_model: "Model", stt_download: "Download",
     stt_downloading: "Downloading… (see stt\\download.log)",
@@ -773,6 +799,7 @@ const I18N = {
 if (IS_MAC) {
   Object.assign(I18N.nl, {
     c_ctrl: "⌘⇧C / ⌘⇧V (⌘C / ⌘V werken altijd)",
+    clear_input_tip: "Wis wat er in de invoer van de agent staat, zonder hem te onderbreken (⌘⇧⌫)",
     c_search: "Zoeken in scrollback — ⌘⇧F",
     c_tabs: "Tab-sneltoetsen (⌃Tab, ⌘1..9, ⌘T/W)",
     help_copyselect: "Zodra je tekst in de terminal selecteert, gaat die automatisch naar het klembord - geen ⌘C nodig.",
@@ -792,6 +819,7 @@ if (IS_MAC) {
   });
   Object.assign(I18N.en, {
     c_ctrl: "⌘⇧C / ⌘⇧V (⌘C / ⌘V always work)",
+    clear_input_tip: "Clear what is in the agent's input, without interrupting it (⌘⇧⌫)",
     c_search: "Search scrollback — ⌘⇧F",
     c_tabs: "Tab shortcuts (⌃Tab, ⌘1..9, ⌘T/W)",
     help_copyselect: "As soon as you select text in the terminal it goes to the clipboard automatically - no ⌘C needed.",
@@ -1309,6 +1337,10 @@ const DEFAULT_SETTINGS = {
   agentsFolded: false, procFolded: false, dropFolded: false,
   // Afsluiten vraagt om bevestiging zolang er iets draait (#168).
   confirmExit: true,
+  // Mogen agents elkaar berichten sturen (#282)? Open is wat claude zelf al doet.
+  agentMessaging: true,
+  // Standaarden van het startformulier (#288).
+  notifyDefault: false, rcDefault: false,
   // Map van ⚡ Snelle agent (#286). Leeg = quick_default_dir van de backend.
   quickDir: "",
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
@@ -1473,6 +1505,10 @@ function refreshOverrideState() {
   const chosen = els.agentInput.value === AGENT_COMMAND;
   els.commandField.classList.toggle("hidden", !chosen);
   applyOverrideState(chosen ? els.commandInput.value : "", [els.modelInput, els.modeInput, els.taskInput], els.commandWarn);
+  // Berichten en Remote Control zijn claude-vlaggen; bij een andere agent of een
+  // eigen commando zouden ze niets doen, dus dan staan ze er ook niet.
+  const claude = els.agentInput.value === "claude";
+  document.querySelectorAll(".claude-only").forEach((el) => el.classList.toggle("hidden", !claude));
 }
 // Welke agent hoort er in het formulier te staan? Een project met een override
 // toont "Eigen commando…", ook al staat er claude/agy in projects.json.
@@ -1833,6 +1869,11 @@ async function selectProject(p, card) {
   updateModelDatalist(els.modelSuggestions, els.agentInput.value);
   fillModeSelect(els.modeInput, els.agentInput.value, p.mode || "default");
   els.commandInput.value = p.command || "";
+  // Melding hoort bij de agent (#280); berichten volgen de standaard uit de
+  // instellingen (#282); Remote Control kies je per keer (#281).
+  els.launchNotify.checked = !!p.notify || !!settings.notifyDefault;
+  els.launchMsg.checked = settings.agentMessaging !== false;
+  els.launchRc.checked = !!settings.rcDefault;
   refreshOverrideState();
   els.status.textContent = "";
   await refreshHostState(); // doet de lokale pad-checks, of slaat ze over bij remote
@@ -3081,6 +3122,7 @@ function renderTabs() {
       let cls = "tab";
       if (current === s.id) cls += " active";
       if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
+      if (s.permission && !s.exited) cls += " permission";
       tab.className = cls;
       tab.dataset.tabId = s.id;
       tab.style.borderTopColor = s.accent || "#7c9cff";
@@ -3209,6 +3251,7 @@ function openTabPanel(anchor, rij, hervullen = false) {
     let cls = "tabpanel-row";
     if (s.id === current) cls += " active";
     if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
+    if (s.permission && !s.exited) cls += " permission";
     rw.className = cls;
     rw.style.setProperty("--tab-accent", s.accent || "#7c9cff");
     const live = settings.tabStatus && s.status && !s.exited;
@@ -3392,6 +3435,9 @@ function showView(target) {
   els.launchView.classList.toggle("hidden", showTerm);
   els.terminals.classList.toggle("hidden", !showTerm);
   if (!showTerm) closeSearch();
+  // Wissen heeft alleen betekenis als er een sessie in beeld is.
+  const clearBtn = document.getElementById("clear-input-btn");
+  if (clearBtn) clearBtn.disabled = !showTerm;
   for (const s of sessions.values()) s.el.classList.toggle("hidden", s.id !== target);
   if (showTerm) {
     const s = sessions.get(target);
@@ -3404,7 +3450,7 @@ function showView(target) {
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId, mirror }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId, mirror, notify, messaging, remoteControl }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -3514,8 +3560,32 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     // Waarvandaan de preview-lijst "sinds deze tab open is" rekent. Wat de agent in
     // deze run schreef staat daarmee bovenaan, los van wat er verder in de map ligt.
     startedAt: Date.now(),
+    // Keuzes van het startformulier (#280-#282). Bewaard bij de tab zodat een
+    // herstart ze meeneemt.
+    notify: !!notify, messaging: messaging !== false, remoteControl: !!remoteControl,
+    // permission = wacht op toestemming; hookSeen = claude meldt zelf wanneer hij
+    // klaar is, dus de stiltetimer hoeft dat niet meer te raden.
+    permission: false, hookSeen: false, pendingRename: null, renameSent: null,
+    // Lokaal krijgt claude onze hooks mee (#280); op een andere machine niet.
+    hooksExpected: (agent || "claude") === "claude" && !command && !mirror && !hostId,
   };
   sessions.set(id, session);
+
+  // Wat claude zelf over zijn toestand zegt (#280, #281). Alleen voor claude: agy
+  // en grok sturen geen van beide, en een spiegel-tab is niet onze sessie.
+  if (hasClaudeSignals(session)) {
+    if (term.parser && term.parser.registerOscHandler) {
+      // Onze eigen hooks sturen OSC 777 "notify;taurus;<tag>". Alleen die vangen
+      // we af; elke andere OSC 777 gaat gewoon door naar xterm.
+      term.parser.registerOscHandler(777, (data) => {
+        const m = /^notify;taurus;(\w+)$/.exec(data);
+        if (!m) return false;
+        onTaurusSignal(session, m[1]);
+        return true;
+      });
+    }
+    term.onTitleChange((title) => onClaudeTitle(session, title));
+  }
 
   term.onData((d) => session.mirror
     ? invoke("ssh_mirror_write", { id: session.mirror, data: d })
@@ -3648,6 +3718,10 @@ async function startSession() {
   const command = isCmd ? els.commandInput.value.trim() : "";
   const agent = isCmd ? "claude" : (els.agentInput.value || "claude");
   const model = els.modelInput.value.trim();
+  const notify = els.launchNotify.checked;
+  const isClaude = agent === "claude" && !command;
+  const messaging = isClaude ? els.launchMsg.checked : true;
+  const remoteControl = isClaude && els.launchRc.checked;
   // De machine hoort bij de AGENT, niet bij deze keer starten: standaard lokaal,
   // en remote alleen als de agent zo is ingericht in "Agents beheren".
   const hostId = selected.host_id || "";
@@ -3659,13 +3733,13 @@ async function startSession() {
   // Van welke kaart komt deze sessie? Bladeren naar een map zet id op "", dus
   // losse sessies krijgen hier vanzelf een lege projectId.
   const projectId = selected.id || "";
-  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId });
+  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId, notify, messaging, remoteControl });
   try {
     // De backend bepaalt de naam van de mux-sessie en geeft hem terug; die bewaren
     // we bij de tab. Een nieuwe sessie krijgt een EIGEN naam (ook in een map waar
     // al een agent draait), dus stoppen en hervatten mogen die naam niet meer uit
     // (host, map) terugrekenen.
-    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows })) || "";
+    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows, claudeOpts: { messaging, remoteControl } })) || "";
     // Een model dat je zelf intypte staat de volgende keer in de suggestielijst.
     // Pas NA een geslaagde start: een modelnaam die de agent weigert hoort niet
     // in de lijst terecht te komen.
@@ -3807,6 +3881,7 @@ async function addAgentFromForm() {
     model: els.modelInput.value.trim(),
     command: els.agentInput.value === AGENT_COMMAND ? els.commandInput.value.trim() : "",
     host_id: selected.host_id || "", // machine hoort bij de agent, niet bij deze start
+    notify: els.launchNotify.checked,
   };
   const next = projects.filter((p) => p.id !== entry.id);
   next.push(entry);
@@ -3875,7 +3950,7 @@ function persistSessionsToDisk() {
     // Een spiegel-tab (JOIN) hoort er ook niet in: die heeft geen eigen proces
     // en bij de volgende start bestaat de sessie van de collega niet meer.
     .filter((s) => !s.command && !s.attached && !s.mirror)
-    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "", mux_name: s.muxName || "" }));
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "", mux_name: s.muxName || "", notify: !!s.notify, messaging: s.messaging !== false, remote_control: !!s.remoteControl }));
   invoke("save_sessions", { sessions: list }).catch(saveSessionsFailed);
 }
 
@@ -3939,6 +4014,7 @@ async function restoreSessions(metas) {
       // Zonder dit zouden alle hervatte sessies na een herstart als losse
       // sessies in een bak belanden in plaats van bij hun eigen agent (#90).
       projectId: meta.project_id || "",
+      notify: !!meta.notify, messaging: meta.messaging !== false, remoteControl: !!meta.remote_control,
     });
     // Welke mux-sessie op de host bij deze tab hoorde. Moet er staan VOOR de
     // restart hieronder, want die stuurt hem mee.
@@ -3956,6 +4032,7 @@ async function restoreSessions(metas) {
         // daar nog loopt alsnog wordt teruggevonden.
         muxName: session.muxName || "",
         cols: session.term.cols, rows: session.term.rows,
+        claudeOpts: { messaging: session.messaging !== false, remoteControl: !!session.remoteControl },
       });
       // Hervat = door Taurus gestart, dus hij hoort in de geschiedenis. Zonder dit
       // blijft die lijst leeg voor wie zijn sessies alleen maar hervat: hij werd
@@ -4684,6 +4761,121 @@ function lastSpinnerVerb(buf) {
   return last;
 }
 
+/* ============ signalen van claude zelf (#280, #281) ============ */
+// Claude zet zijn venstertitel (OSC 0) op "<teken> <sessienaam>". GEMETEN op
+// 2.1.299: "✳" = idle, en tijdens het werken wisselen "◐"/"◑" ongeveer elke
+// seconde. Bij het opstarten staat er kaal "claude"; zonder teken ervoor zegt de
+// titel niets, dus die laten we liggen.
+const CLAUDE_IDLE_GLYPH = "✳";
+function parseClaudeTitle(title) {
+  const m = /^(\S)\s+(.+)$/u.exec(title || "");
+  if (!m || /[\p{L}\p{N}]/u.test(m[1])) return null;
+  return { idle: m[1] === CLAUDE_IDLE_GLYPH, name: m[2].trim() };
+}
+function hasClaudeSignals(s) { return s.agent === "claude" && !s.command && !s.mirror; }
+
+function onClaudeTitle(s, title) {
+  const p = parseClaudeTitle(title);
+  if (!p) return;
+  let render = false;
+  if (!p.idle) {
+    // Bezig: zelfde betekenis als het spinnerwerkwoord in de output.
+    s.lastSpin = Date.now();
+    s.announced = false;
+    if (!s.working || s.awaiting || s.permission) { s.working = true; s.awaiting = false; s.permission = false; render = true; }
+  }
+  // De naam. Staat er een hernoeming van de tab klaar, dan wint die: de titel
+  // draagt dan nog de oude naam tot claude de /rename verwerkt heeft. Anders is
+  // een andere naam een /rename in claude zelf, en die neemt de tab over.
+  if (s.pendingRename) {
+    if (p.name === s.pendingRename) s.pendingRename = null;
+  } else if (p.name && p.name !== s.title) {
+    s.title = p.name;
+    render = true;
+    persistSessionsToDisk();
+    recordSession(s);
+  }
+  if (p.idle) trySendRename(s);
+  if (render) renderTabs();
+}
+
+// Een event van onze eigen hooks: "stop" = de beurt is klaar, "waiting" = claude
+// wacht op toestemming (of op een vraag die alleen jij kunt beantwoorden).
+function onTaurusSignal(s, tag) {
+  s.hookSeen = true;
+  if (tag === "stop") {
+    s.working = false; s.status = null; s.permission = false;
+    if (!s.announced) { s.announced = true; announce(s, "ready"); }
+    trySendRename(s);
+  } else if (tag === "waiting") {
+    s.working = false; s.status = null; s.permission = true;
+    announce(s, "waiting");
+  }
+  renderTabs();
+}
+
+// Melden dat een agent klaar is of wacht. De tab knippert en de stem spreekt
+// alleen als je niet naar die tab kijkt (zoals altijd); de Windows-melding komt
+// als je hem aanvinkte, ook als die tab open staat maar je in een ander venster
+// zit.
+function announce(s, kind) {
+  if (s.id !== current) {
+    s.awaiting = true;
+    speak(t(kind === "waiting" ? "tts_waiting" : "tts_ready").replace("{title}", s.title || "agent"));
+  }
+  const looking = s.id === current && document.hasFocus();
+  if (s.notify && !looking) {
+    // Naam en status samen in de vette regel: Windows zet er zelf "Taurus" boven, en
+    // bij meerdere sessies tegelijk moet je zonder lezen zien welke het is. De map
+    // eronder onderscheidt twee tabs met dezelfde naam.
+    const what = t(kind === "waiting" ? "notify_waiting" : "notify_ready");
+    invoke("notify_os", { title: `${s.title || "agent"} ${what}`, body: s.path || "" }).catch(() => {});
+  }
+}
+
+// Staat de invoer van claude leeg? Gezocht vanaf onderen naar de regel die met
+// het invoerpijltje begint: dat is de invoerregel. Leeg = na het pijltje alleen spaties of
+// gedimde tekst (de suggestie die claude in een lege invoer laat zien). Twijfel
+// telt als niet leeg -- een /rename door iemands half getypte zin heen is erger
+// dan een naam die even later aankomt.
+function claudeInputEmpty(s) {
+  const buf = s.term.buffer.active;
+  const bottom = buf.baseY + s.term.rows - 1;
+  for (let y = bottom; y >= Math.max(0, bottom - s.term.rows); y--) {
+    const line = buf.getLine(y);
+    if (!line) continue;
+    // "❯" in de ene terminal, ">" in de andere -- GEMETEN: in Taurus tekent
+    // claude 2.1.299 ">", in een kale ConPTY "❯".
+    const m = /^\s*([❯>])/.exec(line.translateToString(true));
+    if (!m) continue;
+    const i = m[0].length - 1;
+    for (let x = i + 1; x < line.length; x++) {
+      const c = line.getCell(x);
+      if (!c) continue;
+      const ch = c.getChars();
+      if (ch && ch.trim() && !c.isDim()) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+// Een tabnaam doorgeven aan claude met /rename (#281). Alleen als hij idle is en
+// zijn invoer leeg is; anders blijft hij klaarstaan tot het volgende rustpunt.
+// Per naam hooguit één poging, zodat een /rename die niet aankomt niet blijft
+// herhalen.
+function trySendRename(s) {
+  const name = s.pendingRename;
+  if (!name || s.exited || s.working || s.renameSent === name) return;
+  if (!claudeInputEmpty(s)) return;
+  s.renameSent = name;
+  const clean = name.replace(/[\x00-\x1f\x7f]/g, " ").trim();
+  invoke("write_session", { id: s.id, data: `/rename ${clean}` })
+    .then(() => new Promise((r) => setTimeout(r, 150)))
+    .then(() => invoke("write_session", { id: s.id, data: "\r" }))
+    .catch((e) => dbg(`rename FAIL: ${e}`));
+}
+
 /* ============ PTY-events ============ */
 listen("pty-output", (event) => {
   const [sid, gen, data] = event.payload;
@@ -4702,10 +4894,16 @@ listen("pty-output", (event) => {
     // die de hele beurt getoond wordt (ook tijdens tools/streamen) en dus veel
     // betrouwbaarder is dan "geen spinner gezien".
     const busy = !!verb || /\besc to interrupt\b/i.test(s.buf);
-    if (busy) {
+    if (busy && s.hookSeen) {
+      // Claude meldt zijn toestand zelf (titel + hooks, #280). De buffer houdt
+      // "esc to interrupt" nog vast nadat de beurt klaar is, en zou de tab dan
+      // weer op bezig zetten en de melding wissen -- GEMETEN in een testexemplaar.
+      // Hier dus alleen nog het werkwoord voor op de tab.
+      if (settings.tabStatus && verb && s.working && s.status !== verb) { s.status = verb; render = true; }
+    } else if (busy) {
       s.lastSpin = Date.now();
       s.announced = false; // (weer) bezig -> een latere idle mag opnieuw melden
-      if (!s.working || s.awaiting) { s.working = true; s.awaiting = false; render = true; }
+      if (!s.working || s.awaiting) { s.working = true; s.awaiting = false; s.permission = false; render = true; }
       if (settings.tabStatus && verb && s.status !== verb) { s.status = verb; render = true; }
     }
   }
@@ -4791,19 +4989,24 @@ listen("pty-exit", (event) => {
 // hooguit één melding (s.announced), en alleen voor een tab die je niet bekijkt.
 const READY_IDLE_MS = 3000;
 const READY_CONFIRM_MS = 2000;
+const READY_HOOKS_FALLBACK_MS = 15000;
 setInterval(() => {
   let changed = false; const now = Date.now();
   for (const s of sessions.values()) {
     if (s.exited || !s.lastSpin) continue; // nooit gewerkt -> niets te melden
     const idle = now - s.lastSpin;
     if (s.working && idle > READY_IDLE_MS) { s.working = false; s.status = null; changed = true; }
-    if (!s.working && !s.announced && idle > READY_IDLE_MS + READY_CONFIRM_MS) {
+    // Meldt claude het zelf (hookSeen, #280), dan raadt de timer niet meer mee:
+    // die zag een toestemmingsvraag ook als "klaar".
+    // Een lokale claude-sessie heeft onze hooks; tot het eerste signaal binnen is
+    // wacht de timer langer, want een toestemmingsvraag meldt zich pas na ~6 s
+    // (GEMETEN). Komt er in die tijd niets, dan werkten de hooks kennelijk niet en
+    // valt hij terug op de oude gok.
+    const wait = s.hooksExpected ? READY_HOOKS_FALLBACK_MS : READY_IDLE_MS + READY_CONFIRM_MS;
+    if (!s.working && !s.announced && !s.hookSeen && idle > wait) {
       s.announced = true; // afgehandeld (ook als je ernaar keek: geen latere melding)
-      if (s.id !== current) {
-        s.awaiting = true;
-        speak(t("tts_ready").replace("{title}", s.title || "agent"));
-        changed = true;
-      }
+      announce(s, "ready");
+      changed = true;
     }
   }
   if (changed) renderTabs();
@@ -5053,6 +5256,7 @@ function openTabMenu(x, y, id) {
   const att = s.attached ? " disabled" : "";
   const attWhy = s.attached ? ` title="${escapeHtml(t("attach_not_restartable"))}"` : "";
   m.innerHTML = `
+    <div class="ctx-item${s.exited ? " disabled" : ""}" data-act="clear">${t("ctx_clear")}</div>
     <div class="ctx-item" data-act="rename">${t("ctx_rename")}</div>
     ${isQuick(s) ? `<div class="ctx-item" data-act="promote">📁 ${t("ctx_promote")}</div>` : ""}
     <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
@@ -5061,6 +5265,7 @@ function openTabMenu(x, y, id) {
     <div class="ctx-item${off}"${why} data-act="help">${t("ctx_help")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
+  m.querySelector('[data-act="clear"]').addEventListener("click", () => { closeTabMenu(); clearAgentInput(s); });
   m.querySelector('[data-act="rename"]').addEventListener("click", () => { closeTabMenu(); openRenameTab(x, y, id); });
   // Hulp vragen kan alleen voor een sessie die HIER draait: je nodigt iemand uit in
   // je eigen terminal. Bij een remote sessie zit het werk al ergens anders (#125).
@@ -5091,6 +5296,31 @@ function openTabMenu(x, y, id) {
 }
 document.addEventListener("click", closeTabMenu);
 
+// De invoer van de agent leegmaken ZONDER Ctrl+C (#278): Ctrl+C breekt een lopende
+// beurt af. De invoer is van de agent, niet van ons, dus we sturen de toetsen die
+// hij zelf kent: Ctrl+E (einde regel), Ctrl+K (rest van de regel, of de regelovergang)
+// en Ctrl+U (terug naar het begin). Dat wist één regel; een ingeklapte plak
+// ("[Pasted text #1 +59 lines]") telt als één. Gemeten bij Claude Code: herhalen op
+// een lege invoer doet niets, en een lopende beurt loopt gewoon door.
+// Los versturen, met een korte pauze: als één stoot van ~120 bytes negeerde Claude
+// Code ze tijdens een lopende beurt -- vermoedelijk las hij dat als een plak.
+const CLEAR_INPUT_ROUNDS = 20;
+async function clearAgentInput(s) {
+  if (!s || s.exited || s.clearing) return;
+  s.clearing = true;
+  const write = (d) => s.mirror
+    ? invoke("ssh_mirror_write", { id: s.mirror, data: d })
+    : invoke("write_session", { id: s.id, data: d });
+  try {
+    for (let i = 0; i < CLEAR_INPUT_ROUNDS; i++) {
+      await write("\x05\x0b\x15");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  } catch (e) { dbg(`clear input FAIL: ${e}`); }
+  finally { s.clearing = false; }
+  if (current === s.id) s.term.focus();
+}
+
 // Hernoemen gebeurt in een eigen veldje op de plek van het menu, niet in de tab
 // zelf: renderTabs() tekent de tabbalk opnieuw bij elke statuswissel en zou een
 // invoerveld in de tab halverwege het typen weggooien.
@@ -5112,6 +5342,9 @@ function openRenameTab(x, y, id) {
     const name = input.value.trim();
     if (save && name && name !== s.title) {
       s.title = name;
+      // En claude ook (#281): zijn sessienaam is het adres voor berichten en de
+      // naam op claude.ai. Gaat pas als hij idle is met een lege invoer.
+      if (hasClaudeSignals(s) && !s.exited) { s.pendingRename = name; s.renameSent = null; trySendRename(s); }
       renderTabs();
       persistSessionsToDisk();
       recordSession(s); // ook de geschiedenis, anders toont die de oude naam
@@ -5194,6 +5427,9 @@ function openSettings() {
   els.setSearch.checked = settings.search;
   els.setTabs.checked = settings.tabShortcuts;
   els.setTabStatus.checked = settings.tabStatus;
+  els.setAgentMsg.checked = settings.agentMessaging !== false;
+  els.setNotifyDefault.checked = !!settings.notifyDefault;
+  els.setRcDefault.checked = !!settings.rcDefault;
   els.setTabRecap.checked = settings.tabRecap;
   els.setTabGroupSize.value = settings.tabGroups ? settings.tabGroupSize : 0;
   els.setFullPaths.checked = settings.fullPaths;
@@ -5452,6 +5688,9 @@ function saveSettingsFromForm() {
   settings.search = els.setSearch.checked;
   settings.tabShortcuts = els.setTabs.checked;
   settings.tabStatus = els.setTabStatus.checked;
+  settings.agentMessaging = els.setAgentMsg.checked;
+  settings.notifyDefault = els.setNotifyDefault.checked;
+  settings.rcDefault = els.setRcDefault.checked;
   settings.tabRecap = els.setTabRecap.checked;
   // 0 = uit. Een aparte aanvinkvakje ernaast zou twee besturingselementen voor
   // een keuze zijn; nul is hier de natuurlijke "nooit bundelen".
@@ -6292,6 +6531,7 @@ function renderEditor() {
         <div class="e-field e-cmdfield${hasOverride ? "" : " hidden"}"><span class="e-cap">${escapeHtml(t("cap_command"))}</span>
           <input class="e-command" type="text" placeholder="${escapeHtml(t("command_ph"))}" value="${escapeHtml(r.command || "")}" />
           <span class="e-cmdwarn${hasOverride ? "" : " hidden"}">${escapeHtml(t("command_warn"))}</span></div>
+        <label class="e-check" title="${escapeHtml(t("opt_notify_tip"))}"><input class="e-notify" type="checkbox"${r.notify ? " checked" : ""} /> ${escapeHtml(t("opt_notify"))}</label>
       </div>`;
     // Uitklappen: alleen deze rij, de andere blijven zoals ze staan.
     const toggle = () => {
@@ -6315,6 +6555,7 @@ function renderEditor() {
     row.querySelector(".e-task").addEventListener("input", (e) => (editRows[i].task = e.target.value));
     row.querySelector(".e-mode").addEventListener("change", (e) => (editRows[i].mode = e.target.value));
     row.querySelector(".e-model").addEventListener("input", (e) => (editRows[i].model = e.target.value));
+    row.querySelector(".e-notify").addEventListener("change", (e) => (editRows[i].notify = e.target.checked));
     // Agent wisselen herrendert de rij zodat model-suggesties EN modus-opties
     // meeveranderen; de modus wordt geclampt (claude "plan" bestaat niet voor
     // agy) en het model gewist (een model van de vorige agent is niet geldig).
@@ -6538,6 +6779,8 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (settings.search && ctrl && e.shiftKey && (e.key === "F" || e.key === "f")) { e.preventDefault(); openSearch(); return; }
+  // Niet doorlaten naar xterm: die zou er zelf een backspace van maken.
+  if (ctrl && e.shiftKey && e.key === "Backspace") { e.preventDefault(); e.stopPropagation(); clearAgentInput(sessions.get(current)); return; }
   if (settings.tabShortcuts) {
     // Ctrl+Tab ook op de Mac: dat is daar de gewone tabwissel (Safari, Terminal).
     if ((IS_MAC ? e.ctrlKey && !e.metaKey : ctrl) && e.key === "Tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
@@ -7022,6 +7265,7 @@ const SIDEBAR_ACTIONS = {
   "add-process-btn": () => openNewAgent("plain"),
   "attach-btn": () => openAttachModal(),
   "hosts-btn": () => openHostModal(),
+  "clear-input-btn": () => clearAgentInput(sessions.get(current)),
   "proc-find": () => toggleProcFilter(),
 };
 document.addEventListener("click", (e) => {
@@ -7083,6 +7327,9 @@ window.addEventListener("DOMContentLoaded", () => {
     setSearch: document.querySelector("#set-search"),
     setTabs: document.querySelector("#set-tabshortcuts"),
     setTabStatus: document.querySelector("#set-tabstatus"),
+    setAgentMsg: document.querySelector("#set-agentmsg"),
+    setNotifyDefault: document.querySelector("#set-notify-default"),
+    setRcDefault: document.querySelector("#set-rc-default"),
     setTabRecap: document.querySelector("#set-tabrecap"),
     setTabGroupSize: document.querySelector("#set-tabgroupsize"),
     setFullPaths: document.querySelector("#set-fullpaths"),
@@ -7143,6 +7390,9 @@ window.addEventListener("DOMContentLoaded", () => {
     consentBlock: document.querySelector("#consent-block"),
     toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
+    launchNotify: document.querySelector("#launch-notify"),
+    launchMsg: document.querySelector("#launch-msg"),
+    launchRc: document.querySelector("#launch-rc"),
     agentInput: document.querySelector("#agent-input"),
     modelInput: document.querySelector("#model-input"),
     modelSuggestions: document.querySelector("#model-suggestions"),

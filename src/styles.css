@@ -642,7 +642,12 @@ html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
   font-size: 12px;
   cursor: pointer;
 }
+/* Plakken en invoer wissen naast elkaar: wissen is het antwoord op een plak die misging. */
+.dropper-actions { display: flex; gap: 6px; margin-top: 8px; }
+.dropper-actions .dropper-paste { margin-top: 0; flex: 1; min-width: 0; white-space: nowrap; padding: 7px 4px; gap: 5px; }
 .dropper-paste:hover { color: var(--text); border-color: var(--accent); }
+.dropper-paste:disabled { opacity: .4; cursor: default; }
+.dropper-paste:disabled:hover { color: var(--text-dim); border-color: var(--border); }
 .dropper-paste .dropper-paste-ico { width: 15px; height: 15px; }
 .dropper-paste .dropper-paste-ico svg { width: 100%; height: 100%; display: block; }
 /* Gemeten: een rij is 24px, de gap 5px, dus 88px = precies DRIE hele rijen.
@@ -741,6 +746,8 @@ html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
 /* ---- Tab-activiteit ---- */
 .tab.working .tab-dot { background: var(--green); }
 .tab.awaiting .tab-dot { background: var(--tab-accent, var(--orange)); }
+/* Wacht op toestemming (#280): rood bolletje, ook op de tab die je bekijkt. */
+.tab.permission .tab-dot, .tabpanel-row.permission .tab-dot { background: var(--red); }
 .tab.awaiting:not(.active) { animation: tabflash 1.1s ease-in-out infinite; }
 .tab.awaiting:not(.active) .tab-title { color: var(--tab-accent, var(--orange)); }
 @keyframes tabflash {
@@ -880,14 +887,21 @@ html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
    regels en liep een rij het venster uit -- afgekapt en niet bij te schuiven,
    want een modal heeft geen horizontale scrollbalk. Vast breed kan niet:
    1920x1080 met 150% schaal is effectief 1280x720 CSS-px, en het venster is vaak
-   nog kleiner. Vandaar min(): breed als het past, en anders wat er is. */
-.modal-box.settings-box { width: min(1180px, 94vw); }
+   nog kleiner. Vandaar min(): breed als het past, en anders wat er is.
+   760 en niet 1180 (#288): de tabstrip past ruim, en breder trok elk label en
+   zijn veld uit elkaar tot aan de twee randen van het venster. */
+.modal-box.settings-box { width: min(760px, 94vw); }
 .modal-box h2 { margin: 0 0 18px; font-size: 20px; }
 .modal-box h3 { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
 .setting-group { margin-bottom: 22px; }
 .srow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 14px; }
 .srow input[type="number"] { width: 100px; }
 .srow.check { justify-content: flex-start; gap: 10px; cursor: pointer; }
+/* Label en veld horen bij elkaar (#288): een vaste labelkolom en het veld er
+   direct naast, met een maximale breedte. Met space-between stonden ze op een
+   breed venster aan de twee uiteinden. Smal: het veld onder het label. */
+.srow:not(.check) { display: grid; grid-template-columns: 210px minmax(0, 380px); justify-content: start; gap: 6px 16px; }
+@media (max-width: 620px) { .srow:not(.check) { grid-template-columns: minmax(0, 1fr); } }
 .srow.check input { width: auto; }
 .opt { color: var(--text-dim); font-weight: 400; font-size: 11px; }
 
@@ -979,6 +993,13 @@ html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
 .e-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .e-grid.e-grid3 { grid-template-columns: 1fr 1fr 1fr; }
 .e-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.e-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
+/* Opties naast elkaar en terugvallend naar een volgende regel; de globale input-breedte
+   (100%) zou het vinkje anders oprekken en de tekst naar rechts duwen. */
+.launch-opts { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.launch-opts .check-row { display: inline-flex; align-items: center; gap: 7px; margin: 0; font-size: 13px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.launch-opts .check-row:hover { color: var(--text); }
+.launch-opts .check-row input { width: auto; flex: none; margin: 0; padding: 0; }
 .e-cap { font-size: 10.5px; color: var(--text-dim); letter-spacing: .2px; }
 .e-cmdwarn { font-size: 10.5px; color: var(--orange); }
 
@@ -1143,6 +1164,10 @@ html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
 .setting-group.locked input { cursor: not-allowed; }
 .net-row { cursor: pointer; }
 .net-row .peer-fp { color: var(--text-dim); font-size: 11px; }
+/* Het vinkje links, zoals elk ander vinkje in de instellingen (#288). Zonder
+   width:auto rekte de globale input-breedte het op tot midden in de kaart. */
+.net-row { justify-content: flex-start; }
+.net-row input[type="checkbox"] { width: auto; flex: none; margin: 0; order: -1; }
 
 /* De vingerafdruk is het enige betrouwbare stuk identiteit in deze popup, dus
    die krijgt eigen nadruk -- de naam ernaast is een claim van de client. */

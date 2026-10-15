@@ -96,6 +96,7 @@
               <span class="dz-lbl" data-i18n="dz_prompt">Alleen pad</span>
             </div>
           </div>
+          <div class="dropper-actions">
           <button id="dropper-paste" class="dropper-paste" type="button">
             <span class="dropper-paste-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -105,6 +106,18 @@
             </span>
             <span data-i18n="dz_paste">Plak object</span>
           </button>
+            <!-- Invoer van de agent wissen zonder Ctrl+C, dat een lopende beurt afbreekt (#278).
+                 Hier en niet bovenin: naast plakken zoek je hem als een plak misgaat. -->
+            <button id="clear-input-btn" class="dropper-paste" type="button" data-i18n-title="clear_input_tip" disabled>
+              <span class="dropper-paste-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 5H9l-6 7 6 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z" />
+                  <path d="M17 9l-5 6" /><path d="M12 9l5 6" />
+                </svg>
+              </span>
+              <span data-i18n="dz_clear">Wis invoer</span>
+            </button>
+          </div>
           <div id="dropper-list" class="dropper-list"></div>
         </div>
 
@@ -178,6 +191,11 @@
                   <option value="plan" data-i18n="mode_plan">Plan-modus</option>
                   <option value="auto" data-i18n="mode_auto">Auto (accepteert acties)</option>
                 </select>
+              </div>
+              <div class="field launch-opts">
+                <label class="check-row" data-i18n-title="opt_notify_tip"><input id="launch-notify" type="checkbox" /> <span data-i18n="opt_notify">Melding wanneer klaar</span></label>
+                <label class="check-row claude-only" data-i18n-title="opt_messaging_tip"><input id="launch-msg" type="checkbox" checked /> <span data-i18n="opt_messaging">Berichten tussen agents</span></label>
+                <label class="check-row claude-only" data-i18n-title="opt_rc_tip"><input id="launch-rc" type="checkbox" /> <span data-i18n="opt_rc">Remote Control (claude.ai en mobiel)</span></label>
               </div>
               <div class="field hidden" id="command-field">
                 <label for="command-input"><span data-i18n="launch_command">Commando-override</span> <span class="opt" data-i18n="optional">(optioneel)</span></label>
@@ -253,6 +271,14 @@
               <label class="srow check" data-help-key="help_confirm_exit"><input id="set-confirm-exit" type="checkbox" /> <span data-i18n="set_confirm_exit">Vragen voor afsluiten</span></label>
               <label class="srow" data-help-key="help_quickdir"><span data-i18n="set_quickdir">Map van de snelle agent</span>
                 <span class="v-row"><input id="set-quickdir" type="text" autocomplete="off" /><button id="set-quickdir-browse" class="icon-btn" type="button">📁</button></span></label>
+            </div>
+            <!-- Waar het startformulier mee begint (#288). Stonden verspreid of
+                 ontbraken: de melding en Remote Control hadden geen standaard. -->
+            <div class="setting-group">
+              <h3 data-i18n="grp_newsessions">Nieuwe sessies</h3>
+              <label class="srow check" data-help-key="help_notify_default"><input id="set-notify-default" type="checkbox" /> <span data-i18n="opt_notify">Melding wanneer klaar</span></label>
+              <label class="srow check" data-help-key="help_agentmsg"><input id="set-agentmsg" type="checkbox" /> <span data-i18n="c_agentmsg">Agents mogen elkaar berichten sturen</span></label>
+              <label class="srow check" data-help-key="help_rc_default"><input id="set-rc-default" type="checkbox" /> <span data-i18n="opt_rc">Remote Control (claude.ai en mobiel)</span></label>
             </div>
           </div>
 
