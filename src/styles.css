@@ -975,8 +975,12 @@ html[data-skin] .sidebar.brand-min .brand.brand-wide .brand-logo {
 .e-grid.e-grid3 { grid-template-columns: 1fr 1fr 1fr; }
 .e-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .e-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
-.launch-opts { display: flex; flex-direction: column; gap: 4px; }
-.launch-opts .check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+/* Opties naast elkaar en terugvallend naar een volgende regel; de globale input-breedte
+   (100%) zou het vinkje anders oprekken en de tekst naar rechts duwen. */
+.launch-opts { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.launch-opts .check-row { display: inline-flex; align-items: center; gap: 7px; margin: 0; font-size: 13px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.launch-opts .check-row:hover { color: var(--text); }
+.launch-opts .check-row input { width: auto; flex: none; margin: 0; padding: 0; }
 .e-cap { font-size: 10.5px; color: var(--text-dim); letter-spacing: .2px; }
 .e-cmdwarn { font-size: 10.5px; color: var(--orange); }
 
