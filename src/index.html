@@ -96,6 +96,7 @@
               <span class="dz-lbl" data-i18n="dz_prompt">Alleen pad</span>
             </div>
           </div>
+          <div class="dropper-actions">
           <button id="dropper-paste" class="dropper-paste" type="button">
             <span class="dropper-paste-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -105,6 +106,18 @@
             </span>
             <span data-i18n="dz_paste">Plak object</span>
           </button>
+            <!-- Invoer van de agent wissen zonder Ctrl+C, dat een lopende beurt afbreekt (#278).
+                 Hier en niet bovenin: naast plakken zoek je hem als een plak misgaat. -->
+            <button id="clear-input-btn" class="dropper-paste" type="button" data-i18n-title="clear_input_tip" disabled>
+              <span class="dropper-paste-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 5H9l-6 7 6 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z" />
+                  <path d="M17 9l-5 6" /><path d="M12 9l5 6" />
+                </svg>
+              </span>
+              <span data-i18n="dz_clear">Wis invoer</span>
+            </button>
+          </div>
           <div id="dropper-list" class="dropper-list"></div>
         </div>
 
@@ -132,6 +145,7 @@
               <p class="empty-lead" data-i18n="empty_pick">Kies of maak links een specialist om je werkproces te starten.</p>
               <p class="empty-oneoff" data-i18n="empty_oneoff">…of blader hieronder naar een eenmalige agent.</p>
               <button id="browse-btn" class="browse-btn" data-i18n="browse_folder">📁 Blader naar een map…</button>
+              <button id="quick-btn" class="browse-btn quick-btn" data-i18n="quick_start" data-i18n-title="quick_tip">⚡ Snelle agent</button>
             </div>
 
             <div id="launch-form" class="launch-form hidden">
@@ -177,6 +191,11 @@
                   <option value="plan" data-i18n="mode_plan">Plan-modus</option>
                   <option value="auto" data-i18n="mode_auto">Auto (accepteert acties)</option>
                 </select>
+              </div>
+              <div class="field launch-opts">
+                <label class="check-row" data-i18n-title="opt_notify_tip"><input id="launch-notify" type="checkbox" /> <span data-i18n="opt_notify">Melding wanneer klaar</span></label>
+                <label class="check-row claude-only" data-i18n-title="opt_messaging_tip"><input id="launch-msg" type="checkbox" checked /> <span data-i18n="opt_messaging">Berichten tussen agents</span></label>
+                <label class="check-row claude-only" data-i18n-title="opt_rc_tip"><input id="launch-rc" type="checkbox" /> <span data-i18n="opt_rc">Remote Control (claude.ai en mobiel)</span></label>
               </div>
               <div class="field hidden" id="command-field">
                 <label for="command-input"><span data-i18n="launch_command">Commando-override</span> <span class="opt" data-i18n="optional">(optioneel)</span></label>
@@ -250,6 +269,16 @@
                   <option value="clean" data-i18n="persist_clean">Schoon beginnen</option>
                 </select></label>
               <label class="srow check" data-help-key="help_confirm_exit"><input id="set-confirm-exit" type="checkbox" /> <span data-i18n="set_confirm_exit">Vragen voor afsluiten</span></label>
+              <label class="srow" data-help-key="help_quickdir"><span data-i18n="set_quickdir">Map van de snelle agent</span>
+                <span class="v-row"><input id="set-quickdir" type="text" autocomplete="off" /><button id="set-quickdir-browse" class="icon-btn" type="button">📁</button></span></label>
+            </div>
+            <!-- Waar het startformulier mee begint (#288). Stonden verspreid of
+                 ontbraken: de melding en Remote Control hadden geen standaard. -->
+            <div class="setting-group">
+              <h3 data-i18n="grp_newsessions">Nieuwe sessies</h3>
+              <label class="srow check" data-help-key="help_notify_default"><input id="set-notify-default" type="checkbox" /> <span data-i18n="opt_notify">Melding wanneer klaar</span></label>
+              <label class="srow check" data-help-key="help_agentmsg"><input id="set-agentmsg" type="checkbox" /> <span data-i18n="c_agentmsg">Agents mogen elkaar berichten sturen</span></label>
+              <label class="srow check" data-help-key="help_rc_default"><input id="set-rc-default" type="checkbox" /> <span data-i18n="opt_rc">Remote Control (claude.ai en mobiel)</span></label>
             </div>
           </div>
 
@@ -429,7 +458,14 @@
         <div class="na-kindcap" data-i18n="na_kind">Wat voor agent?</div>
         <div id="na-kinds" class="na-kinds"></div>
         <h2 class="na-second" data-i18n="na_process">Nieuw proces</h2>
-        <div id="na-kinds2" class="na-kinds"></div>
+        <!-- Waar een proces vandaan komt (#284): een map die er al staat, of een
+             repository die Taurus ophaalt. Twee keuzes van hetzelfde, dus naast
+             elkaar -- met waar het draait er meteen bij. -->
+        <div class="na-procrow">
+          <div id="na-kinds2" class="na-kinds"></div>
+          <div id="na-hostfield" class="e-field na-hostfield"><span class="e-cap" data-i18n="cap_host">Machine</span>
+            <select id="na-host"></select></div>
+        </div>
 
         <!-- Rol of vrij adres: eerst waar hij werkt en waarover, dan de bron. Je
              weet eerst waarvoor je iets haalt, dan pas waarvandaan. -->
@@ -459,28 +495,16 @@
         </div>
 
         <div id="na-plain" class="e-fields">
-          <div class="e-grid">
-            <div class="e-field"><span class="e-cap" data-i18n="cap_button">Knop</span>
-              <input id="na-label" type="text" autocomplete="off" /></div>
-            <div class="e-field"><span class="e-cap" data-i18n="cap_host">Machine</span>
-              <select id="na-host"></select></div>
-          </div>
-          <!-- Een werkproces mag ook van GitHub komen (#186). Leeg = de oude weg:
-               je wijst een map aan die er al staat. Met een bron haalt Taurus het
-               op en houdt hij de versie bij, net als bij een rol -- maar zonder
-               het slot: een proces dat niet als ICM-werkproces te herkennen is
-               krijgt een waarschuwing en geen weigering. -->
-          <div class="e-field"><span class="e-cap" data-i18n="na_psource">Bron (optioneel)</span>
+          <!-- Een werkproces mag ook van GitHub komen (#186). Bij "een repository"
+               haalt Taurus het op en houdt hij de versie bij, net als bij een rol --
+               maar zonder het slot: een proces dat niet als ICM-werkproces te
+               herkennen is krijgt een waarschuwing en geen weigering. -->
+          <div id="na-psourcefield" class="e-field hidden"><span class="e-cap" data-i18n="na_source">Bron</span>
             <div class="e-pathrow">
-              <input id="na-psource" type="text" autocomplete="off" data-i18n-ph="na_psource_ph" />
+              <input id="na-psource" type="text" autocomplete="off" data-i18n-ph="na_source_ph" />
               <button id="na-pread" class="btn-ghost" data-i18n="na_read">Lezen</button>
             </div>
-            <div id="na-pnote" class="hint" data-i18n="na_psource_hint">Leeg = je wijst hieronder een map aan die er al is.</div></div>
-          <!-- Waar dit draait (#188). Een werkproces kan een ONDERDEEL zijn van een
-               groter proces: vier fasen, en fase 3 start iets eigen. Dan hoort die
-               kaart onder zijn gastheer te staan en niet los in de lijst. -->
-          <div class="e-field"><span class="e-cap" data-i18n="na_pwhere">Waar draait dit?</span>
-            <select id="na-pwhere"></select></div>
+            <div id="na-pnote" class="hint" data-i18n="na_psource_hint"></div></div>
           <div class="e-field">
             <span class="e-cap" id="na-pathcap" data-i18n="cap_workdir">Werkmap</span>
             <div class="e-pathrow">
@@ -491,10 +515,19 @@
                  verscheen die pas nadat je de agent had bewaard en gekozen. -->
             <div id="na-note" class="status-msg"></div>
           </div>
-          <div class="e-field"><span class="e-cap" data-i18n="cap_tabtitle">Titel van het tabblad</span>
-            <input id="na-title" type="text" autocomplete="off" /></div>
-          <div class="e-field e-taskfield"><span class="e-cap" data-i18n="cap_task">Taak</span>
-            <textarea id="na-task" rows="3"></textarea></div>
+          <!-- Waar dit draait (#188). Een werkproces kan een ONDERDEEL zijn van een
+               groter proces: vier fasen, en fase 3 start iets eigen. Dan hoort die
+               kaart onder zijn gastheer te staan en niet los in de lijst. -->
+          <div class="e-field"><span class="e-cap" data-i18n="na_pwhere">Waar draait dit?</span>
+            <select id="na-pwhere"></select></div>
+          <div class="e-grid">
+            <div class="e-field"><span class="e-cap" data-i18n="na_btn_title">Knoptitel</span>
+              <input id="na-label" type="text" autocomplete="off" /></div>
+            <div class="e-field"><span class="e-cap" data-i18n="na_tab_title">Standaard tabtitel</span>
+              <input id="na-title" type="text" autocomplete="off" /></div>
+          </div>
+          <div class="e-field e-taskfield"><span class="e-cap" data-i18n="na_start_task">Opstarttaak</span>
+            <textarea id="na-task" rows="2"></textarea></div>
           <div class="e-grid e-grid3">
             <div class="e-field"><span class="e-cap" data-i18n="cap_agent">Agent</span>
               <select id="na-agent"></select></div>
@@ -513,6 +546,22 @@
           <button id="na-save" class="btn-primary" data-i18n="new_agent_create">Maak</button>
         </div>
         <div id="na-status" class="status-msg"></div>
+      </div>
+    </div>
+
+    <!-- ===== Snelle agent -> werkproces (#286) ===== -->
+    <div id="promote-modal" class="modal hidden">
+      <div class="modal-box">
+        <h2 data-i18n="promote_title">Maak er een werkproces van</h2>
+        <p class="hint" data-i18n="promote_lead"></p>
+        <div class="e-field"><span class="e-cap" data-i18n="promote_name">Naam van het werkproces</span>
+          <input id="promote-name" type="text" autocomplete="off" />
+          <div id="promote-dest" class="hint"></div></div>
+        <div class="modal-actions">
+          <button id="promote-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+          <button id="promote-go" class="btn-primary" data-i18n="promote_go">Vastleggen</button>
+        </div>
+        <div id="promote-status" class="status-msg"></div>
       </div>
     </div>
 

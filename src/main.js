@@ -3,7 +3,7 @@ const { invoke } = window.__TAURI__.core;
 // buildtijd van de binary zei niets over welke frontend erin zat, en juist dat
 // was twee avonden lang de onbekende. Zie je hier een ander nummer dan
 // verwacht, dan draait er een oudere frontend en is zoeken in de code zinloos.
-const UI_BUILD = "ui-7";
+const UI_BUILD = "ui-8";
 const { listen } = window.__TAURI__.event;
 // macOS (WKWebView) of niet. Eén vlag voor de plekken waar de webview of het OS
 // anders is dan op Windows (#199).
@@ -78,6 +78,21 @@ const I18N = {
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
     session_stop_sure: "zeker weten?",
     set_confirm_exit: "Vragen voor afsluiten",
+    quick_start: "⚡ Snelle agent", quick_title: "Snel",
+    quick_tip: "Snelle agent (Ctrl+Shift+T): een losse vraag, buiten een werkproces",
+    quick_no_dir: "✗ Geen map voor de snelle agent — stel er een in bij Instellingen → Sessies.",
+    set_quickdir: "Map van de snelle agent", ph_quickdir: "leeg = {dir}",
+    help_quickdir: "Hier start ⚡ Snelle agent. Leeg = de map claude in je thuismap als die er is, anders je thuismap.",
+    ctx_promote: "Maak er een werkproces van…",
+    promote_title: "Maak er een werkproces van",
+    promote_lead: "De agent legt dit gesprek vast in een nieuwe map: een CLAUDE.md met het doel, de bronnen, de stappen en wat jullie leerden. Zodra die er staat, komt de map als proces in het linkermenu. Deze sessie loopt gewoon door.",
+    promote_name: "Naam van het werkproces", promote_go: "Vastleggen",
+    promote_dest: "Komt in: {dir}",
+    promote_dup: "✗ Er staat al een proces op {dir}.",
+    promote_sent: "{name}: de agent schrijft de CLAUDE.md…",
+    promote_done: "✓ {name} staat bij de processen",
+    promote_timeout: "⚠ {name}: na 10 minuten nog geen CLAUDE.md in {dir}. Voeg de map zelf toe als hij er later staat.",
+    promote_prompt: "Leg dit werk vast als werkproces. Maak de map {dir} aan en schrijf daarin een CLAUDE.md voor een agent die hier later verder gaat: het doel, de bronnen en paden die we gebruikten, de stappen die werkten en wat we onderweg leerden. Geen verslag van dit gesprek, alleen wat de volgende keer nodig is. Zeg kort dat het klaar is als het bestand er staat.",
     exit_title: "Taurus afsluiten?",
     exit_keeps: "Blijft doorlopen op zijn machine — later weer op te pikken met ⇱",
     exit_stops_resume: "Stopt — de conversatie is bij de volgende start te hervatten",
@@ -185,8 +200,7 @@ const I18N = {
     new_agent_title: "Nieuwe specialist", new_agent_create: "Maak",
     // De zeven ICM-rollen (#159)
     na_kind: "Wat voor specialist?", na_process: "Nieuw proces",
-    na_kind_plain: "Map die je al hebt",
-    na_kind_plain_sub: "een werkproces", na_kind_free: "Ander ICM-adres",
+    na_kind_free: "Ander ICM-adres",
     group_processes: "Processen", grp_processes: "Processen",
     fold_hide: "Inklappen", fold_show: "Uitklappen",
     build_of: "Build van {when}",
@@ -196,8 +210,9 @@ const I18N = {
     na_embedded_in: "In: {label}",
     na_subject: "Waar gaat dit over? (één woord)", na_subject_ph: "bijv. meetings — leeg mag",
     na_name: "Naam", na_name_ph: "leeg = de naam uit de bron",
-    na_psource: "Bron (optioneel)", na_psource_ph: "GitHub-adres, of leeg laten",
-    na_psource_hint: "Leeg = je wijst hieronder een map aan die er al is. Vul je een GitHub-adres in, dan haalt de Taurus het werkproces op en houdt hij de versie bij.",
+    na_psource_hint: "Een GitHub-adres: Taurus haalt het werkproces op in de map hieronder en houdt de versie bij.",
+    na_src_folder: "Een map", na_src_repo: "Een repository",
+    na_btn_title: "Knoptitel", na_tab_title: "Standaard tabtitel", na_start_task: "Opstarttaak",
     na_pfound: "{name} · {branch} @ {sha} · {kb} KB — komt in de werkmap hieronder",
     na_pwarn: "⚠ Geen {files} in de wortel: dit lijkt geen ICM-werkproces. Je kunt het gewoon ophalen — dit is een waarschuwing, geen blokkade.",
     na_pdeploying: "Werkproces ophalen…",
@@ -270,6 +285,8 @@ const I18N = {
     cap_tabtitle: "⎯ Tabtitel bovenin (standaard, per sessie aanpasbaar)", cap_task: "Taak — wordt direct meegestuurd (optioneel)",
     ph_label: "bijv. DVZA", ph_path: "C:\\… of X:\\…", ph_title: "bijv. DVZA-cert", ph_task: "laat leeg voor een lege sessie",
     search_ph: "Zoeken…",
+    ctx_clear: "⌫ Invoer wissen", dz_clear: "Wis invoer",
+    clear_input_tip: "Wis wat er in de invoer van de agent staat, zonder hem te onderbreken (Ctrl+Shift+Backspace)",
     ctx_rename: "✎ Hernoemen", ctx_preview: "👁 HTML-preview", ctx_explorer: "📂 Open map in Verkenner", ctx_close: "✕ Sluiten",
     preview_none: "(geen .html/.md in de werkmap)",
     preview_group_session: "Sinds deze tab open is", preview_group_today: "Eerder vandaag", preview_group_older: "Ouder",
@@ -330,6 +347,17 @@ const I18N = {
     voice_natural: "Windows-stemmen", voice_classic: "Klassiek (SAPI)",
     voice_install_hint: "Meer stemmen of talen nodig? Voeg ze toe via Windows-instellingen → Tijd en taal → Spraak (of taal toevoegen met Text-to-speech).",
     tts_ready: "{title} is klaar",
+    tts_waiting: "{title} wacht op toestemming",
+    notify_ready: "is klaar", notify_waiting: "wacht op je toestemming",
+    opt_notify: "Melding wanneer klaar", opt_messaging: "Berichten tussen agents", opt_rc: "Remote Control (claude.ai en mobiel)",
+    opt_notify_tip: "Een Windows-melding als deze agent klaar is of op je toestemming wacht, behalve als je al naar die tab kijkt.",
+    opt_messaging_tip: "Andere Claude-sessies op deze computer mogen deze sessie berichten sturen, en deze sessie hen. Uit = berichten worden geweigerd.",
+    opt_rc_tip: "Volg en bestuur deze sessie vanaf claude.ai of de Claude-app, onder dezelfde naam als de tab. Vereist een claude.ai-login.",
+    c_agentmsg: "Agents mogen elkaar berichten sturen",
+    grp_newsessions: "Nieuwe sessies",
+    help_notify_default: "Zet het vinkje Melding wanneer klaar standaard aan op het startformulier. Een kaart waarop je het zelf aanzette houdt het altijd aan.",
+    help_rc_default: "Zet het vinkje Remote Control standaard aan op het startformulier: elke nieuwe Claude-sessie is dan ook te volgen vanaf claude.ai en de Claude-app. Vereist een claude.ai-login.",
+    help_agentmsg: "De standaard voor nieuwe sessies. Aan: andere Claude-sessies op deze computer kunnen deze sessie berichten sturen, en deze sessie hen.\nUit: de sessie weigert berichten en kan zelf niemand zoeken of berichten.\nPer sessie aan te passen op het startformulier.",
     stt_head: "Spraak naar tekst — F9 inhouden (of klik 🎙)",
     stt_model: "Model", stt_download: "Download",
     stt_downloading: "Bezig met downloaden… (zie stt\\download.log)",
@@ -439,6 +467,21 @@ const I18N = {
     session_stop_hint: "End this session on the other machine",
     session_stop_sure: "are you sure?",
     set_confirm_exit: "Ask before closing",
+    quick_start: "⚡ Quick agent", quick_title: "Quick",
+    quick_tip: "Quick agent (Ctrl+Shift+T): a one-off question, outside a work process",
+    quick_no_dir: "✗ No folder for the quick agent — set one in Settings → Sessions.",
+    set_quickdir: "Quick agent folder", ph_quickdir: "empty = {dir}",
+    help_quickdir: "Where ⚡ Quick agent starts. Empty = the folder claude in your home folder if it exists, else your home folder.",
+    ctx_promote: "Make it a process…",
+    promote_title: "Make it a process",
+    promote_lead: "The agent captures this conversation in a new folder: a CLAUDE.md with the goal, the sources, the steps and what you learned. As soon as it exists, the folder appears as a process in the left menu. This session keeps running.",
+    promote_name: "Name of the process", promote_go: "Capture",
+    promote_dest: "Goes in: {dir}",
+    promote_dup: "✗ There already is a process at {dir}.",
+    promote_sent: "{name}: the agent is writing the CLAUDE.md…",
+    promote_done: "✓ {name} is now under processes",
+    promote_timeout: "⚠ {name}: no CLAUDE.md in {dir} after 10 minutes. Add the folder yourself once it is there.",
+    promote_prompt: "Capture this work as a work process. Create the folder {dir} and write a CLAUDE.md in it for an agent that continues here later: the goal, the sources and paths we used, the steps that worked and what we learned along the way. No account of this conversation, only what the next time needs. Say briefly that it is done once the file exists.",
     exit_title: "Close Taurus?",
     exit_keeps: "Keeps running on its machine — pick it up later with ⇱",
     exit_stops_resume: "Stops — the conversation can be resumed on the next launch",
@@ -546,8 +589,7 @@ const I18N = {
     new_agent_title: "New specialist", new_agent_create: "Create",
     // The seven ICM roles (#159)
     na_kind: "What kind of specialist?", na_process: "New process",
-    na_kind_plain: "A folder you have",
-    na_kind_plain_sub: "a work process", na_kind_free: "Another ICM address",
+    na_kind_free: "Another ICM address",
     group_processes: "Processes", grp_processes: "Processes",
     fold_hide: "Collapse", fold_show: "Expand",
     build_of: "Built {when}",
@@ -557,8 +599,9 @@ const I18N = {
     na_embedded_in: "In: {label}",
     na_subject: "What is this about? (one word)", na_subject_ph: "e.g. meetings — may be empty",
     na_name: "Name", na_name_ph: "empty = the name from the source",
-    na_psource: "Source (optional)", na_psource_ph: "GitHub address, or leave empty",
-    na_psource_hint: "Empty = you point at a folder that already exists below. Give a GitHub address and the Taurus fetches the work process and watches its version.",
+    na_psource_hint: "A GitHub address: Taurus fetches the work process into the folder below and watches its version.",
+    na_src_folder: "A folder", na_src_repo: "A repository",
+    na_btn_title: "Button title", na_tab_title: "Tab default title", na_start_task: "Startup task",
     na_pfound: "{name} · {branch} @ {sha} · {kb} KB — lands in the working folder below",
     na_pwarn: "⚠ No {files} in the root: this does not look like an ICM work process. You can still fetch it — this is a warning, not a block.",
     na_pdeploying: "Fetching the work process…",
@@ -631,6 +674,8 @@ const I18N = {
     cap_tabtitle: "⎯ Tab title (default, editable per session)", cap_task: "Task — sent immediately (optional)",
     ph_label: "e.g. DVZA", ph_path: "C:\\… or X:\\…", ph_title: "e.g. DVZA-cert", ph_task: "leave empty for a blank session",
     search_ph: "Search…",
+    ctx_clear: "⌫ Clear input", dz_clear: "Clear input",
+    clear_input_tip: "Clear what is in the agent's input, without interrupting it (Ctrl+Shift+Backspace)",
     ctx_rename: "✎ Rename", ctx_preview: "👁 HTML preview", ctx_explorer: "📂 Open folder in Explorer", ctx_close: "✕ Close",
     preview_none: "(no .html/.md in the working folder)",
     preview_group_session: "Since this tab opened", preview_group_today: "Earlier today", preview_group_older: "Older",
@@ -691,6 +736,17 @@ const I18N = {
     voice_natural: "Windows voices", voice_classic: "Classic (SAPI)",
     voice_install_hint: "Need more voices or languages? Add them via Windows Settings → Time & language → Speech (or add a language with Text-to-speech).",
     tts_ready: "{title} is ready",
+    tts_waiting: "{title} is waiting for permission",
+    notify_ready: "is done", notify_waiting: "is waiting for your permission",
+    opt_notify: "Notify when done", opt_messaging: "Messages between agents", opt_rc: "Remote Control (claude.ai and mobile)",
+    opt_notify_tip: "A Windows notification when this agent is done or waits for your permission, unless you are already looking at its tab.",
+    opt_messaging_tip: "Other Claude sessions on this computer may message this session, and it may message them. Off = messages are refused.",
+    opt_rc_tip: "Follow and steer this session from claude.ai or the Claude app, under the same name as the tab. Needs a claude.ai login.",
+    c_agentmsg: "Agents may message each other",
+    grp_newsessions: "New sessions",
+    help_notify_default: "Ticks Notify when done on the launch form by default. A card on which you ticked it yourself always keeps it on.",
+    help_rc_default: "Ticks Remote Control on the launch form by default: every new Claude session can then also be followed from claude.ai and the Claude app. Needs a claude.ai login.",
+    help_agentmsg: "The default for new sessions. On: other Claude sessions on this computer can message this session, and it can message them.\nOff: the session refuses messages and cannot look up or message anyone itself.\nCan be changed per session on the launch form.",
     stt_head: "Speech to text — hold F9 (or click 🎙)",
     stt_model: "Model", stt_download: "Download",
     stt_downloading: "Downloading… (see stt\\download.log)",
@@ -743,6 +799,7 @@ const I18N = {
 if (IS_MAC) {
   Object.assign(I18N.nl, {
     c_ctrl: "⌘⇧C / ⌘⇧V (⌘C / ⌘V werken altijd)",
+    clear_input_tip: "Wis wat er in de invoer van de agent staat, zonder hem te onderbreken (⌘⇧⌫)",
     c_search: "Zoeken in scrollback — ⌘⇧F",
     c_tabs: "Tab-sneltoetsen (⌃Tab, ⌘1..9, ⌘T/W)",
     help_copyselect: "Zodra je tekst in de terminal selecteert, gaat die automatisch naar het klembord - geen ⌘C nodig.",
@@ -762,6 +819,7 @@ if (IS_MAC) {
   });
   Object.assign(I18N.en, {
     c_ctrl: "⌘⇧C / ⌘⇧V (⌘C / ⌘V always work)",
+    clear_input_tip: "Clear what is in the agent's input, without interrupting it (⌘⇧⌫)",
     c_search: "Search scrollback — ⌘⇧F",
     c_tabs: "Tab shortcuts (⌃Tab, ⌘1..9, ⌘T/W)",
     help_copyselect: "As soon as you select text in the terminal it goes to the clipboard automatically - no ⌘C needed.",
@@ -1279,6 +1337,12 @@ const DEFAULT_SETTINGS = {
   agentsFolded: false, procFolded: false, dropFolded: false,
   // Afsluiten vraagt om bevestiging zolang er iets draait (#168).
   confirmExit: true,
+  // Mogen agents elkaar berichten sturen (#282)? Open is wat claude zelf al doet.
+  agentMessaging: true,
+  // Standaarden van het startformulier (#288).
+  notifyDefault: false, rcDefault: false,
+  // Map van ⚡ Snelle agent (#286). Leeg = quick_default_dir van de backend.
+  quickDir: "",
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
   ttsEnabled: false, ttsVoice: "", ttsRate: 0, // Windows-native TTS
@@ -1441,6 +1505,10 @@ function refreshOverrideState() {
   const chosen = els.agentInput.value === AGENT_COMMAND;
   els.commandField.classList.toggle("hidden", !chosen);
   applyOverrideState(chosen ? els.commandInput.value : "", [els.modelInput, els.modeInput, els.taskInput], els.commandWarn);
+  // Berichten en Remote Control zijn claude-vlaggen; bij een andere agent of een
+  // eigen commando zouden ze niets doen, dus dan staan ze er ook niet.
+  const claude = els.agentInput.value === "claude";
+  document.querySelectorAll(".claude-only").forEach((el) => el.classList.toggle("hidden", !claude));
 }
 // Welke agent hoort er in het formulier te staan? Een project met een override
 // toont "Eigen commando…", ook al staat er claude/agy in projects.json.
@@ -1801,6 +1869,11 @@ async function selectProject(p, card) {
   updateModelDatalist(els.modelSuggestions, els.agentInput.value);
   fillModeSelect(els.modeInput, els.agentInput.value, p.mode || "default");
   els.commandInput.value = p.command || "";
+  // Melding hoort bij de agent (#280); berichten volgen de standaard uit de
+  // instellingen (#282); Remote Control kies je per keer (#281).
+  els.launchNotify.checked = !!p.notify || !!settings.notifyDefault;
+  els.launchMsg.checked = settings.agentMessaging !== false;
+  els.launchRc.checked = !!settings.rcDefault;
   refreshOverrideState();
   els.status.textContent = "";
   await refreshHostState(); // doet de lokale pad-checks, of slaat ze over bij remote
@@ -3049,6 +3122,7 @@ function renderTabs() {
       let cls = "tab";
       if (current === s.id) cls += " active";
       if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
+      if (s.permission && !s.exited) cls += " permission";
       tab.className = cls;
       tab.dataset.tabId = s.id;
       tab.style.borderTopColor = s.accent || "#7c9cff";
@@ -3104,6 +3178,13 @@ function renderTabs() {
   plus.textContent = t("newtab");
   plus.addEventListener("click", () => { resetLaunchForm(); showView("new"); });
   els.tabbar.appendChild(plus);
+  // ⚡ naast ＋: een snelle agent zonder eerst een map te kiezen (#286).
+  const quick = document.createElement("div");
+  quick.className = "tab newtab quicktab";
+  quick.textContent = "⚡";
+  quick.title = t("quick_tip");
+  quick.addEventListener("click", startQuick);
+  els.tabbar.appendChild(quick);
   syncTabPanel();
 }
 
@@ -3170,6 +3251,7 @@ function openTabPanel(anchor, rij, hervullen = false) {
     let cls = "tabpanel-row";
     if (s.id === current) cls += " active";
     if (s.exited) cls += " exited"; else if (s.awaiting) cls += " awaiting"; else if (s.working) cls += " working";
+    if (s.permission && !s.exited) cls += " permission";
     rw.className = cls;
     rw.style.setProperty("--tab-accent", s.accent || "#7c9cff");
     const live = settings.tabStatus && s.status && !s.exited;
@@ -3353,6 +3435,9 @@ function showView(target) {
   els.launchView.classList.toggle("hidden", showTerm);
   els.terminals.classList.toggle("hidden", !showTerm);
   if (!showTerm) closeSearch();
+  // Wissen heeft alleen betekenis als er een sessie in beeld is.
+  const clearBtn = document.getElementById("clear-input-btn");
+  if (clearBtn) clearBtn.disabled = !showTerm;
   for (const s of sessions.values()) s.el.classList.toggle("hidden", s.id !== target);
   if (showTerm) {
     const s = sessions.get(target);
@@ -3365,7 +3450,7 @@ function showView(target) {
 /* ============ sessie starten ============ */
 // Bouwt de terminal-UI + sessie-object en bedraadt alle events. Doet NIET zelf de
 // backend-aanroep (create vs resume verschilt) -- dat doet de aanroeper.
-function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId, mirror }) {
+function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId, mirror, notify, messaging, remoteControl }) {
   const el = document.createElement("div");
   el.className = "term-container";
   el.innerHTML = `
@@ -3475,8 +3560,32 @@ function spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, mo
     // Waarvandaan de preview-lijst "sinds deze tab open is" rekent. Wat de agent in
     // deze run schreef staat daarmee bovenaan, los van wat er verder in de map ligt.
     startedAt: Date.now(),
+    // Keuzes van het startformulier (#280-#282). Bewaard bij de tab zodat een
+    // herstart ze meeneemt.
+    notify: !!notify, messaging: messaging !== false, remoteControl: !!remoteControl,
+    // permission = wacht op toestemming; hookSeen = claude meldt zelf wanneer hij
+    // klaar is, dus de stiltetimer hoeft dat niet meer te raden.
+    permission: false, hookSeen: false, pendingRename: null, renameSent: null,
+    // Lokaal krijgt claude onze hooks mee (#280); op een andere machine niet.
+    hooksExpected: (agent || "claude") === "claude" && !command && !mirror && !hostId,
   };
   sessions.set(id, session);
+
+  // Wat claude zelf over zijn toestand zegt (#280, #281). Alleen voor claude: agy
+  // en grok sturen geen van beide, en een spiegel-tab is niet onze sessie.
+  if (hasClaudeSignals(session)) {
+    if (term.parser && term.parser.registerOscHandler) {
+      // Onze eigen hooks sturen OSC 777 "notify;taurus;<tag>". Alleen die vangen
+      // we af; elke andere OSC 777 gaat gewoon door naar xterm.
+      term.parser.registerOscHandler(777, (data) => {
+        const m = /^notify;taurus;(\w+)$/.exec(data);
+        if (!m) return false;
+        onTaurusSignal(session, m[1]);
+        return true;
+      });
+    }
+    term.onTitleChange((title) => onClaudeTitle(session, title));
+  }
 
   term.onData((d) => session.mirror
     ? invoke("ssh_mirror_write", { id: session.mirror, data: d })
@@ -3609,6 +3718,10 @@ async function startSession() {
   const command = isCmd ? els.commandInput.value.trim() : "";
   const agent = isCmd ? "claude" : (els.agentInput.value || "claude");
   const model = els.modelInput.value.trim();
+  const notify = els.launchNotify.checked;
+  const isClaude = agent === "claude" && !command;
+  const messaging = isClaude ? els.launchMsg.checked : true;
+  const remoteControl = isClaude && els.launchRc.checked;
   // De machine hoort bij de AGENT, niet bij deze keer starten: standaard lokaal,
   // en remote alleen als de agent zo is ingericht in "Agents beheren".
   const hostId = selected.host_id || "";
@@ -3620,13 +3733,13 @@ async function startSession() {
   // Van welke kaart komt deze sessie? Bladeren naar een map zet id op "", dus
   // losse sessies krijgen hier vanzelf een lege projectId.
   const projectId = selected.id || "";
-  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId });
+  const session = spawnTerminal({ id, uuid, path, title, accent, mode, command, agent, model, hostId, projectId, notify, messaging, remoteControl });
   try {
     // De backend bepaalt de naam van de mux-sessie en geeft hem terug; die bewaren
     // we bij de tab. Een nieuwe sessie krijgt een EIGEN naam (ook in een map waar
     // al een agent draait), dus stoppen en hervatten mogen die naam niet meer uit
     // (host, map) terugrekenen.
-    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows })) || "";
+    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task, sessionId: uuid, mode, fullPaths: settings.fullPaths, command, agent, model: resolveModelArg(agent, model), hostId, cols: session.term.cols, rows: session.term.rows, claudeOpts: { messaging, remoteControl } })) || "";
     // Een model dat je zelf intypte staat de volgende keer in de suggestielijst.
     // Pas NA een geslaagde start: een modelnaam die de agent weigert hoort niet
     // in de lijst terecht te komen.
@@ -3652,6 +3765,107 @@ async function startSession() {
   }
 }
 
+/* ============ snelle agent (#286) ============ */
+// Een losse vraag hoort niet in een werkproces, en hoort ook niet te wachten op
+// het kiezen van een map. ⚡ start claude meteen in een vaste map. Of een sessie
+// een snelle agent IS, leiden we af (geen kaart, lokaal, in die map) -- dan
+// overleeft het een herstart zonder dat de sessie er iets extra's voor bewaart.
+let quickDefault = "";
+const QUICK_ACCENT = "#e0b341";
+function quickPath() { return (settings.quickDir || "").trim() || quickDefault; }
+function isQuick(s) {
+  const q = quickPath();
+  return !!q && !s.projectId && !s.hostId && !s.mirror && !s.attached && samePath(s.path, q);
+}
+
+async function startQuick() {
+  if (!quickDefault) { try { quickDefault = await invoke("quick_default_dir"); } catch (_) {} }
+  const path = quickPath();
+  if (!path) { toast(t("quick_no_dir"), "err"); return; }
+  const id = "s" + (++seq);
+  const uuid = crypto.randomUUID();
+  const title = t("quick_title");
+  const agent = "claude", model = "", mode = "default";
+  // Dezelfde standaarden als het startformulier (#288): een snelle agent heeft
+  // geen formulier, dus volgt hij gewoon de instellingen.
+  const notify = !!settings.notifyDefault;
+  const messaging = settings.agentMessaging !== false;
+  const remoteControl = !!settings.rcDefault;
+  const session = spawnTerminal({ id, uuid, path, title, accent: QUICK_ACCENT, mode, command: "", agent, model, hostId: "", projectId: "", notify, messaging, remoteControl });
+  try {
+    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task: "", sessionId: uuid, mode, fullPaths: settings.fullPaths, command: "", agent, model: resolveModelArg(agent, model), hostId: "", cols: session.term.cols, rows: session.term.rows, claudeOpts: { messaging, remoteControl } })) || "";
+    recordSession(session);
+    showView(id);
+    persistSessionsToDisk();
+  } catch (e) {
+    sessions.delete(id); session.term.dispose(); session.el.remove();
+    toast("✗ " + e, "err");
+    renderTabs();
+  }
+}
+
+// Een snelle vraag die een werkproces blijkt te zijn. Het gesprek zelf kan niet
+// mee: claude bewaart het onder de map waarin het liep. Wat de volgende sessie
+// nodig heeft is een CLAUDE.md, en die schrijft de agent het best zelf -- hij weet
+// wat er gebeurd is. Taurus wacht tot het bestand er staat en zet de map dan als
+// proces in het menu.
+let promoteFor = null;
+function promoteDir() {
+  const name = els.promoteName.value.trim();
+  return name ? joinPath(quickPath(), slugify(name)) : "";
+}
+function renderPromoteDest() {
+  const dir = promoteDir();
+  els.promoteDest.textContent = dir ? t("promote_dest").replace("{dir}", dir) : "";
+  naSay(els.promoteStatus, "", "");
+}
+function openPromote(s) {
+  promoteFor = s.id;
+  els.promoteName.value = s.title && s.title !== t("quick_title") ? s.title : "";
+  renderPromoteDest();
+  els.promoteModal.classList.remove("hidden");
+  els.promoteName.focus();
+  els.promoteName.select();
+}
+async function promoteGo() {
+  const s = sessions.get(promoteFor);
+  const name = els.promoteName.value.trim();
+  const dir = promoteDir();
+  if (!s || !name || !dir) { els.promoteName.focus(); return; }
+  if (projects.some((p) => !p.host_id && samePath(p.path, dir))) {
+    naSay(els.promoteStatus, t("promote_dup").replace("{dir}", dir), "err");
+    return;
+  }
+  els.promoteModal.classList.add("hidden");
+  let has = false;
+  try { has = await invoke("has_claude_md", { path: dir }); } catch (_) {}
+  if (!has) {
+    // Eén regel, en de Enter APART en even later: in één schrijfactie ziet claude
+    // tekst plus Enter als een plakactie, en dan blijft de vraag in de invoer staan
+    // (gemeten). Is de agent nog bezig, dan zet claude hem in de rij.
+    await invoke("write_session", { id: s.id, data: t("promote_prompt").replace("{dir}", dir) }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 300));
+    await invoke("write_session", { id: s.id, data: String.fromCharCode(13) }).catch(() => {});
+    showView(s.id);
+    toast(t("promote_sent").replace("{name}", name), "");
+    const until = Date.now() + 10 * 60 * 1000;
+    while (!has && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try { has = await invoke("has_claude_md", { path: dir }); } catch (_) {}
+    }
+    if (!has) { toast(t("promote_timeout").replace("{name}", name).replace("{dir}", dir), "err"); return; }
+  }
+  const made = { ...blankRow(), id: uniqueId(name), label: name, path: dir, kind: "process", title: name };
+  try {
+    await invoke("save_projects", { projects: projects.concat([made]) });
+    projects = await invoke("get_projects");
+    renderProjects();
+    toast(t("promote_done").replace("{name}", name), "ok");
+  } catch (e) {
+    toast("✗ " + e, "err");
+  }
+}
+
 // "＋ Agent toevoegen" op het startformulier: bewaar de nu ingevulde agent in het
 // linkermenu (save_projects) EN start 'm meteen. Zo bouwt een nieuwe gebruiker het
 // menu op i.p.v. steeds een eenmalige (niet-bewaarde) agent te openen -- zie #54.
@@ -3672,6 +3886,7 @@ async function addAgentFromForm() {
     model: els.modelInput.value.trim(),
     command: els.agentInput.value === AGENT_COMMAND ? els.commandInput.value.trim() : "",
     host_id: selected.host_id || "", // machine hoort bij de agent, niet bij deze start
+    notify: els.launchNotify.checked,
   };
   const next = projects.filter((p) => p.id !== entry.id);
   next.push(entry);
@@ -3740,7 +3955,7 @@ function persistSessionsToDisk() {
     // Een spiegel-tab (JOIN) hoort er ook niet in: die heeft geen eigen proces
     // en bij de volgende start bestaat de sessie van de collega niet meer.
     .filter((s) => !s.command && !s.attached && !s.mirror)
-    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "", mux_name: s.muxName || "" }));
+    .map((s) => ({ id: s.id, uuid: s.uuid, path: s.path, title: s.title, accent: s.accent, mode: s.mode || "default", agent: s.agent || "claude", model: s.model || "", host_id: s.hostId || "", project_id: s.projectId || "", mux_name: s.muxName || "", notify: !!s.notify, messaging: s.messaging !== false, remote_control: !!s.remoteControl }));
   invoke("save_sessions", { sessions: list }).catch(saveSessionsFailed);
 }
 
@@ -3804,6 +4019,7 @@ async function restoreSessions(metas) {
       // Zonder dit zouden alle hervatte sessies na een herstart als losse
       // sessies in een bak belanden in plaats van bij hun eigen agent (#90).
       projectId: meta.project_id || "",
+      notify: !!meta.notify, messaging: meta.messaging !== false, remoteControl: !!meta.remote_control,
     });
     // Welke mux-sessie op de host bij deze tab hoorde. Moet er staan VOOR de
     // restart hieronder, want die stuurt hem mee.
@@ -3821,6 +4037,7 @@ async function restoreSessions(metas) {
         // daar nog loopt alsnog wordt teruggevonden.
         muxName: session.muxName || "",
         cols: session.term.cols, rows: session.term.rows,
+        claudeOpts: { messaging: session.messaging !== false, remoteControl: !!session.remoteControl },
       });
       // Hervat = door Taurus gestart, dus hij hoort in de geschiedenis. Zonder dit
       // blijft die lijst leeg voor wie zijn sessies alleen maar hervat: hij werd
@@ -4549,6 +4766,121 @@ function lastSpinnerVerb(buf) {
   return last;
 }
 
+/* ============ signalen van claude zelf (#280, #281) ============ */
+// Claude zet zijn venstertitel (OSC 0) op "<teken> <sessienaam>". GEMETEN op
+// 2.1.299: "✳" = idle, en tijdens het werken wisselen "◐"/"◑" ongeveer elke
+// seconde. Bij het opstarten staat er kaal "claude"; zonder teken ervoor zegt de
+// titel niets, dus die laten we liggen.
+const CLAUDE_IDLE_GLYPH = "✳";
+function parseClaudeTitle(title) {
+  const m = /^(\S)\s+(.+)$/u.exec(title || "");
+  if (!m || /[\p{L}\p{N}]/u.test(m[1])) return null;
+  return { idle: m[1] === CLAUDE_IDLE_GLYPH, name: m[2].trim() };
+}
+function hasClaudeSignals(s) { return s.agent === "claude" && !s.command && !s.mirror; }
+
+function onClaudeTitle(s, title) {
+  const p = parseClaudeTitle(title);
+  if (!p) return;
+  let render = false;
+  if (!p.idle) {
+    // Bezig: zelfde betekenis als het spinnerwerkwoord in de output.
+    s.lastSpin = Date.now();
+    s.announced = false;
+    if (!s.working || s.awaiting || s.permission) { s.working = true; s.awaiting = false; s.permission = false; render = true; }
+  }
+  // De naam. Staat er een hernoeming van de tab klaar, dan wint die: de titel
+  // draagt dan nog de oude naam tot claude de /rename verwerkt heeft. Anders is
+  // een andere naam een /rename in claude zelf, en die neemt de tab over.
+  if (s.pendingRename) {
+    if (p.name === s.pendingRename) s.pendingRename = null;
+  } else if (p.name && p.name !== s.title) {
+    s.title = p.name;
+    render = true;
+    persistSessionsToDisk();
+    recordSession(s);
+  }
+  if (p.idle) trySendRename(s);
+  if (render) renderTabs();
+}
+
+// Een event van onze eigen hooks: "stop" = de beurt is klaar, "waiting" = claude
+// wacht op toestemming (of op een vraag die alleen jij kunt beantwoorden).
+function onTaurusSignal(s, tag) {
+  s.hookSeen = true;
+  if (tag === "stop") {
+    s.working = false; s.status = null; s.permission = false;
+    if (!s.announced) { s.announced = true; announce(s, "ready"); }
+    trySendRename(s);
+  } else if (tag === "waiting") {
+    s.working = false; s.status = null; s.permission = true;
+    announce(s, "waiting");
+  }
+  renderTabs();
+}
+
+// Melden dat een agent klaar is of wacht. De tab knippert en de stem spreekt
+// alleen als je niet naar die tab kijkt (zoals altijd); de Windows-melding komt
+// als je hem aanvinkte, ook als die tab open staat maar je in een ander venster
+// zit.
+function announce(s, kind) {
+  if (s.id !== current) {
+    s.awaiting = true;
+    speak(t(kind === "waiting" ? "tts_waiting" : "tts_ready").replace("{title}", s.title || "agent"));
+  }
+  const looking = s.id === current && document.hasFocus();
+  if (s.notify && !looking) {
+    // Naam en status samen in de vette regel: Windows zet er zelf "Taurus" boven, en
+    // bij meerdere sessies tegelijk moet je zonder lezen zien welke het is. De map
+    // eronder onderscheidt twee tabs met dezelfde naam.
+    const what = t(kind === "waiting" ? "notify_waiting" : "notify_ready");
+    invoke("notify_os", { title: `${s.title || "agent"} ${what}`, body: s.path || "" }).catch(() => {});
+  }
+}
+
+// Staat de invoer van claude leeg? Gezocht vanaf onderen naar de regel die met
+// het invoerpijltje begint: dat is de invoerregel. Leeg = na het pijltje alleen spaties of
+// gedimde tekst (de suggestie die claude in een lege invoer laat zien). Twijfel
+// telt als niet leeg -- een /rename door iemands half getypte zin heen is erger
+// dan een naam die even later aankomt.
+function claudeInputEmpty(s) {
+  const buf = s.term.buffer.active;
+  const bottom = buf.baseY + s.term.rows - 1;
+  for (let y = bottom; y >= Math.max(0, bottom - s.term.rows); y--) {
+    const line = buf.getLine(y);
+    if (!line) continue;
+    // "❯" in de ene terminal, ">" in de andere -- GEMETEN: in Taurus tekent
+    // claude 2.1.299 ">", in een kale ConPTY "❯".
+    const m = /^\s*([❯>])/.exec(line.translateToString(true));
+    if (!m) continue;
+    const i = m[0].length - 1;
+    for (let x = i + 1; x < line.length; x++) {
+      const c = line.getCell(x);
+      if (!c) continue;
+      const ch = c.getChars();
+      if (ch && ch.trim() && !c.isDim()) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+// Een tabnaam doorgeven aan claude met /rename (#281). Alleen als hij idle is en
+// zijn invoer leeg is; anders blijft hij klaarstaan tot het volgende rustpunt.
+// Per naam hooguit één poging, zodat een /rename die niet aankomt niet blijft
+// herhalen.
+function trySendRename(s) {
+  const name = s.pendingRename;
+  if (!name || s.exited || s.working || s.renameSent === name) return;
+  if (!claudeInputEmpty(s)) return;
+  s.renameSent = name;
+  const clean = name.replace(/[\x00-\x1f\x7f]/g, " ").trim();
+  invoke("write_session", { id: s.id, data: `/rename ${clean}` })
+    .then(() => new Promise((r) => setTimeout(r, 150)))
+    .then(() => invoke("write_session", { id: s.id, data: "\r" }))
+    .catch((e) => dbg(`rename FAIL: ${e}`));
+}
+
 /* ============ PTY-events ============ */
 listen("pty-output", (event) => {
   const [sid, gen, data] = event.payload;
@@ -4567,10 +4899,16 @@ listen("pty-output", (event) => {
     // die de hele beurt getoond wordt (ook tijdens tools/streamen) en dus veel
     // betrouwbaarder is dan "geen spinner gezien".
     const busy = !!verb || /\besc to interrupt\b/i.test(s.buf);
-    if (busy) {
+    if (busy && s.hookSeen) {
+      // Claude meldt zijn toestand zelf (titel + hooks, #280). De buffer houdt
+      // "esc to interrupt" nog vast nadat de beurt klaar is, en zou de tab dan
+      // weer op bezig zetten en de melding wissen -- GEMETEN in een testexemplaar.
+      // Hier dus alleen nog het werkwoord voor op de tab.
+      if (settings.tabStatus && verb && s.working && s.status !== verb) { s.status = verb; render = true; }
+    } else if (busy) {
       s.lastSpin = Date.now();
       s.announced = false; // (weer) bezig -> een latere idle mag opnieuw melden
-      if (!s.working || s.awaiting) { s.working = true; s.awaiting = false; render = true; }
+      if (!s.working || s.awaiting) { s.working = true; s.awaiting = false; s.permission = false; render = true; }
       if (settings.tabStatus && verb && s.status !== verb) { s.status = verb; render = true; }
     }
   }
@@ -4656,19 +4994,24 @@ listen("pty-exit", (event) => {
 // hooguit één melding (s.announced), en alleen voor een tab die je niet bekijkt.
 const READY_IDLE_MS = 3000;
 const READY_CONFIRM_MS = 2000;
+const READY_HOOKS_FALLBACK_MS = 15000;
 setInterval(() => {
   let changed = false; const now = Date.now();
   for (const s of sessions.values()) {
     if (s.exited || !s.lastSpin) continue; // nooit gewerkt -> niets te melden
     const idle = now - s.lastSpin;
     if (s.working && idle > READY_IDLE_MS) { s.working = false; s.status = null; changed = true; }
-    if (!s.working && !s.announced && idle > READY_IDLE_MS + READY_CONFIRM_MS) {
+    // Meldt claude het zelf (hookSeen, #280), dan raadt de timer niet meer mee:
+    // die zag een toestemmingsvraag ook als "klaar".
+    // Een lokale claude-sessie heeft onze hooks; tot het eerste signaal binnen is
+    // wacht de timer langer, want een toestemmingsvraag meldt zich pas na ~6 s
+    // (GEMETEN). Komt er in die tijd niets, dan werkten de hooks kennelijk niet en
+    // valt hij terug op de oude gok.
+    const wait = s.hooksExpected ? READY_HOOKS_FALLBACK_MS : READY_IDLE_MS + READY_CONFIRM_MS;
+    if (!s.working && !s.announced && !s.hookSeen && idle > wait) {
       s.announced = true; // afgehandeld (ook als je ernaar keek: geen latere melding)
-      if (s.id !== current) {
-        s.awaiting = true;
-        speak(t("tts_ready").replace("{title}", s.title || "agent"));
-        changed = true;
-      }
+      announce(s, "ready");
+      changed = true;
     }
   }
   if (changed) renderTabs();
@@ -4918,13 +5261,16 @@ function openTabMenu(x, y, id) {
   const att = s.attached ? " disabled" : "";
   const attWhy = s.attached ? ` title="${escapeHtml(t("attach_not_restartable"))}"` : "";
   m.innerHTML = `
+    <div class="ctx-item${s.exited ? " disabled" : ""}" data-act="clear">${t("ctx_clear")}</div>
     <div class="ctx-item" data-act="rename">${t("ctx_rename")}</div>
+    ${isQuick(s) ? `<div class="ctx-item" data-act="promote">📁 ${t("ctx_promote")}</div>` : ""}
     <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
     <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item${att}"${attWhy} data-act="move">${t("ctx_move")}</div>
     <div class="ctx-item${off}"${why} data-act="help">${t("ctx_help")}</div>
     <div class="ctx-item" data-act="close">${t("ctx_close")}</div>`;
   m.style.left = x + "px"; m.style.top = y + "px";
+  m.querySelector('[data-act="clear"]').addEventListener("click", () => { closeTabMenu(); clearAgentInput(s); });
   m.querySelector('[data-act="rename"]').addEventListener("click", () => { closeTabMenu(); openRenameTab(x, y, id); });
   // Hulp vragen kan alleen voor een sessie die HIER draait: je nodigt iemand uit in
   // je eigen terminal. Bij een remote sessie zit het werk al ergens anders (#125).
@@ -4933,6 +5279,7 @@ function openTabMenu(x, y, id) {
     if (!s.hostId) askForHelp(s);
   });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
+  m.querySelector('[data-act="promote"]')?.addEventListener("click", () => { closeTabMenu(); openPromote(s); });
   // Verplaatsen werkt op de AGENT achter deze tab; de sessie zelf verhuist niet
   // mee, die draait waar hij draait tot je hem opnieuw start.
   m.querySelector('[data-act="move"]').addEventListener("click", () => {
@@ -4953,6 +5300,31 @@ function openTabMenu(x, y, id) {
   tabMenuEl = m;
 }
 document.addEventListener("click", closeTabMenu);
+
+// De invoer van de agent leegmaken ZONDER Ctrl+C (#278): Ctrl+C breekt een lopende
+// beurt af. De invoer is van de agent, niet van ons, dus we sturen de toetsen die
+// hij zelf kent: Ctrl+E (einde regel), Ctrl+K (rest van de regel, of de regelovergang)
+// en Ctrl+U (terug naar het begin). Dat wist één regel; een ingeklapte plak
+// ("[Pasted text #1 +59 lines]") telt als één. Gemeten bij Claude Code: herhalen op
+// een lege invoer doet niets, en een lopende beurt loopt gewoon door.
+// Los versturen, met een korte pauze: als één stoot van ~120 bytes negeerde Claude
+// Code ze tijdens een lopende beurt -- vermoedelijk las hij dat als een plak.
+const CLEAR_INPUT_ROUNDS = 20;
+async function clearAgentInput(s) {
+  if (!s || s.exited || s.clearing) return;
+  s.clearing = true;
+  const write = (d) => s.mirror
+    ? invoke("ssh_mirror_write", { id: s.mirror, data: d })
+    : invoke("write_session", { id: s.id, data: d });
+  try {
+    for (let i = 0; i < CLEAR_INPUT_ROUNDS; i++) {
+      await write("\x05\x0b\x15");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  } catch (e) { dbg(`clear input FAIL: ${e}`); }
+  finally { s.clearing = false; }
+  if (current === s.id) s.term.focus();
+}
 
 // Hernoemen gebeurt in een eigen veldje op de plek van het menu, niet in de tab
 // zelf: renderTabs() tekent de tabbalk opnieuw bij elke statuswissel en zou een
@@ -4975,6 +5347,9 @@ function openRenameTab(x, y, id) {
     const name = input.value.trim();
     if (save && name && name !== s.title) {
       s.title = name;
+      // En claude ook (#281): zijn sessienaam is het adres voor berichten en de
+      // naam op claude.ai. Gaat pas als hij idle is met een lege invoer.
+      if (hasClaudeSignals(s) && !s.exited) { s.pendingRename = name; s.renameSent = null; trySendRename(s); }
       renderTabs();
       persistSessionsToDisk();
       recordSession(s); // ook de geschiedenis, anders toont die de oude naam
@@ -5057,11 +5432,16 @@ function openSettings() {
   els.setSearch.checked = settings.search;
   els.setTabs.checked = settings.tabShortcuts;
   els.setTabStatus.checked = settings.tabStatus;
+  els.setAgentMsg.checked = settings.agentMessaging !== false;
+  els.setNotifyDefault.checked = !!settings.notifyDefault;
+  els.setRcDefault.checked = !!settings.rcDefault;
   els.setTabRecap.checked = settings.tabRecap;
   els.setTabGroupSize.value = settings.tabGroups ? settings.tabGroupSize : 0;
   els.setFullPaths.checked = settings.fullPaths;
   renderRoleRows();
   els.setConfirmExit.checked = settings.confirmExit !== false;
+  els.setQuickDir.value = settings.quickDir || "";
+  els.setQuickDir.placeholder = t("ph_quickdir").replace("{dir}", quickDefault || "—");
   els.setPersistMode.value = persistMode();
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
@@ -5313,6 +5693,9 @@ function saveSettingsFromForm() {
   settings.search = els.setSearch.checked;
   settings.tabShortcuts = els.setTabs.checked;
   settings.tabStatus = els.setTabStatus.checked;
+  settings.agentMessaging = els.setAgentMsg.checked;
+  settings.notifyDefault = els.setNotifyDefault.checked;
+  settings.rcDefault = els.setRcDefault.checked;
   settings.tabRecap = els.setTabRecap.checked;
   // 0 = uit. Een aparte aanvinkvakje ernaast zou twee besturingselementen voor
   // een keuze zijn; nul is hier de natuurlijke "nooit bundelen".
@@ -5324,6 +5707,7 @@ function saveSettingsFromForm() {
   settings.fullPaths = els.setFullPaths.checked;
   saveRoles();
   settings.confirmExit = els.setConfirmExit.checked;
+  settings.quickDir = els.setQuickDir.value.trim();
   settings.persistMode = els.setPersistMode.value;
   settings.skin = els.setSkin.value;
   if (els.setSeeThrough) settings.sidebarSeeThrough = els.setSeeThrough.checked;
@@ -5593,10 +5977,33 @@ function renderNaKinds() {
     enabledRoles().map((r) => tile(r.id, r.icon, t("role_" + r.id), "")).join("") +
     tile("free", "⬡", t("na_kind_free"), t("na_kind_free_sub"));
   // Een proces is geen agent: eigen lijst, eigen kopje. Dit was voorheen "project".
-  els.naKinds2.innerHTML = tile("plain", "📁", t("na_kind_plain"), t("na_kind_plain_sub"));
+  // Twee tegels voor waar het vandaan komt (#284); beide zijn soort "plain".
+  const src = (key, icon, title) =>
+    `<button type="button" class="na-kind${naKind === "plain" && naSrc === key ? " on" : ""}" data-kind="plain" data-src="${key}">` +
+    `<span class="na-kind-ico" aria-hidden="true">${escapeHtml(icon)}</span>` +
+    `<span class="na-kind-title">${escapeHtml(title)}</span></button>`;
+  els.naKinds2.innerHTML = src("folder", "📁", t("na_src_folder")) + src("repo", "📦", t("na_src_repo"));
   for (const b of [...els.naKinds.querySelectorAll(".na-kind"), ...els.naKinds2.querySelectorAll(".na-kind")]) {
-    b.addEventListener("click", () => selectNaKind(b.dataset.kind));
+    b.addEventListener("click", () => {
+      if (b.dataset.src) naSrc = b.dataset.src;
+      selectNaKind(b.dataset.kind);
+    });
   }
+}
+
+// Map of repository (#284). Bij een map wijs je hem aan; bij een repository vul je
+// de bron in, en is het mapveld waar die terechtkomt.
+let naSrc = "folder";
+function applyNaSrc() {
+  const repo = naSrc === "repo";
+  els.naPsourceField.classList.toggle("hidden", !repo);
+  if (!repo) {
+    // Terug naar een map: een eerder gelezen bron telt niet meer mee bij opslaan.
+    naProcProbe = null;
+    els.naPnote.textContent = t("na_psource_hint");
+    els.naPnote.className = "hint";
+  }
+  renderNewAgentHost();
 }
 
 function selectNaKind(kind) {
@@ -5607,10 +6014,15 @@ function selectNaKind(kind) {
   els.naDestField.classList.add("hidden");
   els.naPlain.classList.toggle("hidden", kind !== "plain");
   els.naRole.classList.toggle("hidden", kind === "plain");
+  els.naHostField.classList.toggle("hidden", kind !== "plain");
   els.naSave.textContent = t(kind === "plain" ? "new_agent_create" : "na_deploy");
   naSay(els.naStatus, "", "");
   renderNaKinds();
-  if (kind === "plain") { els.naLabel.focus(); return; }
+  if (kind === "plain") {
+    applyNaSrc();
+    (naSrc === "repo" ? els.naPsource : els.naPath).focus();
+    return;
+  }
   // De rolkop zegt welke rol dit is en met welke vraag je binnenkomt. Geen naam:
   // die vult het veld eronder in.
   els.naRoleHead.innerHTML = role
@@ -5705,6 +6117,17 @@ function proposeProcessPath() {
   els.naPath.value = naPathProposed;
 }
 
+// Knoptitel voorstellen zodra we er een weten: de laatste map, of de naam uit de
+// bron. Nooit overschrijven wat je zelf typte -- een eerder VOORSTEL wel, anders
+// blijft de naam van de vorige map staan als je een andere kiest.
+let naLabelProposed = "";
+function naProposeLabel(name) {
+  const nu = els.naLabel.value.trim();
+  if (!name || (nu && nu !== naLabelProposed)) return;
+  naLabelProposed = name;
+  els.naLabel.value = name;
+}
+
 // De bron van een PROCES lezen. Zelfde probe als bij een rol, maar zonder slot:
 // `strict: false` laat een bron die niet als ICM-werkproces te herkennen is
 // gewoon door, met in het rapport wat er niet gevonden is. Die bevinding komt
@@ -5739,6 +6162,7 @@ async function naReadProcessSource() {
         .replace("{kb}", p.sizeKb);
   els.naPnote.className = niets ? "hint warn" : "hint";
   proposeProcessPath();
+  naProposeLabel(p.name || "");
 }
 
 async function naDeploy() {
@@ -5845,6 +6269,9 @@ function openNewAgent(kind) {
   els.naPsource.value = "";
   naProcProbe = null;
   naPathProposed = "";
+  naLabelProposed = "";
+  // Een proces begint als map: dat is de gewone weg (#284).
+  naSrc = "folder";
   renderProcessWhere();
   els.naPwhere.value = "";
   els.naPnote.textContent = t("na_psource_hint");
@@ -5858,7 +6285,7 @@ function openNewAgent(kind) {
   renderNewAgentHost();
   renderNewAgentAgent();
   // Eerst tonen, dan kiezen. selectNaKind zet de focus in het veld dat bij de
-  // keuze hoort (de knopnaam bij een proces, de bron bij een agent), en focus()
+  // keuze hoort (de map of bron bij een proces, de bron bij een agent), en focus()
   // op iets in een verborgen venster doet niets -- daarom stond die van het proces
   // hier nog een tweede keer. Nu geldt het voor beide soorten.
   els.newagentModal.classList.remove("hidden");
@@ -5879,7 +6306,8 @@ function renderNewAgentHost() {
   // lokale CLAUDE.md-controle -- die zou over de verkeerde schijf gaan.
   const remote = !!cur;
   els.naBrowse.classList.toggle("hidden", remote);
-  els.naPathCap.textContent = t(remote ? "cap_workdir_remote" : "cap_workdir");
+  // Bij een repository is dit de map waar hij terechtkomt, niet een die er al staat.
+  els.naPathCap.textContent = t(remote ? "cap_workdir_remote" : naSrc === "repo" ? "na_dest" : "cap_workdir");
   els.naPath.placeholder = t(remote ? "ph_path_remote" : "ph_path");
   if (remote) naSay(els.naNote, "", "");
 }
@@ -5902,7 +6330,9 @@ function renderNewAgentAgent() {
 // bewaard en aangeklikt -- dus je hoorde het altijd te laat.
 async function naCheckPath() {
   const path = els.naPath.value.trim();
-  if (naDraft.host_id || !path) { naSay(els.naNote, "", ""); return; }
+  // Een repository komt pas bij het maken in die map; dat hij nu nog niet bestaat
+  // is dan juist de bedoeling.
+  if (naDraft.host_id || !path || naSrc === "repo") { naSay(els.naNote, "", ""); return; }
   let exists = false;
   try { exists = await invoke("path_exists", { path }); } catch (_) {}
   if (!exists) { naSay(els.naNote, t("na_no_path"), "err"); return; }
@@ -5912,6 +6342,13 @@ async function naCheckPath() {
 }
 
 async function saveNewAgent() {
+  // Repository gekozen: dan hoort er een bron te zijn, en die lezen we zelf als je
+  // nog niet op Lezen drukte -- zonder gelezen bron werd de kaart een map zonder
+  // inhoud.
+  if (naSrc === "repo") {
+    if (!els.naPsource.value.trim()) { naSay(els.naStatus, t("na_need_source"), "err"); els.naPsource.focus(); return; }
+    if (!naProcProbe) { await naReadProcessSource(); if (!naProcProbe) return; }
+  }
   const label = els.naLabel.value.trim();
   const path = els.naPath.value.trim();
   if (!label) { naSay(els.naStatus, t("na_need_label"), "err"); els.naLabel.focus(); return; }
@@ -6099,6 +6536,7 @@ function renderEditor() {
         <div class="e-field e-cmdfield${hasOverride ? "" : " hidden"}"><span class="e-cap">${escapeHtml(t("cap_command"))}</span>
           <input class="e-command" type="text" placeholder="${escapeHtml(t("command_ph"))}" value="${escapeHtml(r.command || "")}" />
           <span class="e-cmdwarn${hasOverride ? "" : " hidden"}">${escapeHtml(t("command_warn"))}</span></div>
+        <label class="e-check" title="${escapeHtml(t("opt_notify_tip"))}"><input class="e-notify" type="checkbox"${r.notify ? " checked" : ""} /> ${escapeHtml(t("opt_notify"))}</label>
       </div>`;
     // Uitklappen: alleen deze rij, de andere blijven zoals ze staan.
     const toggle = () => {
@@ -6122,6 +6560,7 @@ function renderEditor() {
     row.querySelector(".e-task").addEventListener("input", (e) => (editRows[i].task = e.target.value));
     row.querySelector(".e-mode").addEventListener("change", (e) => (editRows[i].mode = e.target.value));
     row.querySelector(".e-model").addEventListener("input", (e) => (editRows[i].model = e.target.value));
+    row.querySelector(".e-notify").addEventListener("change", (e) => (editRows[i].notify = e.target.checked));
     // Agent wisselen herrendert de rij zodat model-suggesties EN modus-opties
     // meeveranderen; de modus wordt geclampt (claude "plan" bestaat niet voor
     // agy) en het model gewist (een model van de vorige agent is niet geldig).
@@ -6319,7 +6758,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.newagentModal.classList.add("hidden"); els.exitModal.classList.add("hidden"); els.updateModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
+  if (modalOpen()) { if (e.key === "Escape") { els.promoteModal.classList.add("hidden"); els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.newagentModal.classList.add("hidden"); els.exitModal.classList.add("hidden"); els.updateModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
     document.querySelector("#restore-modal").classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
@@ -6345,11 +6784,14 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (settings.search && ctrl && e.shiftKey && (e.key === "F" || e.key === "f")) { e.preventDefault(); openSearch(); return; }
+  // Niet doorlaten naar xterm: die zou er zelf een backspace van maken.
+  if (ctrl && e.shiftKey && e.key === "Backspace") { e.preventDefault(); e.stopPropagation(); clearAgentInput(sessions.get(current)); return; }
   if (settings.tabShortcuts) {
     // Ctrl+Tab ook op de Mac: dat is daar de gewone tabwissel (Safari, Terminal).
     if ((IS_MAC ? e.ctrlKey && !e.metaKey : ctrl) && e.key === "Tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
     // macOS: ⌘T / ⌘W / ⌘1..9 lopen via het menu (menu-action hieronder, #229).
     if (IS_MAC) return;
+    if (ctrl && e.shiftKey && (e.key === "t" || e.key === "T")) { e.preventDefault(); startQuick(); return; }
     if (ctrl && (e.key === "t" || e.key === "T")) { e.preventDefault(); tabAction("tab-new"); return; }
     if (ctrl && (e.key === "w" || e.key === "W")) { e.preventDefault(); tabAction("tab-close"); return; }
     if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); tabAction("tab-" + e.key); return; }
@@ -6828,6 +7270,7 @@ const SIDEBAR_ACTIONS = {
   "add-process-btn": () => openNewAgent("plain"),
   "attach-btn": () => openAttachModal(),
   "hosts-btn": () => openHostModal(),
+  "clear-input-btn": () => clearAgentInput(sessions.get(current)),
   "proc-find": () => toggleProcFilter(),
 };
 document.addEventListener("click", (e) => {
@@ -6889,10 +7332,18 @@ window.addEventListener("DOMContentLoaded", () => {
     setSearch: document.querySelector("#set-search"),
     setTabs: document.querySelector("#set-tabshortcuts"),
     setTabStatus: document.querySelector("#set-tabstatus"),
+    setAgentMsg: document.querySelector("#set-agentmsg"),
+    setNotifyDefault: document.querySelector("#set-notify-default"),
+    setRcDefault: document.querySelector("#set-rc-default"),
     setTabRecap: document.querySelector("#set-tabrecap"),
     setTabGroupSize: document.querySelector("#set-tabgroupsize"),
     setFullPaths: document.querySelector("#set-fullpaths"),
     setConfirmExit: document.querySelector("#set-confirm-exit"),
+    setQuickDir: document.querySelector("#set-quickdir"),
+    promoteModal: document.querySelector("#promote-modal"),
+    promoteName: document.querySelector("#promote-name"),
+    promoteDest: document.querySelector("#promote-dest"),
+    promoteStatus: document.querySelector("#promote-status"),
     exitModal: document.querySelector("#exit-modal"),
     exitKeeps: document.querySelector("#exit-keeps"),
     exitKeepsList: document.querySelector("#exit-keeps-list"),
@@ -6944,6 +7395,9 @@ window.addEventListener("DOMContentLoaded", () => {
     consentBlock: document.querySelector("#consent-block"),
     toast: document.querySelector("#toast"),
     modeInput: document.querySelector("#mode-input"),
+    launchNotify: document.querySelector("#launch-notify"),
+    launchMsg: document.querySelector("#launch-msg"),
+    launchRc: document.querySelector("#launch-rc"),
     agentInput: document.querySelector("#agent-input"),
     modelInput: document.querySelector("#model-input"),
     modelSuggestions: document.querySelector("#model-suggestions"),
@@ -7009,6 +7463,8 @@ window.addEventListener("DOMContentLoaded", () => {
     naSubject: document.querySelector("#na-subject"),
     naName: document.querySelector("#na-name"),
     naPsource: document.querySelector("#na-psource"),
+    naPsourceField: document.querySelector("#na-psourcefield"),
+    naHostField: document.querySelector("#na-hostfield"),
     naPwhere: document.querySelector("#na-pwhere"),
     naPnote: document.querySelector("#na-pnote"),
     naSource: document.querySelector("#na-source"),
@@ -7095,6 +7551,17 @@ window.addEventListener("DOMContentLoaded", () => {
     fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value);
   });
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
+  document.querySelector("#quick-btn").addEventListener("click", startQuick);
+  document.querySelector("#set-quickdir-browse").addEventListener("click", async () => {
+    let dir = null;
+    try { dir = await invoke("pick_folder"); } catch (_) { return; }
+    if (dir) els.setQuickDir.value = dir;
+  });
+  invoke("quick_default_dir").then((d) => { quickDefault = d || ""; }).catch(() => {});
+  els.promoteName.addEventListener("input", renderPromoteDest);
+  els.promoteName.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); promoteGo(); } });
+  document.querySelector("#promote-go").addEventListener("click", promoteGo);
+  document.querySelector("#promote-cancel").addEventListener("click", () => els.promoteModal.classList.add("hidden"));
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   // De ＋ maakt een agent; beheren zit onder de voettekst (#157).
@@ -7104,12 +7571,14 @@ window.addEventListener("DOMContentLoaded", () => {
     try { dir = await invoke("pick_folder"); } catch (_) { return; }
     if (!dir) return;
     els.naPath.value = dir;
-    // Naam voorstellen zodra we er een weten -- maar nooit overschrijven wat de
-    // gebruiker zelf al getypt heeft.
-    if (!els.naLabel.value.trim()) els.naLabel.value = dir.replace(/[\/]+$/, "").split(/[\/]/).pop() || dir;
+    if (naSrc === "folder") naProposeLabel(dir.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || dir);
     naCheckPath();
   });
-  els.naPath.addEventListener("change", naCheckPath);
+  els.naPath.addEventListener("change", () => {
+    const dir = els.naPath.value.trim();
+    if (naSrc === "folder" && dir) naProposeLabel(dir.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || dir);
+    naCheckPath();
+  });
   els.naAgent.addEventListener("change", () => {
     if (els.naAgent.value === AGENT_COMMAND) {
       naDraft.command = els.naCommand.value.trim() || DEFAULT_OWN_COMMAND;
@@ -7131,6 +7600,8 @@ window.addEventListener("DOMContentLoaded", () => {
   els.naSave.addEventListener("click", () => (naKind === "plain" ? saveNewAgent() : naDeploy()));
   document.querySelector("#na-read").addEventListener("click", naReadSource);
   document.querySelector("#na-pread").addEventListener("click", naReadProcessSource);
+  // Een andere bron getypt = het vorige leesrapport geldt niet meer.
+  els.naPsource.addEventListener("input", () => { naProcProbe = null; naSay(els.naStatus, "", ""); });
   els.naPwhere.addEventListener("change", proposeProcessPath);
   els.upGo.addEventListener("click", doUpdate);
   document.querySelector("#up-skip").addEventListener("click", skipUpdate);

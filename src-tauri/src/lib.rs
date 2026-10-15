@@ -64,6 +64,10 @@ struct Project {
     // oude afleiding nog, zodat bestaande projects.json niets verschuift.
     #[serde(default)]
     kind: String,
+    // Een Windows-melding als deze agent klaar is of op toestemming wacht (#280).
+    // Alleen de frontend kijkt ernaar; hier staat het zodat het bewaard blijft.
+    #[serde(default)]
+    notify: bool,
 }
 
 // Herkomst van een gekloonde map. Alleen wat we nodig hebben om te weten of hij
@@ -2819,6 +2823,16 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).is_dir()
 }
 
+// Waar een snelle agent standaard start (#286): de map `claude` in je thuismap als
+// die er is -- daar staan bij de meeste gebruikers hun agentmappen al onder --
+// anders de thuismap zelf. In de instellingen te veranderen.
+#[tauri::command]
+fn quick_default_dir() -> String {
+    let Some(home) = platform::home_dir() else { return String::new() };
+    let claude = home.join("claude");
+    if claude.is_dir() { claude } else { home }.to_string_lossy().into_owned()
+}
+
 // Versie van de app (uit Cargo.toml) -> discreet in de UI getoond.
 #[tauri::command]
 fn app_version() -> String {
@@ -2885,6 +2899,20 @@ struct PersistedSession {
     // een nieuwe starten). Leeg = lokaal, of een sessie van voor dit veld.
     #[serde(default)]
     mux_name: String,
+    // Wat er bij het starten is aangevinkt (#280-#282). Hervatten na een herstart
+    // hoort dezelfde sessie op te leveren, dus ook met dezelfde keuzes. Een
+    // sessions.json van voor deze velden levert de oude situatie: geen melding,
+    // berichten open, geen Remote Control.
+    #[serde(default)]
+    notify: bool,
+    #[serde(default = "ja")]
+    messaging: bool,
+    #[serde(default)]
+    remote_control: bool,
+}
+
+fn ja() -> bool {
+    true
 }
 
 fn sessions_path() -> std::path::PathBuf {
@@ -4104,6 +4132,98 @@ fn agent_permission_mode(mode: &str) -> Option<&'static str> {
     }
 }
 
+// Wat je bij het starten van een claude-sessie aanvinkt (#280-#282). De frontend
+// stuurt het mee; agy en grok kennen geen van deze vlaggen.
+#[derive(serde::Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeOpts {
+    // Berichten van en naar andere Claude-sessies op deze machine. Open is wat
+    // claude zelf al doet, dus dat is ook de standaard.
+    #[serde(default = "ja")]
+    messaging: bool,
+    #[serde(default)]
+    remote_control: bool,
+}
+
+impl Default for ClaudeOpts {
+    fn default() -> Self {
+        ClaudeOpts { messaging: true, remote_control: false }
+    }
+}
+
+// Wat build_command er voor claude bij zet. Los van ClaudeOpts omdat het pad
+// naar het settings-bestand pas bestaat nadat het geschreven is -- en de tests
+// willen build_command draaien zonder iets op schijf te zetten.
+#[derive(Default)]
+struct ClaudeExtra {
+    settings: Option<String>,
+    remote_control: bool,
+}
+
+// De hooks waarmee claude zelf zegt dat hij klaar is of op je wacht (#280).
+//
+// GEMETEN op 2.1.299: de titel (OSC 0) zakt bij een toestemmingsvraag ook naar
+// "✳", dus daaraan zie je het verschil tussen klaar en wachten niet. De Stop-hook
+// komt op het moment dat de beurt eindigt, de Notification-hook ongeveer zes
+// seconden nadat een toestemmingsvraag in beeld kwam.
+//
+// Een hook kan geen bytes in onze pty schrijven, maar wel claude vragen een
+// OSC-reeks uit te sturen (`terminalSequence`). OSC 777 staat op claude's
+// toegestane lijst; de frontend vangt alleen de reeksen met "taurus;" erin op.
+// `echo '<json>'` werkt hetzelfde in Git Bash en in PowerShell (de shell die
+// claude kiest als Git Bash ontbreekt): beide laten een enkel-gequote string
+// letterlijk staan, dus `\u001b` komt als tekst aan en claude's JSON-parser
+// maakt er ESC van.
+fn claude_signals(messaging: bool) -> serde_json::Value {
+    let hook = |tag: &str| {
+        serde_json::json!([{ "hooks": [{
+            "type": "command",
+            "command": format!("echo '{{\"terminalSequence\":\"\\u001b]777;notify;taurus;{}\\u0007\"}}'", tag),
+        }]}])
+    };
+    let mut v = serde_json::json!({
+        "hooks": {
+            "Stop": hook("stop"),
+            "Notification": [{
+                "matcher": "permission_prompt|elicitation_dialog|elicitation_url_dialog",
+                "hooks": hook("waiting")[0]["hooks"].clone(),
+            }],
+        }
+    });
+    // Berichten dicht (#282): niets ontvangen en zelf ook niet zoeken of sturen.
+    // Open laat beide weg, zodat de eigen instelling van claude gewoon geldt.
+    if !messaging {
+        v["crossSessionInbound"] = "refuse".into();
+        v["permissions"] = serde_json::json!({ "deny": ["SendMessage", "ListAgents"] });
+    }
+    v
+}
+
+// Schrijft het settings-bestand voor claude en geeft het pad terug. Twee vaste
+// bestanden (open en dicht) in plaats van één per sessie: de inhoud hangt alleen
+// van die keuze af, en zo blijft er niets achter als een tab dicht gaat. Lukt het
+// schrijven niet, dan start de sessie gewoon zonder -- de schermlezer van de tab
+// werkt dan nog zoals voorheen.
+fn write_claude_signals(messaging: bool) -> Option<String> {
+    let dir = config_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let p = dir.join(if messaging { "claude-signals.json" } else { "claude-signals-closed.json" });
+    let txt = serde_json::to_string_pretty(&claude_signals(messaging)).ok()?;
+    if std::fs::read_to_string(&p).ok().as_deref() != Some(txt.as_str()) {
+        std::fs::write(&p, txt).ok()?;
+    }
+    Some(p.to_string_lossy().into_owned())
+}
+
+// Lokaal krijgt claude het settings-bestand mee; op een andere machine bestaat
+// dat pad niet. Remote Control geldt overal, het is maar een vlag.
+fn claude_extra(opts: ClaudeOpts, remote: bool) -> ClaudeExtra {
+    ClaudeExtra {
+        settings: if remote { None } else { write_claude_signals(opts.messaging) },
+        remote_control: opts.remote_control,
+    }
+}
+
 fn build_command(
     agent: &str,
     kind: LaunchKind,
@@ -4115,6 +4235,7 @@ fn build_command(
     full_paths: bool,
     // Some(os) = dit commando draait op een remote host, niet hier.
     remote_os: Option<&str>,
+    extra: &ClaudeExtra,
 ) -> (String, Vec<String>) {
     // `a` start met de eventuele cmd.exe-shim-prefix ("/c <pad>", #40); de
     // agent-vlaggen komen daarachter. Remote is er geen shim: daar bestaat het
@@ -4212,6 +4333,16 @@ fn build_command(
             }
             a.push("-n".into());
             a.push(norm_title(title));
+            if let Some(p) = &extra.settings {
+                a.push("--settings".into());
+                a.push(p.clone());
+            }
+            // Met de naam erbij: zonder waarde zou de vlag het volgende argument
+            // als naam opeten -- en dat is hier soms de taak.
+            if extra.remote_control {
+                a.push("--remote-control".into());
+                a.push(norm_title(title));
+            }
             if let Some(m) = agent_permission_mode(mode) {
                 a.push("--permission-mode".into());
                 a.push(m.into());
@@ -5510,6 +5641,8 @@ fn create_session(
     // shell of in een mislukte `claude --resume`. Wat weg mag zijn, moet ook echt
     // verdwijnen als je de tab sluit.
     ephemeral: Option<bool>,
+    // Wat er voor claude is aangevinkt (#280-#282). Afwezig = zoals het was.
+    claude_opts: Option<ClaudeOpts>,
     // Geeft de naam van de mux-sessie terug die dit opleverde; leeg bij een
     // lokale sessie. De tab bewaart die naam, zodat stoppen en later hervatten
     // deze sessie aanspreken en niet een naam die uit (host, map) is
@@ -5533,6 +5666,7 @@ fn create_session(
             &model,
             full_paths,
             host.as_ref().map(|h| effective_os(h)),
+            &claude_extra(claude_opts.unwrap_or_default(), host.is_some()),
         )
     };
     // Fresh: een nieuwe sessie is een NIEUWE sessie, ook in een map waar er al
@@ -5621,6 +5755,7 @@ fn restart_session(
     // De mux-sessie die bij deze tab hoort. Afwezig of leeg = een tab van voor
     // dit veld; dan geldt de oude afgeleide naam.
     mux_name: Option<String>,
+    claude_opts: Option<ClaudeOpts>,
 ) -> Result<(), String> {
     {
         if let Some(mut s) = state.sessions.lock().unwrap().remove(&id) {
@@ -5641,6 +5776,7 @@ fn restart_session(
             &model,
             full_paths,
             host.as_ref().map(|h| effective_os(h)),
+            &claude_extra(claude_opts.unwrap_or_default(), host.is_some()),
         )
     };
     // Remote herstart: het kappen hierboven doodt alleen de lokale ssh.exe. Draait
@@ -6726,6 +6862,20 @@ fn parse_say_voices(listing: &str) -> Vec<String> {
             ok.then(|| format!("say|{}|{}", lang.replace('_', "-"), name.trim()))
         })
         .collect()
+}
+
+// Een Windows-melding plus een knipperende taakbalkknop (#280): een agent met
+// "melding wanneer klaar" is klaar, of wacht op toestemming. De frontend beslist
+// of het nodig is (niet als je naar die tab kijkt); hier wordt alleen gemeld.
+// Mislukt de melding, dan blijft het knipperen over -- nooit een fout naar boven,
+// want een melding die niet lukt mag niets anders tegenhouden.
+#[tauri::command]
+fn notify_os(app: AppHandle, title: String, body: String) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app.notification().builder().title(title).body(body).show();
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
+    }
 }
 
 #[tauri::command]
@@ -8228,6 +8378,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             // F9 = push-to-talk-toggle, ook zonder vensterfocus. Registratie
             // aan de Rust-kant; de frontend krijgt een event en doet de rest.
@@ -8345,6 +8496,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            notify_os,
             get_projects,
             save_projects,
             system_accent,
@@ -8394,6 +8546,7 @@ pub fn run() {
             pick_folder,
             pick_file,
             path_exists,
+            quick_default_dir,
             app_version,
             app_built,
             has_claude_md,
@@ -9982,6 +10135,7 @@ mod tests {
                 "",
                 false,
                 Some(os),
+                &ClaudeExtra::default(),
             );
             assert_eq!(program, expect);
             assert!(!program.contains('\\') && !program.contains('/'), "geen pad: {}", program);
@@ -10108,6 +10262,7 @@ mod tests {
             "",
             false,
             Some(host.os.as_str()),
+            &ClaudeExtra::default(),
         );
         let (prog, a, _) = wrap_remote(&host, &cwd, program, args, MuxTarget::Existing("")).expect("wrap_remote");
         println!("PROGRAM: {}", prog);
@@ -10294,16 +10449,16 @@ mod tests {
     fn a_mode_from_another_agent_never_becomes_a_flag() {
         assert_eq!(agent_permission_mode("sandbox"), None, "agy-modus");
         assert_eq!(agent_permission_mode("Manual"), None, "hoofdletters telt de CLI ook niet");
-        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "sandbox", "", false, None);
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "sandbox", "", false, None, &ClaudeExtra::default());
         assert!(!a.contains(&"--permission-mode".to_string()), "{a:?}");
     }
 
     // De nieuwe modi komen ook echt op de commandoregel terecht.
     #[test]
     fn accept_edits_and_dont_ask_reach_the_command_line() {
-        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "acceptEdits", "", false, None);
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "", "acceptEdits", "", false, None, &ClaudeExtra::default());
         assert!(a.windows(2).any(|w| w == ["--permission-mode", "acceptEdits"]), "{a:?}");
-        let (_, b) = build_command("claude", LaunchKind::Create, "u1", "t", "", "dontAsk", "", false, None);
+        let (_, b) = build_command("claude", LaunchKind::Create, "u1", "t", "", "dontAsk", "", false, None, &ClaudeExtra::default());
         assert!(b.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]), "{b:?}");
     }
 
@@ -10311,23 +10466,52 @@ mod tests {
     // uitzoeken waarom hervatten faalde, precies het pad dat hij dekt.
     #[test]
     fn build_command_claude_create_and_resume() {
-        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true, None);
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "t", "do it", "plan", "opus", true, None, &ClaudeExtra::default());
         assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
         assert!(a.windows(2).any(|w| w == ["--permission-mode", "plan"]));
         assert!(a.windows(2).any(|w| w == ["--model", "opus"]));
         assert!(a.contains(&"--append-system-prompt".to_string()));
         assert_eq!(a.last().unwrap(), "do it");
 
-        let (_, r) = build_command("claude", LaunchKind::Resume, "u1", "t", "do it", "default", "", false, None);
+        let (_, r) = build_command("claude", LaunchKind::Resume, "u1", "t", "do it", "default", "", false, None, &ClaudeExtra::default());
         assert_eq!(r[0..2], ["--resume".to_string(), "u1".to_string()]);
         // Bij resume geen taak meesturen en geen --permission-mode "default".
         assert!(!r.contains(&"do it".to_string()));
         assert!(!r.contains(&"--permission-mode".to_string()));
     }
 
+    // #280/#281: settings-bestand en Remote Control komen voor de taak, en
+    // --remote-control krijgt altijd een naam mee -- anders eet hij de taak op.
+    #[test]
+    fn build_command_claude_carries_signals_and_remote_control() {
+        let extra = ClaudeExtra { settings: Some(r"C:\cfg\claude-signals.json".into()), remote_control: true };
+        let (_, a) = build_command("claude", LaunchKind::Create, "u1", "mijn tab", "do it", "default", "", false, None, &extra);
+        assert!(a.windows(2).any(|w| w == ["--settings", r"C:\cfg\claude-signals.json"]));
+        assert!(a.windows(2).any(|w| w == ["--remote-control", "mijn tab"]));
+        assert_eq!(a.last().unwrap(), "do it");
+        // grok en agy kennen deze vlaggen niet.
+        let (_, g) = build_command("grok", LaunchKind::Create, "u1", "t", "", "default", "", false, None, &extra);
+        assert!(!g.contains(&"--settings".to_string()) && !g.contains(&"--remote-control".to_string()));
+    }
+
+    // #280/#282: de hooks zijn er altijd; dicht weigert berichten en de tools.
+    #[test]
+    fn claude_signals_open_and_closed() {
+        let open = claude_signals(true);
+        let stop = open["hooks"]["Stop"][0]["hooks"][0]["command"].as_str().unwrap();
+        assert_eq!(stop, r#"echo '{"terminalSequence":"\u001b]777;notify;taurus;stop\u0007"}'"#);
+        let wait = &open["hooks"]["Notification"][0];
+        assert!(wait["matcher"].as_str().unwrap().contains("permission_prompt"));
+        assert!(wait["hooks"][0]["command"].as_str().unwrap().contains("taurus;waiting"));
+        assert!(open.get("crossSessionInbound").is_none() && open.get("permissions").is_none());
+        let closed = claude_signals(false);
+        assert_eq!(closed["crossSessionInbound"], "refuse");
+        assert_eq!(closed["permissions"]["deny"], serde_json::json!(["SendMessage", "ListAgents"]));
+    }
+
     #[test]
     fn build_command_agy_resume_continues_without_task() {
-        let (_, a) = build_command("agy", LaunchKind::Resume, "u1", "t", "task", "auto", "", true, None);
+        let (_, a) = build_command("agy", LaunchKind::Resume, "u1", "t", "task", "auto", "", true, None, &ClaudeExtra::default());
         assert!(a.contains(&"--continue".to_string()));
         assert!(a.contains(&"--dangerously-skip-permissions".to_string()));
         // agy kent geen prompt bij --continue en geen full-paths-equivalent.
@@ -10340,7 +10524,7 @@ mod tests {
     // een volgende overname stilletjes kwijtraakt.
     #[test]
     fn build_command_grok_follows_claude_except_for_name_and_rules() {
-        let (_, a) = build_command("grok", LaunchKind::Create, "u1", "t", "do it", "plan", "grok-4.5", true, None);
+        let (_, a) = build_command("grok", LaunchKind::Create, "u1", "t", "do it", "plan", "grok-4.5", true, None, &ClaudeExtra::default());
         assert_eq!(a[0..2], ["--session-id".to_string(), "u1".to_string()]);
         assert!(a.windows(2).any(|w| w == ["--permission-mode", "plan"]), "{a:?}");
         assert!(a.windows(2).any(|w| w == ["--model", "grok-4.5"]), "{a:?}");
@@ -10352,7 +10536,7 @@ mod tests {
         assert!(!a.contains(&"-n".to_string()), "{a:?}");
         assert_eq!(a.last().unwrap(), "do it");
 
-        let (_, r) = build_command("grok", LaunchKind::Resume, "u1", "t", "do it", "default", "", false, None);
+        let (_, r) = build_command("grok", LaunchKind::Resume, "u1", "t", "do it", "default", "", false, None, &ClaudeExtra::default());
         assert_eq!(r[0..2], ["--resume".to_string(), "u1".to_string()]);
         assert!(!r.contains(&"do it".to_string()), "{r:?}");
         assert!(!r.contains(&"--permission-mode".to_string()), "{r:?}");
@@ -10363,7 +10547,7 @@ mod tests {
     // --permission-mode uit te komen.
     #[test]
     fn build_command_grok_drops_a_mode_that_is_not_his() {
-        let (_, a) = build_command("grok", LaunchKind::Create, "u1", "t", "", "sandbox", "", false, None);
+        let (_, a) = build_command("grok", LaunchKind::Create, "u1", "t", "", "sandbox", "", false, None, &ClaudeExtra::default());
         assert!(!a.contains(&"--permission-mode".to_string()), "{a:?}");
     }
 
@@ -10913,6 +11097,7 @@ mod tests {
             // Leeg: de tests dekken juist de kaarten van VOOR dit veld, waar de
             // zijbalk het nog uit role/origin afleidt.
             kind: String::new(),
+            notify: false,
         }
     }
 
