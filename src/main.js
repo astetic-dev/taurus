@@ -339,6 +339,9 @@ const I18N = {
     opt_messaging_tip: "Andere Claude-sessies op deze computer mogen deze sessie berichten sturen, en deze sessie hen. Uit = berichten worden geweigerd.",
     opt_rc_tip: "Volg en bestuur deze sessie vanaf claude.ai of de Claude-app, onder dezelfde naam als de tab. Vereist een claude.ai-login.",
     c_agentmsg: "Agents mogen elkaar berichten sturen",
+    grp_newsessions: "Nieuwe sessies",
+    help_notify_default: "Zet het vinkje Melding wanneer klaar standaard aan op het startformulier. Een kaart waarop je het zelf aanzette houdt het altijd aan.",
+    help_rc_default: "Zet het vinkje Remote Control standaard aan op het startformulier: elke nieuwe Claude-sessie is dan ook te volgen vanaf claude.ai en de Claude-app. Vereist een claude.ai-login.",
     help_agentmsg: "De standaard voor nieuwe sessies. Aan: andere Claude-sessies op deze computer kunnen deze sessie berichten sturen, en deze sessie hen.\nUit: de sessie weigert berichten en kan zelf niemand zoeken of berichten.\nPer sessie aan te passen op het startformulier.",
     stt_head: "Spraak naar tekst — F9 inhouden (of klik 🎙)",
     stt_model: "Model", stt_download: "Download",
@@ -710,6 +713,9 @@ const I18N = {
     opt_messaging_tip: "Other Claude sessions on this computer may message this session, and it may message them. Off = messages are refused.",
     opt_rc_tip: "Follow and steer this session from claude.ai or the Claude app, under the same name as the tab. Needs a claude.ai login.",
     c_agentmsg: "Agents may message each other",
+    grp_newsessions: "New sessions",
+    help_notify_default: "Ticks Notify when done on the launch form by default. A card on which you ticked it yourself always keeps it on.",
+    help_rc_default: "Ticks Remote Control on the launch form by default: every new Claude session can then also be followed from claude.ai and the Claude app. Needs a claude.ai login.",
     help_agentmsg: "The default for new sessions. On: other Claude sessions on this computer can message this session, and it can message them.\nOff: the session refuses messages and cannot look up or message anyone itself.\nCan be changed per session on the launch form.",
     stt_head: "Speech to text — hold F9 (or click 🎙)",
     stt_model: "Model", stt_download: "Download",
@@ -1303,6 +1309,8 @@ const DEFAULT_SETTINGS = {
   confirmExit: true,
   // Mogen agents elkaar berichten sturen (#282)? Open is wat claude zelf al doet.
   agentMessaging: true,
+  // Standaarden van het startformulier (#288).
+  notifyDefault: false, rcDefault: false,
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
   ttsEnabled: false, ttsVoice: "", ttsRate: 0, // Windows-native TTS
@@ -1831,9 +1839,9 @@ async function selectProject(p, card) {
   els.commandInput.value = p.command || "";
   // Melding hoort bij de agent (#280); berichten volgen de standaard uit de
   // instellingen (#282); Remote Control kies je per keer (#281).
-  els.launchNotify.checked = !!p.notify;
+  els.launchNotify.checked = !!p.notify || !!settings.notifyDefault;
   els.launchMsg.checked = settings.agentMessaging !== false;
-  els.launchRc.checked = false;
+  els.launchRc.checked = !!settings.rcDefault;
   refreshOverrideState();
   els.status.textContent = "";
   await refreshHostState(); // doet de lokale pad-checks, of slaat ze over bij remote
@@ -5283,6 +5291,8 @@ function openSettings() {
   els.setTabs.checked = settings.tabShortcuts;
   els.setTabStatus.checked = settings.tabStatus;
   els.setAgentMsg.checked = settings.agentMessaging !== false;
+  els.setNotifyDefault.checked = !!settings.notifyDefault;
+  els.setRcDefault.checked = !!settings.rcDefault;
   els.setTabRecap.checked = settings.tabRecap;
   els.setTabGroupSize.value = settings.tabGroups ? settings.tabGroupSize : 0;
   els.setFullPaths.checked = settings.fullPaths;
@@ -5540,6 +5550,8 @@ function saveSettingsFromForm() {
   settings.tabShortcuts = els.setTabs.checked;
   settings.tabStatus = els.setTabStatus.checked;
   settings.agentMessaging = els.setAgentMsg.checked;
+  settings.notifyDefault = els.setNotifyDefault.checked;
+  settings.rcDefault = els.setRcDefault.checked;
   settings.tabRecap = els.setTabRecap.checked;
   // 0 = uit. Een aparte aanvinkvakje ernaast zou twee besturingselementen voor
   // een keuze zijn; nul is hier de natuurlijke "nooit bundelen".
@@ -7122,6 +7134,8 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabs: document.querySelector("#set-tabshortcuts"),
     setTabStatus: document.querySelector("#set-tabstatus"),
     setAgentMsg: document.querySelector("#set-agentmsg"),
+    setNotifyDefault: document.querySelector("#set-notify-default"),
+    setRcDefault: document.querySelector("#set-rc-default"),
     setTabRecap: document.querySelector("#set-tabrecap"),
     setTabGroupSize: document.querySelector("#set-tabgroupsize"),
     setFullPaths: document.querySelector("#set-fullpaths"),

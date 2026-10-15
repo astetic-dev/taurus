@@ -269,6 +269,14 @@
                 </select></label>
               <label class="srow check" data-help-key="help_confirm_exit"><input id="set-confirm-exit" type="checkbox" /> <span data-i18n="set_confirm_exit">Vragen voor afsluiten</span></label>
             </div>
+            <!-- Waar het startformulier mee begint (#288). Stonden verspreid of
+                 ontbraken: de melding en Remote Control hadden geen standaard. -->
+            <div class="setting-group">
+              <h3 data-i18n="grp_newsessions">Nieuwe sessies</h3>
+              <label class="srow check" data-help-key="help_notify_default"><input id="set-notify-default" type="checkbox" /> <span data-i18n="opt_notify">Melding wanneer klaar</span></label>
+              <label class="srow check" data-help-key="help_agentmsg"><input id="set-agentmsg" type="checkbox" /> <span data-i18n="c_agentmsg">Agents mogen elkaar berichten sturen</span></label>
+              <label class="srow check" data-help-key="help_rc_default"><input id="set-rc-default" type="checkbox" /> <span data-i18n="opt_rc">Remote Control (claude.ai en mobiel)</span></label>
+            </div>
           </div>
 
           <!-- Thema -->
@@ -315,7 +323,6 @@
               <label class="srow check" data-help-key="help_trimsel"><input id="set-trimsel" type="checkbox" /> <span data-i18n="c_trimsel">Selectie opschonen bij kopiëren</span></label>
               <label class="srow check" data-help-key="help_pasteright"><input id="set-pasteright" type="checkbox" /> <span data-i18n="c_paste">Rechtermuisklik plakt</span></label>
               <label class="srow check" data-help-key="help_agentmouse"><input id="set-agentmouse" type="checkbox" /> <span data-i18n="c_mouse">Agent mag de muis gebruiken</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
-              <label class="srow check" data-help-key="help_agentmsg"><input id="set-agentmsg" type="checkbox" /> <span data-i18n="c_agentmsg">Agents mogen elkaar berichten sturen</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
               <label class="srow check" data-help-key="help_ctrlshift"><input id="set-ctrlshift" type="checkbox" /> <span data-i18n="c_ctrl">Ctrl+Shift+C / Ctrl+Shift+V</span></label>
               <label class="srow check" data-help-key="help_weblinks"><input id="set-weblinks" type="checkbox" /> <span data-i18n="c_links">Klikbare links</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
               <label class="srow check" data-help-key="help_search"><input id="set-search" type="checkbox" /> <span data-i18n="c_search">Zoeken in scrollback — Ctrl+Shift+F</span> <span class="opt" data-i18n="c_links_new">(nieuwe sessies)</span></label>
