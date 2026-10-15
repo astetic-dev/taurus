@@ -185,8 +185,7 @@ const I18N = {
     new_agent_title: "Nieuwe specialist", new_agent_create: "Maak",
     // De zeven ICM-rollen (#159)
     na_kind: "Wat voor specialist?", na_process: "Nieuw proces",
-    na_kind_plain: "Map die je al hebt",
-    na_kind_plain_sub: "een werkproces", na_kind_free: "Ander ICM-adres",
+    na_kind_free: "Ander ICM-adres",
     group_processes: "Processen", grp_processes: "Processen",
     fold_hide: "Inklappen", fold_show: "Uitklappen",
     build_of: "Build van {when}",
@@ -196,8 +195,9 @@ const I18N = {
     na_embedded_in: "In: {label}",
     na_subject: "Waar gaat dit over? (één woord)", na_subject_ph: "bijv. meetings — leeg mag",
     na_name: "Naam", na_name_ph: "leeg = de naam uit de bron",
-    na_psource: "Bron (optioneel)", na_psource_ph: "GitHub-adres, of leeg laten",
-    na_psource_hint: "Leeg = je wijst hieronder een map aan die er al is. Vul je een GitHub-adres in, dan haalt de Taurus het werkproces op en houdt hij de versie bij.",
+    na_psource_hint: "Een GitHub-adres: Taurus haalt het werkproces op in de map hieronder en houdt de versie bij.",
+    na_src_folder: "Een map", na_src_repo: "Een repository",
+    na_btn_title: "Knoptitel", na_tab_title: "Standaard tabtitel", na_start_task: "Opstarttaak",
     na_pfound: "{name} · {branch} @ {sha} · {kb} KB — komt in de werkmap hieronder",
     na_pwarn: "⚠ Geen {files} in de wortel: dit lijkt geen ICM-werkproces. Je kunt het gewoon ophalen — dit is een waarschuwing, geen blokkade.",
     na_pdeploying: "Werkproces ophalen…",
@@ -546,8 +546,7 @@ const I18N = {
     new_agent_title: "New specialist", new_agent_create: "Create",
     // The seven ICM roles (#159)
     na_kind: "What kind of specialist?", na_process: "New process",
-    na_kind_plain: "A folder you have",
-    na_kind_plain_sub: "a work process", na_kind_free: "Another ICM address",
+    na_kind_free: "Another ICM address",
     group_processes: "Processes", grp_processes: "Processes",
     fold_hide: "Collapse", fold_show: "Expand",
     build_of: "Built {when}",
@@ -557,8 +556,9 @@ const I18N = {
     na_embedded_in: "In: {label}",
     na_subject: "What is this about? (one word)", na_subject_ph: "e.g. meetings — may be empty",
     na_name: "Name", na_name_ph: "empty = the name from the source",
-    na_psource: "Source (optional)", na_psource_ph: "GitHub address, or leave empty",
-    na_psource_hint: "Empty = you point at a folder that already exists below. Give a GitHub address and the Taurus fetches the work process and watches its version.",
+    na_psource_hint: "A GitHub address: Taurus fetches the work process into the folder below and watches its version.",
+    na_src_folder: "A folder", na_src_repo: "A repository",
+    na_btn_title: "Button title", na_tab_title: "Tab default title", na_start_task: "Startup task",
     na_pfound: "{name} · {branch} @ {sha} · {kb} KB — lands in the working folder below",
     na_pwarn: "⚠ No {files} in the root: this does not look like an ICM work process. You can still fetch it — this is a warning, not a block.",
     na_pdeploying: "Fetching the work process…",
@@ -5593,10 +5593,33 @@ function renderNaKinds() {
     enabledRoles().map((r) => tile(r.id, r.icon, t("role_" + r.id), "")).join("") +
     tile("free", "⬡", t("na_kind_free"), t("na_kind_free_sub"));
   // Een proces is geen agent: eigen lijst, eigen kopje. Dit was voorheen "project".
-  els.naKinds2.innerHTML = tile("plain", "📁", t("na_kind_plain"), t("na_kind_plain_sub"));
+  // Twee tegels voor waar het vandaan komt (#284); beide zijn soort "plain".
+  const src = (key, icon, title) =>
+    `<button type="button" class="na-kind${naKind === "plain" && naSrc === key ? " on" : ""}" data-kind="plain" data-src="${key}">` +
+    `<span class="na-kind-ico" aria-hidden="true">${escapeHtml(icon)}</span>` +
+    `<span class="na-kind-title">${escapeHtml(title)}</span></button>`;
+  els.naKinds2.innerHTML = src("folder", "📁", t("na_src_folder")) + src("repo", "📦", t("na_src_repo"));
   for (const b of [...els.naKinds.querySelectorAll(".na-kind"), ...els.naKinds2.querySelectorAll(".na-kind")]) {
-    b.addEventListener("click", () => selectNaKind(b.dataset.kind));
+    b.addEventListener("click", () => {
+      if (b.dataset.src) naSrc = b.dataset.src;
+      selectNaKind(b.dataset.kind);
+    });
   }
+}
+
+// Map of repository (#284). Bij een map wijs je hem aan; bij een repository vul je
+// de bron in, en is het mapveld waar die terechtkomt.
+let naSrc = "folder";
+function applyNaSrc() {
+  const repo = naSrc === "repo";
+  els.naPsourceField.classList.toggle("hidden", !repo);
+  if (!repo) {
+    // Terug naar een map: een eerder gelezen bron telt niet meer mee bij opslaan.
+    naProcProbe = null;
+    els.naPnote.textContent = t("na_psource_hint");
+    els.naPnote.className = "hint";
+  }
+  renderNewAgentHost();
 }
 
 function selectNaKind(kind) {
@@ -5607,10 +5630,15 @@ function selectNaKind(kind) {
   els.naDestField.classList.add("hidden");
   els.naPlain.classList.toggle("hidden", kind !== "plain");
   els.naRole.classList.toggle("hidden", kind === "plain");
+  els.naHostField.classList.toggle("hidden", kind !== "plain");
   els.naSave.textContent = t(kind === "plain" ? "new_agent_create" : "na_deploy");
   naSay(els.naStatus, "", "");
   renderNaKinds();
-  if (kind === "plain") { els.naLabel.focus(); return; }
+  if (kind === "plain") {
+    applyNaSrc();
+    (naSrc === "repo" ? els.naPsource : els.naPath).focus();
+    return;
+  }
   // De rolkop zegt welke rol dit is en met welke vraag je binnenkomt. Geen naam:
   // die vult het veld eronder in.
   els.naRoleHead.innerHTML = role
@@ -5705,6 +5733,17 @@ function proposeProcessPath() {
   els.naPath.value = naPathProposed;
 }
 
+// Knoptitel voorstellen zodra we er een weten: de laatste map, of de naam uit de
+// bron. Nooit overschrijven wat je zelf typte -- een eerder VOORSTEL wel, anders
+// blijft de naam van de vorige map staan als je een andere kiest.
+let naLabelProposed = "";
+function naProposeLabel(name) {
+  const nu = els.naLabel.value.trim();
+  if (!name || (nu && nu !== naLabelProposed)) return;
+  naLabelProposed = name;
+  els.naLabel.value = name;
+}
+
 // De bron van een PROCES lezen. Zelfde probe als bij een rol, maar zonder slot:
 // `strict: false` laat een bron die niet als ICM-werkproces te herkennen is
 // gewoon door, met in het rapport wat er niet gevonden is. Die bevinding komt
@@ -5739,6 +5778,7 @@ async function naReadProcessSource() {
         .replace("{kb}", p.sizeKb);
   els.naPnote.className = niets ? "hint warn" : "hint";
   proposeProcessPath();
+  naProposeLabel(p.name || "");
 }
 
 async function naDeploy() {
@@ -5845,6 +5885,9 @@ function openNewAgent(kind) {
   els.naPsource.value = "";
   naProcProbe = null;
   naPathProposed = "";
+  naLabelProposed = "";
+  // Een proces begint als map: dat is de gewone weg (#284).
+  naSrc = "folder";
   renderProcessWhere();
   els.naPwhere.value = "";
   els.naPnote.textContent = t("na_psource_hint");
@@ -5858,7 +5901,7 @@ function openNewAgent(kind) {
   renderNewAgentHost();
   renderNewAgentAgent();
   // Eerst tonen, dan kiezen. selectNaKind zet de focus in het veld dat bij de
-  // keuze hoort (de knopnaam bij een proces, de bron bij een agent), en focus()
+  // keuze hoort (de map of bron bij een proces, de bron bij een agent), en focus()
   // op iets in een verborgen venster doet niets -- daarom stond die van het proces
   // hier nog een tweede keer. Nu geldt het voor beide soorten.
   els.newagentModal.classList.remove("hidden");
@@ -5879,7 +5922,8 @@ function renderNewAgentHost() {
   // lokale CLAUDE.md-controle -- die zou over de verkeerde schijf gaan.
   const remote = !!cur;
   els.naBrowse.classList.toggle("hidden", remote);
-  els.naPathCap.textContent = t(remote ? "cap_workdir_remote" : "cap_workdir");
+  // Bij een repository is dit de map waar hij terechtkomt, niet een die er al staat.
+  els.naPathCap.textContent = t(remote ? "cap_workdir_remote" : naSrc === "repo" ? "na_dest" : "cap_workdir");
   els.naPath.placeholder = t(remote ? "ph_path_remote" : "ph_path");
   if (remote) naSay(els.naNote, "", "");
 }
@@ -5902,7 +5946,9 @@ function renderNewAgentAgent() {
 // bewaard en aangeklikt -- dus je hoorde het altijd te laat.
 async function naCheckPath() {
   const path = els.naPath.value.trim();
-  if (naDraft.host_id || !path) { naSay(els.naNote, "", ""); return; }
+  // Een repository komt pas bij het maken in die map; dat hij nu nog niet bestaat
+  // is dan juist de bedoeling.
+  if (naDraft.host_id || !path || naSrc === "repo") { naSay(els.naNote, "", ""); return; }
   let exists = false;
   try { exists = await invoke("path_exists", { path }); } catch (_) {}
   if (!exists) { naSay(els.naNote, t("na_no_path"), "err"); return; }
@@ -5912,6 +5958,13 @@ async function naCheckPath() {
 }
 
 async function saveNewAgent() {
+  // Repository gekozen: dan hoort er een bron te zijn, en die lezen we zelf als je
+  // nog niet op Lezen drukte -- zonder gelezen bron werd de kaart een map zonder
+  // inhoud.
+  if (naSrc === "repo") {
+    if (!els.naPsource.value.trim()) { naSay(els.naStatus, t("na_need_source"), "err"); els.naPsource.focus(); return; }
+    if (!naProcProbe) { await naReadProcessSource(); if (!naProcProbe) return; }
+  }
   const label = els.naLabel.value.trim();
   const path = els.naPath.value.trim();
   if (!label) { naSay(els.naStatus, t("na_need_label"), "err"); els.naLabel.focus(); return; }
@@ -7009,6 +7062,8 @@ window.addEventListener("DOMContentLoaded", () => {
     naSubject: document.querySelector("#na-subject"),
     naName: document.querySelector("#na-name"),
     naPsource: document.querySelector("#na-psource"),
+    naPsourceField: document.querySelector("#na-psourcefield"),
+    naHostField: document.querySelector("#na-hostfield"),
     naPwhere: document.querySelector("#na-pwhere"),
     naPnote: document.querySelector("#na-pnote"),
     naSource: document.querySelector("#na-source"),
@@ -7104,12 +7159,14 @@ window.addEventListener("DOMContentLoaded", () => {
     try { dir = await invoke("pick_folder"); } catch (_) { return; }
     if (!dir) return;
     els.naPath.value = dir;
-    // Naam voorstellen zodra we er een weten -- maar nooit overschrijven wat de
-    // gebruiker zelf al getypt heeft.
-    if (!els.naLabel.value.trim()) els.naLabel.value = dir.replace(/[\/]+$/, "").split(/[\/]/).pop() || dir;
+    if (naSrc === "folder") naProposeLabel(dir.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || dir);
     naCheckPath();
   });
-  els.naPath.addEventListener("change", naCheckPath);
+  els.naPath.addEventListener("change", () => {
+    const dir = els.naPath.value.trim();
+    if (naSrc === "folder" && dir) naProposeLabel(dir.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || dir);
+    naCheckPath();
+  });
   els.naAgent.addEventListener("change", () => {
     if (els.naAgent.value === AGENT_COMMAND) {
       naDraft.command = els.naCommand.value.trim() || DEFAULT_OWN_COMMAND;
@@ -7131,6 +7188,8 @@ window.addEventListener("DOMContentLoaded", () => {
   els.naSave.addEventListener("click", () => (naKind === "plain" ? saveNewAgent() : naDeploy()));
   document.querySelector("#na-read").addEventListener("click", naReadSource);
   document.querySelector("#na-pread").addEventListener("click", naReadProcessSource);
+  // Een andere bron getypt = het vorige leesrapport geldt niet meer.
+  els.naPsource.addEventListener("input", () => { naProcProbe = null; naSay(els.naStatus, "", ""); });
   els.naPwhere.addEventListener("change", proposeProcessPath);
   els.upGo.addEventListener("click", doUpdate);
   document.querySelector("#up-skip").addEventListener("click", skipUpdate);

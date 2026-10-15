@@ -1,5 +1,6 @@
 # Bouwt src/fonts/taurus-line-icons.woff2: Lucide-glyphs (ISC) onder de
 # codepoints van de emoji die de Taurus-UI gebruikt (#icon-sets).
+# Bron: lucide-static 1.48.0 (font/lucide.ttf + font/codepoints.json).
 import json, sys
 from fontTools.ttLib import TTFont
 from fontTools import subset
@@ -13,6 +14,7 @@ MAP = {
     0x1FA7A: "stethoscope", 0x1F4D0: "ruler", 0x1F6A6: "traffic-cone",
     0x2697: "flask-conical", 0x2712: "pen-tool", 0x25B6: "play", 0x23F8: "pause",
     0x2B21: "hexagon", 0x2261: "list", 0x2212: "minus", 0x21F1: "arrow-up-left",
+    0x1F4E6: "git-branch",
 }
 src, cps, out = sys.argv[1], sys.argv[2], sys.argv[3]
 codes = json.load(open(cps))

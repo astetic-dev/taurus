@@ -429,7 +429,14 @@
         <div class="na-kindcap" data-i18n="na_kind">Wat voor agent?</div>
         <div id="na-kinds" class="na-kinds"></div>
         <h2 class="na-second" data-i18n="na_process">Nieuw proces</h2>
-        <div id="na-kinds2" class="na-kinds"></div>
+        <!-- Waar een proces vandaan komt (#284): een map die er al staat, of een
+             repository die Taurus ophaalt. Twee keuzes van hetzelfde, dus naast
+             elkaar -- met waar het draait er meteen bij. -->
+        <div class="na-procrow">
+          <div id="na-kinds2" class="na-kinds"></div>
+          <div id="na-hostfield" class="e-field na-hostfield"><span class="e-cap" data-i18n="cap_host">Machine</span>
+            <select id="na-host"></select></div>
+        </div>
 
         <!-- Rol of vrij adres: eerst waar hij werkt en waarover, dan de bron. Je
              weet eerst waarvoor je iets haalt, dan pas waarvandaan. -->
@@ -459,28 +466,16 @@
         </div>
 
         <div id="na-plain" class="e-fields">
-          <div class="e-grid">
-            <div class="e-field"><span class="e-cap" data-i18n="cap_button">Knop</span>
-              <input id="na-label" type="text" autocomplete="off" /></div>
-            <div class="e-field"><span class="e-cap" data-i18n="cap_host">Machine</span>
-              <select id="na-host"></select></div>
-          </div>
-          <!-- Een werkproces mag ook van GitHub komen (#186). Leeg = de oude weg:
-               je wijst een map aan die er al staat. Met een bron haalt Taurus het
-               op en houdt hij de versie bij, net als bij een rol -- maar zonder
-               het slot: een proces dat niet als ICM-werkproces te herkennen is
-               krijgt een waarschuwing en geen weigering. -->
-          <div class="e-field"><span class="e-cap" data-i18n="na_psource">Bron (optioneel)</span>
+          <!-- Een werkproces mag ook van GitHub komen (#186). Bij "een repository"
+               haalt Taurus het op en houdt hij de versie bij, net als bij een rol --
+               maar zonder het slot: een proces dat niet als ICM-werkproces te
+               herkennen is krijgt een waarschuwing en geen weigering. -->
+          <div id="na-psourcefield" class="e-field hidden"><span class="e-cap" data-i18n="na_source">Bron</span>
             <div class="e-pathrow">
-              <input id="na-psource" type="text" autocomplete="off" data-i18n-ph="na_psource_ph" />
+              <input id="na-psource" type="text" autocomplete="off" data-i18n-ph="na_source_ph" />
               <button id="na-pread" class="btn-ghost" data-i18n="na_read">Lezen</button>
             </div>
-            <div id="na-pnote" class="hint" data-i18n="na_psource_hint">Leeg = je wijst hieronder een map aan die er al is.</div></div>
-          <!-- Waar dit draait (#188). Een werkproces kan een ONDERDEEL zijn van een
-               groter proces: vier fasen, en fase 3 start iets eigen. Dan hoort die
-               kaart onder zijn gastheer te staan en niet los in de lijst. -->
-          <div class="e-field"><span class="e-cap" data-i18n="na_pwhere">Waar draait dit?</span>
-            <select id="na-pwhere"></select></div>
+            <div id="na-pnote" class="hint" data-i18n="na_psource_hint"></div></div>
           <div class="e-field">
             <span class="e-cap" id="na-pathcap" data-i18n="cap_workdir">Werkmap</span>
             <div class="e-pathrow">
@@ -491,10 +486,19 @@
                  verscheen die pas nadat je de agent had bewaard en gekozen. -->
             <div id="na-note" class="status-msg"></div>
           </div>
-          <div class="e-field"><span class="e-cap" data-i18n="cap_tabtitle">Titel van het tabblad</span>
-            <input id="na-title" type="text" autocomplete="off" /></div>
-          <div class="e-field e-taskfield"><span class="e-cap" data-i18n="cap_task">Taak</span>
-            <textarea id="na-task" rows="3"></textarea></div>
+          <!-- Waar dit draait (#188). Een werkproces kan een ONDERDEEL zijn van een
+               groter proces: vier fasen, en fase 3 start iets eigen. Dan hoort die
+               kaart onder zijn gastheer te staan en niet los in de lijst. -->
+          <div class="e-field"><span class="e-cap" data-i18n="na_pwhere">Waar draait dit?</span>
+            <select id="na-pwhere"></select></div>
+          <div class="e-grid">
+            <div class="e-field"><span class="e-cap" data-i18n="na_btn_title">Knoptitel</span>
+              <input id="na-label" type="text" autocomplete="off" /></div>
+            <div class="e-field"><span class="e-cap" data-i18n="na_tab_title">Standaard tabtitel</span>
+              <input id="na-title" type="text" autocomplete="off" /></div>
+          </div>
+          <div class="e-field e-taskfield"><span class="e-cap" data-i18n="na_start_task">Opstarttaak</span>
+            <textarea id="na-task" rows="2"></textarea></div>
           <div class="e-grid e-grid3">
             <div class="e-field"><span class="e-cap" data-i18n="cap_agent">Agent</span>
               <select id="na-agent"></select></div>

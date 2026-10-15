@@ -50,7 +50,7 @@
   font-family: "Taurus Line Icons";
   src: url("fonts/taurus-line-icons.woff2") format("woff2");
   font-display: block;
-  unicode-range: U+1F4C1-1F4C2, U+1F399, U+1F5D1, U+1F441, U+2699, U+1F5A5, U+1F50A, U+270E, U+270B, U+27F3, U+21BB, U+26A0, U+2139, U+2715, U+1F50E, U+2315, U+1F4AC, U+1F465, U+1F5FA, U+1FA7A, U+1F4D0, U+1F6A6, U+2697, U+2712, U+25B6, U+23F8, U+2B21, U+2261, U+2212, U+21F1;
+  unicode-range: U+1F4C1-1F4C2, U+1F399, U+1F5D1, U+1F441, U+2699, U+1F5A5, U+1F50A, U+270E, U+270B, U+27F3, U+21BB, U+26A0, U+2139, U+2715, U+1F50E, U+2315, U+1F4AC, U+1F465, U+1F5FA, U+1FA7A, U+1F4D0, U+1F6A6, U+2697, U+2712, U+25B6, U+23F8, U+2B21, U+2261, U+2212, U+21F1, U+1F4E6;
 }
 html[data-icons="line"] { --icon-font: "Taurus Line Icons",; }
 
@@ -274,6 +274,16 @@ h2.na-second { margin-top: 22px; }
 .na-kind:hover { border-color: var(--accent); }
 .na-kind.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .na-kind .na-kind-sub { font-size: 10px; color: var(--text-dim); }
+/* Map of repository, met waar het draait ernaast (#284). De tegels houden hun
+   eigen breedte; de machinekeuze vult de rest en zakt op een smal scherm eronder. */
+.na-procrow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 14px; margin-bottom: 14px; }
+.na-procrow .na-kinds { margin-bottom: 0; }
+.na-procrow .na-hostfield { flex: 1 1 180px; min-width: 0; }
+/* Tegels en machinekeuze even hoog, zodat de rij als een rij leest. */
+.na-procrow .na-kind, .na-procrow .na-hostfield select { height: 36px; padding-top: 0; padding-bottom: 0; }
+.na-procrow .na-kind { align-content: center; }
+/* Leeg = geen melding, en dan ook geen lege regel onder de werkmap. */
+#na-note:empty { display: none; }
 .na-role-head { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
 .na-role-head b { color: var(--text); font-size: 13px; }
 /* Het leesrapport: vaste kolommen, zodat het te scannen is als een label-lijst. */
