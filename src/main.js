@@ -3786,9 +3786,14 @@ async function startQuick() {
   const uuid = crypto.randomUUID();
   const title = t("quick_title");
   const agent = "claude", model = "", mode = "default";
-  const session = spawnTerminal({ id, uuid, path, title, accent: QUICK_ACCENT, mode, command: "", agent, model, hostId: "", projectId: "" });
+  // Dezelfde standaarden als het startformulier (#288): een snelle agent heeft
+  // geen formulier, dus volgt hij gewoon de instellingen.
+  const notify = !!settings.notifyDefault;
+  const messaging = settings.agentMessaging !== false;
+  const remoteControl = !!settings.rcDefault;
+  const session = spawnTerminal({ id, uuid, path, title, accent: QUICK_ACCENT, mode, command: "", agent, model, hostId: "", projectId: "", notify, messaging, remoteControl });
   try {
-    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task: "", sessionId: uuid, mode, fullPaths: settings.fullPaths, command: "", agent, model: resolveModelArg(agent, model), hostId: "", cols: session.term.cols, rows: session.term.rows })) || "";
+    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task: "", sessionId: uuid, mode, fullPaths: settings.fullPaths, command: "", agent, model: resolveModelArg(agent, model), hostId: "", cols: session.term.cols, rows: session.term.rows, claudeOpts: { messaging, remoteControl } })) || "";
     recordSession(session);
     showView(id);
     persistSessionsToDisk();
