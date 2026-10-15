@@ -4682,7 +4682,11 @@ function announce(s, kind) {
   }
   const looking = s.id === current && document.hasFocus();
   if (s.notify && !looking) {
-    invoke("notify_os", { title: s.title || "agent", body: t(kind === "waiting" ? "notify_waiting" : "notify_ready") }).catch(() => {});
+    // Naam en status samen in de vette regel: Windows zet er zelf "Taurus" boven, en
+    // bij meerdere sessies tegelijk moet je zonder lezen zien welke het is. De map
+    // eronder onderscheidt twee tabs met dezelfde naam.
+    const what = t(kind === "waiting" ? "notify_waiting" : "notify_ready");
+    invoke("notify_os", { title: `${s.title || "agent"} ${what}`, body: s.path || "" }).catch(() => {});
   }
 }
 
