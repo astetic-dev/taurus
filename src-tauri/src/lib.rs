@@ -2819,6 +2819,16 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).is_dir()
 }
 
+// Waar een snelle agent standaard start (#286): de map `claude` in je thuismap als
+// die er is -- daar staan bij de meeste gebruikers hun agentmappen al onder --
+// anders de thuismap zelf. In de instellingen te veranderen.
+#[tauri::command]
+fn quick_default_dir() -> String {
+    let Some(home) = platform::home_dir() else { return String::new() };
+    let claude = home.join("claude");
+    if claude.is_dir() { claude } else { home }.to_string_lossy().into_owned()
+}
+
 // Versie van de app (uit Cargo.toml) -> discreet in de UI getoond.
 #[tauri::command]
 fn app_version() -> String {
@@ -8394,6 +8404,7 @@ pub fn run() {
             pick_folder,
             pick_file,
             path_exists,
+            quick_default_dir,
             app_version,
             app_built,
             has_claude_md,

@@ -78,6 +78,21 @@ const I18N = {
     session_stop_hint: "Deze sessie beëindigen op de andere machine",
     session_stop_sure: "zeker weten?",
     set_confirm_exit: "Vragen voor afsluiten",
+    quick_start: "⚡ Snelle agent", quick_title: "Snel",
+    quick_tip: "Snelle agent (Ctrl+Shift+T): een losse vraag, buiten een werkproces",
+    quick_no_dir: "✗ Geen map voor de snelle agent — stel er een in bij Instellingen → Sessies.",
+    set_quickdir: "Map van de snelle agent", ph_quickdir: "leeg = {dir}",
+    help_quickdir: "Hier start ⚡ Snelle agent. Leeg = de map claude in je thuismap als die er is, anders je thuismap.",
+    ctx_promote: "Maak er een werkproces van…",
+    promote_title: "Maak er een werkproces van",
+    promote_lead: "De agent legt dit gesprek vast in een nieuwe map: een CLAUDE.md met het doel, de bronnen, de stappen en wat jullie leerden. Zodra die er staat, komt de map als proces in het linkermenu. Deze sessie loopt gewoon door.",
+    promote_name: "Naam van het werkproces", promote_go: "Vastleggen",
+    promote_dest: "Komt in: {dir}",
+    promote_dup: "✗ Er staat al een proces op {dir}.",
+    promote_sent: "{name}: de agent schrijft de CLAUDE.md…",
+    promote_done: "✓ {name} staat bij de processen",
+    promote_timeout: "⚠ {name}: na 10 minuten nog geen CLAUDE.md in {dir}. Voeg de map zelf toe als hij er later staat.",
+    promote_prompt: "Leg dit werk vast als werkproces. Maak de map {dir} aan en schrijf daarin een CLAUDE.md voor een agent die hier later verder gaat: het doel, de bronnen en paden die we gebruikten, de stappen die werkten en wat we onderweg leerden. Geen verslag van dit gesprek, alleen wat de volgende keer nodig is. Zeg kort dat het klaar is als het bestand er staat.",
     exit_title: "Taurus afsluiten?",
     exit_keeps: "Blijft doorlopen op zijn machine — later weer op te pikken met ⇱",
     exit_stops_resume: "Stopt — de conversatie is bij de volgende start te hervatten",
@@ -439,6 +454,21 @@ const I18N = {
     session_stop_hint: "End this session on the other machine",
     session_stop_sure: "are you sure?",
     set_confirm_exit: "Ask before closing",
+    quick_start: "⚡ Quick agent", quick_title: "Quick",
+    quick_tip: "Quick agent (Ctrl+Shift+T): a one-off question, outside a work process",
+    quick_no_dir: "✗ No folder for the quick agent — set one in Settings → Sessions.",
+    set_quickdir: "Quick agent folder", ph_quickdir: "empty = {dir}",
+    help_quickdir: "Where ⚡ Quick agent starts. Empty = the folder claude in your home folder if it exists, else your home folder.",
+    ctx_promote: "Make it a process…",
+    promote_title: "Make it a process",
+    promote_lead: "The agent captures this conversation in a new folder: a CLAUDE.md with the goal, the sources, the steps and what you learned. As soon as it exists, the folder appears as a process in the left menu. This session keeps running.",
+    promote_name: "Name of the process", promote_go: "Capture",
+    promote_dest: "Goes in: {dir}",
+    promote_dup: "✗ There already is a process at {dir}.",
+    promote_sent: "{name}: the agent is writing the CLAUDE.md…",
+    promote_done: "✓ {name} is now under processes",
+    promote_timeout: "⚠ {name}: no CLAUDE.md in {dir} after 10 minutes. Add the folder yourself once it is there.",
+    promote_prompt: "Capture this work as a work process. Create the folder {dir} and write a CLAUDE.md in it for an agent that continues here later: the goal, the sources and paths we used, the steps that worked and what we learned along the way. No account of this conversation, only what the next time needs. Say briefly that it is done once the file exists.",
     exit_title: "Close Taurus?",
     exit_keeps: "Keeps running on its machine — pick it up later with ⇱",
     exit_stops_resume: "Stops — the conversation can be resumed on the next launch",
@@ -1279,6 +1309,8 @@ const DEFAULT_SETTINGS = {
   agentsFolded: false, procFolded: false, dropFolded: false,
   // Afsluiten vraagt om bevestiging zolang er iets draait (#168).
   confirmExit: true,
+  // Map van ⚡ Snelle agent (#286). Leeg = quick_default_dir van de backend.
+  quickDir: "",
   agentMouse: false, // false = muis blijft lokaal (slepen selecteert); true = agent krijgt de muis
   skin: "", // "" = volg branding-default / anders "default"
   ttsEnabled: false, ttsVoice: "", ttsRate: 0, // Windows-native TTS
@@ -3104,6 +3136,13 @@ function renderTabs() {
   plus.textContent = t("newtab");
   plus.addEventListener("click", () => { resetLaunchForm(); showView("new"); });
   els.tabbar.appendChild(plus);
+  // ⚡ naast ＋: een snelle agent zonder eerst een map te kiezen (#286).
+  const quick = document.createElement("div");
+  quick.className = "tab newtab quicktab";
+  quick.textContent = "⚡";
+  quick.title = t("quick_tip");
+  quick.addEventListener("click", startQuick);
+  els.tabbar.appendChild(quick);
   syncTabPanel();
 }
 
@@ -3649,6 +3688,102 @@ async function startSession() {
     sessions.delete(id); session.term.dispose(); session.el.remove();
     els.status.textContent = "✗ " + e; els.status.className = "status-msg err";
     renderTabs();
+  }
+}
+
+/* ============ snelle agent (#286) ============ */
+// Een losse vraag hoort niet in een werkproces, en hoort ook niet te wachten op
+// het kiezen van een map. ⚡ start claude meteen in een vaste map. Of een sessie
+// een snelle agent IS, leiden we af (geen kaart, lokaal, in die map) -- dan
+// overleeft het een herstart zonder dat de sessie er iets extra's voor bewaart.
+let quickDefault = "";
+const QUICK_ACCENT = "#e0b341";
+function quickPath() { return (settings.quickDir || "").trim() || quickDefault; }
+function isQuick(s) {
+  const q = quickPath();
+  return !!q && !s.projectId && !s.hostId && !s.mirror && !s.attached && samePath(s.path, q);
+}
+
+async function startQuick() {
+  if (!quickDefault) { try { quickDefault = await invoke("quick_default_dir"); } catch (_) {} }
+  const path = quickPath();
+  if (!path) { toast(t("quick_no_dir"), "err"); return; }
+  const id = "s" + (++seq);
+  const uuid = crypto.randomUUID();
+  const title = t("quick_title");
+  const agent = "claude", model = "", mode = "default";
+  const session = spawnTerminal({ id, uuid, path, title, accent: QUICK_ACCENT, mode, command: "", agent, model, hostId: "", projectId: "" });
+  try {
+    session.muxName = (await invoke("create_session", { id, gen: session.gen, path, title, task: "", sessionId: uuid, mode, fullPaths: settings.fullPaths, command: "", agent, model: resolveModelArg(agent, model), hostId: "", cols: session.term.cols, rows: session.term.rows })) || "";
+    recordSession(session);
+    showView(id);
+    persistSessionsToDisk();
+  } catch (e) {
+    sessions.delete(id); session.term.dispose(); session.el.remove();
+    toast("✗ " + e, "err");
+    renderTabs();
+  }
+}
+
+// Een snelle vraag die een werkproces blijkt te zijn. Het gesprek zelf kan niet
+// mee: claude bewaart het onder de map waarin het liep. Wat de volgende sessie
+// nodig heeft is een CLAUDE.md, en die schrijft de agent het best zelf -- hij weet
+// wat er gebeurd is. Taurus wacht tot het bestand er staat en zet de map dan als
+// proces in het menu.
+let promoteFor = null;
+function promoteDir() {
+  const name = els.promoteName.value.trim();
+  return name ? joinPath(quickPath(), slugify(name)) : "";
+}
+function renderPromoteDest() {
+  const dir = promoteDir();
+  els.promoteDest.textContent = dir ? t("promote_dest").replace("{dir}", dir) : "";
+  naSay(els.promoteStatus, "", "");
+}
+function openPromote(s) {
+  promoteFor = s.id;
+  els.promoteName.value = s.title && s.title !== t("quick_title") ? s.title : "";
+  renderPromoteDest();
+  els.promoteModal.classList.remove("hidden");
+  els.promoteName.focus();
+  els.promoteName.select();
+}
+async function promoteGo() {
+  const s = sessions.get(promoteFor);
+  const name = els.promoteName.value.trim();
+  const dir = promoteDir();
+  if (!s || !name || !dir) { els.promoteName.focus(); return; }
+  if (projects.some((p) => !p.host_id && samePath(p.path, dir))) {
+    naSay(els.promoteStatus, t("promote_dup").replace("{dir}", dir), "err");
+    return;
+  }
+  els.promoteModal.classList.add("hidden");
+  let has = false;
+  try { has = await invoke("has_claude_md", { path: dir }); } catch (_) {}
+  if (!has) {
+    // Eén regel, en de Enter APART en even later: in één schrijfactie ziet claude
+    // tekst plus Enter als een plakactie, en dan blijft de vraag in de invoer staan
+    // (gemeten). Is de agent nog bezig, dan zet claude hem in de rij.
+    await invoke("write_session", { id: s.id, data: t("promote_prompt").replace("{dir}", dir) }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 300));
+    await invoke("write_session", { id: s.id, data: String.fromCharCode(13) }).catch(() => {});
+    showView(s.id);
+    toast(t("promote_sent").replace("{name}", name), "");
+    const until = Date.now() + 10 * 60 * 1000;
+    while (!has && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try { has = await invoke("has_claude_md", { path: dir }); } catch (_) {}
+    }
+    if (!has) { toast(t("promote_timeout").replace("{name}", name).replace("{dir}", dir), "err"); return; }
+  }
+  const made = { ...blankRow(), id: uniqueId(name), label: name, path: dir, kind: "process", title: name };
+  try {
+    await invoke("save_projects", { projects: projects.concat([made]) });
+    projects = await invoke("get_projects");
+    renderProjects();
+    toast(t("promote_done").replace("{name}", name), "ok");
+  } catch (e) {
+    toast("✗ " + e, "err");
   }
 }
 
@@ -4919,6 +5054,7 @@ function openTabMenu(x, y, id) {
   const attWhy = s.attached ? ` title="${escapeHtml(t("attach_not_restartable"))}"` : "";
   m.innerHTML = `
     <div class="ctx-item" data-act="rename">${t("ctx_rename")}</div>
+    ${isQuick(s) ? `<div class="ctx-item" data-act="promote">📁 ${t("ctx_promote")}</div>` : ""}
     <div class="ctx-item${off}"${why} data-act="preview">${t("ctx_preview")}</div>
     <div class="ctx-item${off}"${why} data-act="explorer">${t("ctx_explorer")}</div>
     <div class="ctx-item${att}"${attWhy} data-act="move">${t("ctx_move")}</div>
@@ -4933,6 +5069,7 @@ function openTabMenu(x, y, id) {
     if (!s.hostId) askForHelp(s);
   });
   m.querySelector('[data-act="close"]').addEventListener("click", () => { closeTabMenu(); closeSession(id); });
+  m.querySelector('[data-act="promote"]')?.addEventListener("click", () => { closeTabMenu(); openPromote(s); });
   // Verplaatsen werkt op de AGENT achter deze tab; de sessie zelf verhuist niet
   // mee, die draait waar hij draait tot je hem opnieuw start.
   m.querySelector('[data-act="move"]').addEventListener("click", () => {
@@ -5062,6 +5199,8 @@ function openSettings() {
   els.setFullPaths.checked = settings.fullPaths;
   renderRoleRows();
   els.setConfirmExit.checked = settings.confirmExit !== false;
+  els.setQuickDir.value = settings.quickDir || "";
+  els.setQuickDir.placeholder = t("ph_quickdir").replace("{dir}", quickDefault || "—");
   els.setPersistMode.value = persistMode();
   // Toon de effectieve skin: expliciete keuze, anders branding-default-skin,
   // anders de "brand"-skin (als er een branding-thema is), anders default.
@@ -5324,6 +5463,7 @@ function saveSettingsFromForm() {
   settings.fullPaths = els.setFullPaths.checked;
   saveRoles();
   settings.confirmExit = els.setConfirmExit.checked;
+  settings.quickDir = els.setQuickDir.value.trim();
   settings.persistMode = els.setPersistMode.value;
   settings.skin = els.setSkin.value;
   if (els.setSeeThrough) settings.sidebarSeeThrough = els.setSeeThrough.checked;
@@ -6372,7 +6512,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (modalOpen()) { if (e.key === "Escape") { els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.newagentModal.classList.add("hidden"); els.exitModal.classList.add("hidden"); els.updateModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
+  if (modalOpen()) { if (e.key === "Escape") { els.promoteModal.classList.add("hidden"); els.settingsModal.classList.add("hidden"); els.editorModal.classList.add("hidden"); els.newagentModal.classList.add("hidden"); els.exitModal.classList.add("hidden"); els.updateModal.classList.add("hidden"); closeHostModal(); els.moveModal.classList.add("hidden"); // Escape op de opstartvraag = "niets openen", en dat verliest niets: de geschiedenis blijft (#129).
     document.querySelector("#restore-modal").classList.add("hidden"); } return; }
   if (!els.searchbar.classList.contains("hidden") && e.key === "Escape") { e.preventDefault(); closeSearch(); return; }
   // Een uitgeklapte tabgroep is ook iets dat "open" staat; Escape hoort hem te
@@ -6403,6 +6543,7 @@ document.addEventListener("keydown", (e) => {
     if ((IS_MAC ? e.ctrlKey && !e.metaKey : ctrl) && e.key === "Tab") { e.preventDefault(); cycleTab(e.shiftKey ? -1 : 1); return; }
     // macOS: ⌘T / ⌘W / ⌘1..9 lopen via het menu (menu-action hieronder, #229).
     if (IS_MAC) return;
+    if (ctrl && e.shiftKey && (e.key === "t" || e.key === "T")) { e.preventDefault(); startQuick(); return; }
     if (ctrl && (e.key === "t" || e.key === "T")) { e.preventDefault(); tabAction("tab-new"); return; }
     if (ctrl && (e.key === "w" || e.key === "W")) { e.preventDefault(); tabAction("tab-close"); return; }
     if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); tabAction("tab-" + e.key); return; }
@@ -6946,6 +7087,11 @@ window.addEventListener("DOMContentLoaded", () => {
     setTabGroupSize: document.querySelector("#set-tabgroupsize"),
     setFullPaths: document.querySelector("#set-fullpaths"),
     setConfirmExit: document.querySelector("#set-confirm-exit"),
+    setQuickDir: document.querySelector("#set-quickdir"),
+    promoteModal: document.querySelector("#promote-modal"),
+    promoteName: document.querySelector("#promote-name"),
+    promoteDest: document.querySelector("#promote-dest"),
+    promoteStatus: document.querySelector("#promote-status"),
     exitModal: document.querySelector("#exit-modal"),
     exitKeeps: document.querySelector("#exit-keeps"),
     exitKeepsList: document.querySelector("#exit-keeps-list"),
@@ -7150,6 +7296,17 @@ window.addEventListener("DOMContentLoaded", () => {
     fillModeSelect(els.modeInput, els.agentInput.value, els.modeInput.value);
   });
   document.querySelector("#browse-btn").addEventListener("click", browseFolder);
+  document.querySelector("#quick-btn").addEventListener("click", startQuick);
+  document.querySelector("#set-quickdir-browse").addEventListener("click", async () => {
+    let dir = null;
+    try { dir = await invoke("pick_folder"); } catch (_) { return; }
+    if (dir) els.setQuickDir.value = dir;
+  });
+  invoke("quick_default_dir").then((d) => { quickDefault = d || ""; }).catch(() => {});
+  els.promoteName.addEventListener("input", renderPromoteDest);
+  els.promoteName.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); promoteGo(); } });
+  document.querySelector("#promote-go").addEventListener("click", promoteGo);
+  document.querySelector("#promote-cancel").addEventListener("click", () => els.promoteModal.classList.add("hidden"));
   document.querySelector("#reload-btn").addEventListener("click", loadProjects);
   document.querySelector("#settings-btn").addEventListener("click", openSettings);
   // De ＋ maakt een agent; beheren zit onder de voettekst (#157).

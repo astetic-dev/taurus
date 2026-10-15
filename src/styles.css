@@ -50,7 +50,7 @@
   font-family: "Taurus Line Icons";
   src: url("fonts/taurus-line-icons.woff2") format("woff2");
   font-display: block;
-  unicode-range: U+1F4C1-1F4C2, U+1F399, U+1F5D1, U+1F441, U+2699, U+1F5A5, U+1F50A, U+270E, U+270B, U+27F3, U+21BB, U+26A0, U+2139, U+2715, U+1F50E, U+2315, U+1F4AC, U+1F465, U+1F5FA, U+1FA7A, U+1F4D0, U+1F6A6, U+2697, U+2712, U+25B6, U+23F8, U+2B21, U+2261, U+2212, U+21F1, U+1F4E6;
+  unicode-range: U+1F4C1-1F4C2, U+1F399, U+1F5D1, U+1F441, U+2699, U+1F5A5, U+1F50A, U+270E, U+270B, U+27F3, U+21BB, U+26A0, U+2139, U+2715, U+1F50E, U+2315, U+1F4AC, U+1F465, U+1F5FA, U+1FA7A, U+1F4D0, U+1F6A6, U+2697, U+2712, U+25B6, U+23F8, U+2B21, U+2261, U+2212, U+21F1, U+1F4E6, U+26A1;
 }
 html[data-icons="line"] { --icon-font: "Taurus Line Icons",; }
 
@@ -339,6 +339,8 @@ h2.na-second { margin-top: 22px; }
 .tab .tab-close:hover { color: var(--red); }
 .tab.newtab { color: var(--accent); border-top-color: transparent; background: transparent; font-weight: 600; }
 .tab.newtab.active { background: var(--bg); }
+/* ⚡ snelle agent (#286): direct naast ＋, smal -- het is een knop, geen tab. */
+.tab.quicktab { padding-left: 8px; padding-right: 8px; margin-left: -4px; }
 
 /* Herordenen (slepen): geen tekstselectie bij klikken-en-vasthouden + sleep-feedback. */
 .project-card, .tab { user-select: none; }

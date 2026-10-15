@@ -132,6 +132,7 @@
               <p class="empty-lead" data-i18n="empty_pick">Kies of maak links een specialist om je werkproces te starten.</p>
               <p class="empty-oneoff" data-i18n="empty_oneoff">…of blader hieronder naar een eenmalige agent.</p>
               <button id="browse-btn" class="browse-btn" data-i18n="browse_folder">📁 Blader naar een map…</button>
+              <button id="quick-btn" class="browse-btn quick-btn" data-i18n="quick_start" data-i18n-title="quick_tip">⚡ Snelle agent</button>
             </div>
 
             <div id="launch-form" class="launch-form hidden">
@@ -250,6 +251,8 @@
                   <option value="clean" data-i18n="persist_clean">Schoon beginnen</option>
                 </select></label>
               <label class="srow check" data-help-key="help_confirm_exit"><input id="set-confirm-exit" type="checkbox" /> <span data-i18n="set_confirm_exit">Vragen voor afsluiten</span></label>
+              <label class="srow" data-help-key="help_quickdir"><span data-i18n="set_quickdir">Map van de snelle agent</span>
+                <span class="v-row"><input id="set-quickdir" type="text" autocomplete="off" /><button id="set-quickdir-browse" class="icon-btn" type="button">📁</button></span></label>
             </div>
           </div>
 
@@ -517,6 +520,22 @@
           <button id="na-save" class="btn-primary" data-i18n="new_agent_create">Maak</button>
         </div>
         <div id="na-status" class="status-msg"></div>
+      </div>
+    </div>
+
+    <!-- ===== Snelle agent -> werkproces (#286) ===== -->
+    <div id="promote-modal" class="modal hidden">
+      <div class="modal-box">
+        <h2 data-i18n="promote_title">Maak er een werkproces van</h2>
+        <p class="hint" data-i18n="promote_lead"></p>
+        <div class="e-field"><span class="e-cap" data-i18n="promote_name">Naam van het werkproces</span>
+          <input id="promote-name" type="text" autocomplete="off" />
+          <div id="promote-dest" class="hint"></div></div>
+        <div class="modal-actions">
+          <button id="promote-cancel" class="btn-ghost" data-i18n="cancel">Annuleer</button>
+          <button id="promote-go" class="btn-primary" data-i18n="promote_go">Vastleggen</button>
+        </div>
+        <div id="promote-status" class="status-msg"></div>
       </div>
     </div>
 
